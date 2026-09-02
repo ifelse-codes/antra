@@ -3,10 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 #[cfg(unix)]
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-#[cfg(windows)]
-use tokio::io::AsyncReadExt;
+use tokio::io::BufReader;
 use tokio::sync::{watch, RwLock};
 
 use super::protocol::*;
@@ -185,10 +184,10 @@ pub mod windows_server {
             let last_activity = Arc::clone(&last_activity);
 
             tokio::spawn(async move {
-                // NamedPipeServer has inherent read(&self) and write_all(&self) methods
-                // These do NOT use the AsyncRead/AsyncWrite traits
+                // AsyncReadExt is only implemented for &NamedPipeServer, not NamedPipeServer
+                let mut reader = &server;
                 let mut buf = vec![0u8; 4096];
-                let n = match server.read(&mut buf).await {
+                let n = match reader.read(&mut buf).await {
                     Ok(n) if n > 0 => n,
                     Ok(_) => return,
                     Err(e) => {
@@ -233,10 +232,11 @@ pub mod windows_server {
                         let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
                             message: "Shutting down".to_string(),
                         }));
-                        // Best effort write
                         let json = serde_json::to_string(&resp).unwrap_or_default();
-                        let _ = server.write_all(json.as_bytes()).await;
-                        let _ = server.write_all(b"\n").await;
+                        // AsyncWriteExt is only implemented for &NamedPipeServer
+                        let mut writer = &server;
+                        let _ = writer.write_all(json.as_bytes()).await;
+                        let _ = writer.write_all(b"\n").await;
                         signal_shutdown();
                         return;
                     }
@@ -247,8 +247,10 @@ pub mod windows_server {
                 };
 
                 let json = serde_json::to_string(&response).unwrap_or_default();
-                let _ = server.write_all(json.as_bytes()).await;
-                let _ = server.write_all(b"\n").await;
+                // AsyncWriteExt is only implemented for &NamedPipeServer
+                let mut writer = &server;
+                let _ = writer.write_all(json.as_bytes()).await;
+                let _ = writer.write_all(b"\n").await;
             });
         }
     }
