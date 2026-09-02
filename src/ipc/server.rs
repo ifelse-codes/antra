@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 #[cfg(unix)]
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(windows)]
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{watch, RwLock};
 
 use super::protocol::*;
@@ -184,10 +185,9 @@ pub mod windows_server {
             let last_activity = Arc::clone(&last_activity);
 
             tokio::spawn(async move {
-                // AsyncReadExt is only implemented for &NamedPipeServer, not NamedPipeServer
-                let mut reader = &server;
+                // AsyncRead is implemented for NamedPipeServer (owned), takes &mut self
                 let mut buf = vec![0u8; 4096];
-                let n = match reader.read(&mut buf).await {
+                let n = match server.read(&mut buf).await {
                     Ok(n) if n > 0 => n,
                     Ok(_) => return,
                     Err(e) => {
@@ -233,10 +233,9 @@ pub mod windows_server {
                             message: "Shutting down".to_string(),
                         }));
                         let json = serde_json::to_string(&resp).unwrap_or_default();
-                        // AsyncWriteExt is only implemented for &NamedPipeServer
-                        let mut writer = &server;
-                        let _ = writer.write_all(json.as_bytes()).await;
-                        let _ = writer.write_all(b"\n").await;
+                        // AsyncWrite is implemented for NamedPipeServer (owned)
+                        let _ = server.write_all(json.as_bytes()).await;
+                        let _ = server.write_all(b"\n").await;
                         signal_shutdown();
                         return;
                     }
@@ -247,10 +246,9 @@ pub mod windows_server {
                 };
 
                 let json = serde_json::to_string(&response).unwrap_or_default();
-                // AsyncWriteExt is only implemented for &NamedPipeServer
-                let mut writer = &server;
-                let _ = writer.write_all(json.as_bytes()).await;
-                let _ = writer.write_all(b"\n").await;
+                // AsyncWrite is implemented for NamedPipeServer (owned)
+                let _ = server.write_all(json.as_bytes()).await;
+                let _ = server.write_all(b"\n").await;
             });
         }
     }
