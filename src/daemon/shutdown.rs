@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use anyhow::Result;
 use tokio::sync::watch;
 
 /// Graceful shutdown coordinator
@@ -48,7 +47,7 @@ impl Default for Shutdown {
 }
 
 #[cfg(unix)]
-pub async fn setup_signal_handlers(shutdown: std::sync::Arc<Shutdown>) -> Result<()> {
+pub async fn setup_signal_handlers(shutdown: std::sync::Arc<Shutdown>) -> anyhow::Result<()> {
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;

@@ -60,6 +60,7 @@ pub fn pipe_path() -> String {
 }
 
 /// Handle a single IPC message from a reader/writer pair
+#[cfg_attr(windows, allow(dead_code))]
 async fn handle_one_message(
     reader: &mut (impl tokio::io::AsyncBufRead + Unpin),
     writer: &mut (impl tokio::io::AsyncWrite + Unpin),
@@ -164,6 +165,7 @@ pub mod unix_server {
 #[cfg(windows)]
 pub mod windows_server {
     use super::*;
+    #[allow(unused_imports)]
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
     pub async fn start_ipc_server(
