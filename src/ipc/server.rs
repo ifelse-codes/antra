@@ -183,9 +183,9 @@ pub mod windows_server {
             let last_activity = Arc::clone(&last_activity);
 
             tokio::spawn(async move {
-                // Read from the pipe using a temporary buffer
+                // Read from the pipe using the inherent read method
                 let mut buf = vec![0u8; 4096];
-                let n = match server.read(&mut buf).await {
+                let n = match tokio::io::AsyncReadExt::read(&server, &mut buf).await {
                     Ok(n) if n > 0 => n,
                     Ok(_) => return,
                     Err(e) => {
@@ -230,11 +230,10 @@ pub mod windows_server {
                         let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
                             message: "Shutting down".to_string(),
                         }));
-                        // Best effort write
+                        // Best effort write using inherent method
                         let json = serde_json::to_string(&resp).unwrap_or_default();
-                        let mut server_ref = &server;
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, json.as_bytes()).await;
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, b"\n").await;
+                        let _ = tokio::io::AsyncWriteExt::write(&server, json.as_bytes()).await;
+                        let _ = tokio::io::AsyncWriteExt::write(&server, b"\n").await;
                         signal_shutdown();
                         return;
                     }
@@ -245,9 +244,8 @@ pub mod windows_server {
                 };
 
                 let json = serde_json::to_string(&response).unwrap_or_default();
-                let mut server_ref = &server;
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, json.as_bytes()).await;
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, b"\n").await;
+                let _ = tokio::io::AsyncWriteExt::write(&server, json.as_bytes()).await;
+                let _ = tokio::io::AsyncWriteExt::write(&server, b"\n").await;
             });
         }
     }

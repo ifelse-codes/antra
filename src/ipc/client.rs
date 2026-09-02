@@ -12,19 +12,8 @@ pub fn is_daemon_running() -> bool {
     }
     #[cfg(windows)]
     {
-        // On Windows, try to connect to the named pipe
         let pipe_name = super::server::pipe_path();
-        match std::net::UdpSocket::bind("127.0.0.1:0") {
-            Ok(socket) => {
-                // If we can create a socket, check if the pipe exists
-                // by trying to open it with a simple path check
-                drop(socket);
-                // Use a simple file-exists check for the pipe
-                // Named pipes on Windows appear as files in \\.\\pipe\\
-                std::path::Path::new(&pipe_name).exists()
-            }
-            Err(_) => false,
-        }
+        std::path::Path::new(&pipe_name).exists()
     }
 }
 
@@ -64,26 +53,20 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ClientOptions;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let pipe_name = super::server::pipe_path();
-
-        let mut client = ClientOptions::new().open(&pipe_name)?;
+        let client = ClientOptions::new().open(&pipe_name)?;
 
         let msg = IpcMessage::new(payload);
         let json = serde_json::to_string(&msg)?;
 
-        // Write the message - NamedPipeClient implements AsyncWrite for &NamedPipeClient
-        // so we need &mut &client for write_all which takes &mut self
-        let mut client_ref = &client;
-        tokio::io::AsyncWriteExt::write_all(&mut client_ref, json.as_bytes()).await?;
-        tokio::io::AsyncWriteExt::write_all(&mut client_ref, b"\n").await?;
-        tokio::io::AsyncWriteExt::flush(&mut client_ref).await?;
+        // Write using the inherent write method
+        client.write(json.as_bytes()).await?;
+        client.write(b"\n").await?;
 
-        // Read response
+        // Read response using the inherent read method
         let mut buf = vec![0u8; 4096];
-        let mut client_ref2 = &client;
-        let n = client_ref2.read(&mut buf).await?;
+        let n = client.read(&mut buf).await?;
 
         if n == 0 {
             anyhow::bail!("Daemon closed connection without response");
