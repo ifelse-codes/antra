@@ -12,7 +12,7 @@ set -euo pipefail
 
 REPO="ifelse-codes/antra"
 BINARY_NAME="antra"
-GITHUB_URL="https://github.com/${REPO}/releases/latest/download"
+GITHUB_BASE_URL="https://github.com/${REPO}/releases/download"
 MIN_PORTABLE_DIR="${HOME}/.local/bin"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ get_latest_version() {
 
 download_binary() {
     local artifact="$1" version="$2" dest="$3"
-    local url="${GITHUB_URL}/${version}/${artifact}"
+    local url="${GITHUB_BASE_URL}/${version}/${artifact}"
 
     info "Downloading ${artifact} (${version})..."
     if ! curl -fsSL -o "$dest" "$url"; then
@@ -116,7 +116,7 @@ download_binary() {
 
 verify_checksum() {
     local binary_path="$1" version="$2" artifact="$3"
-    local checksum_url="${GITHUB_URL}/${version}/${artifact}.sha256"
+    local checksum_url="${GITHUB_BASE_URL}/${version}/${artifact}.sha256"
     local expected_hash
 
     info "Verifying checksum..."
