@@ -53,7 +53,6 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ClientOptions;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let pipe_name = super::server::pipe_path();
         let client = ClientOptions::new().open(&pipe_name)?;
@@ -61,16 +60,13 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
         let msg = IpcMessage::new(payload);
         let json = serde_json::to_string(&msg)?;
 
-        // NamedPipeClient implements AsyncWrite for &NamedPipeClient
-        // so we need &mut &client to call write_all (which takes &mut self)
-        let mut writer = &client;
-        writer.write_all(json.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
+        // NamedPipeClient has inherent write_all(&self) and read(&self) methods
+        // These do NOT use the AsyncRead/AsyncWrite traits
+        client.write_all(json.as_bytes()).await?;
+        client.write_all(b"\n").await?;
 
-        // NamedPipeClient implements AsyncRead for &NamedPipeClient
-        let mut reader = &client;
         let mut buf = vec![0u8; 4096];
-        let n = reader.read(&mut buf).await?;
+        let n = client.read(&mut buf).await?;
 
         if n == 0 {
             anyhow::bail!("Daemon closed connection without response");

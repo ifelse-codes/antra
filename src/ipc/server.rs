@@ -161,7 +161,6 @@ pub mod unix_server {
 #[cfg(windows)]
 pub mod windows_server {
     use super::*;
-    use tokio::io::AsyncReadExt;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
     pub async fn start_ipc_server(
@@ -183,11 +182,10 @@ pub mod windows_server {
             let last_activity = Arc::clone(&last_activity);
 
             tokio::spawn(async move {
-                // NamedPipeServer implements AsyncRead for &NamedPipeServer
-                // so we need &server to call read (via AsyncReadExt)
-                let mut reader = &server;
+                // NamedPipeServer has inherent read(&self) and write_all(&self) methods
+                // These do NOT use the AsyncRead/AsyncWrite traits
                 let mut buf = vec![0u8; 4096];
-                let n = match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
+                let n = match server.read(&mut buf).await {
                     Ok(n) if n > 0 => n,
                     Ok(_) => return,
                     Err(e) => {
@@ -232,11 +230,10 @@ pub mod windows_server {
                         let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
                             message: "Shutting down".to_string(),
                         }));
-                        // Best effort write using &server (AsyncWrite for &NamedPipeServer)
+                        // Best effort write
                         let json = serde_json::to_string(&resp).unwrap_or_default();
-                        let mut writer = &server;
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, json.as_bytes()).await;
-                        let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, b"\n").await;
+                        let _ = server.write_all(json.as_bytes()).await;
+                        let _ = server.write_all(b"\n").await;
                         signal_shutdown();
                         return;
                     }
@@ -247,9 +244,8 @@ pub mod windows_server {
                 };
 
                 let json = serde_json::to_string(&response).unwrap_or_default();
-                let mut writer = &server;
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, json.as_bytes()).await;
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut writer, b"\n").await;
+                let _ = server.write_all(json.as_bytes()).await;
+                let _ = server.write_all(b"\n").await;
             });
         }
     }
