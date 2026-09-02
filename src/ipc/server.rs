@@ -3,7 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(windows)]
+use tokio::io::AsyncReadExt;
 use tokio::sync::{watch, RwLock};
 
 use super::protocol::*;

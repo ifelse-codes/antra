@@ -1,5 +1,8 @@
 use anyhow::Result;
+#[cfg(unix)]
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(windows)]
+use tokio::io::AsyncReadExt;
 
 use super::protocol::*;
 
