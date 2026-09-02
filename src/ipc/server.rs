@@ -232,8 +232,9 @@ pub mod windows_server {
                         }));
                         // Best effort write
                         let json = serde_json::to_string(&resp).unwrap_or_default();
-                        let _ = tokio::io::AsyncWriteExt::write_all(&server, json.as_bytes()).await;
-                        let _ = tokio::io::AsyncWriteExt::write_all(&server, b"\n").await;
+                        let mut server_ref = &server;
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, json.as_bytes()).await;
+                        let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, b"\n").await;
                         signal_shutdown();
                         return;
                     }
@@ -244,8 +245,9 @@ pub mod windows_server {
                 };
 
                 let json = serde_json::to_string(&response).unwrap_or_default();
-                let _ = tokio::io::AsyncWriteExt::write_all(&server, json.as_bytes()).await;
-                let _ = tokio::io::AsyncWriteExt::write_all(&server, b"\n").await;
+                let mut server_ref = &server;
+                let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, json.as_bytes()).await;
+                let _ = tokio::io::AsyncWriteExt::write_all(&mut server_ref, b"\n").await;
             });
         }
     }

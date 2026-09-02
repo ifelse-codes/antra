@@ -5,7 +5,9 @@ use anyhow::Result;
 use tokio::sync::{watch, RwLock};
 
 use crate::certs::cache::CertCache;
-use crate::ipc::server::{pid_path, socket_path};
+use crate::ipc::server::pid_path;
+#[cfg(unix)]
+use crate::ipc::server::socket_path;
 use crate::routing::registry::RouteRegistry;
 
 /// Default idle timeout (10 minutes)
