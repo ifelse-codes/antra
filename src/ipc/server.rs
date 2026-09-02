@@ -25,7 +25,7 @@ pub fn signal_shutdown() {
     }
 }
 
-/// Path to the daemon socket (Unix) or pipe name (Windows)
+/// Path to the daemon socket (Unix only)
 #[cfg(unix)]
 pub fn socket_path() -> PathBuf {
     let dir = dirs::runtime_dir()
@@ -56,17 +56,15 @@ pub fn pipe_path() -> String {
     r"\\.\pipe\antra-daemon".to_string()
 }
 
-/// Handle a raw stream (used by both Unix and Windows implementations)
-async fn handle_stream(
-    reader: &mut BufReader<impl tokio::io::AsyncRead + Unpin>,
+/// Handle a single IPC message from a reader/writer pair
+async fn handle_one_message(
+    reader: &mut (impl tokio::io::AsyncBufRead + Unpin),
     writer: &mut (impl tokio::io::AsyncWrite + Unpin),
-    registry: Arc<RouteRegistry>,
+    registry: &Arc<RouteRegistry>,
     start_time: Instant,
-    last_activity: Arc<RwLock<Instant>>,
+    last_activity: &Arc<RwLock<Instant>>,
 ) -> Result<()> {
     let mut line = String::new();
-
-    // Read one line (JSON message)
     reader.read_line(&mut line).await?;
 
     if line.is_empty() {
@@ -84,7 +82,6 @@ async fn handle_stream(
         }
     };
 
-    // Check protocol version
     if msg.version != PROTOCOL_VERSION {
         let resp = IpcMessage::new(IpcPayload::Error(ErrorResponse {
             message: format!(
@@ -96,27 +93,22 @@ async fn handle_stream(
         return Ok(());
     }
 
-    // Update last activity timestamp on any command
     *last_activity.write().await = Instant::now();
 
-    // Handle command
     let response = match msg.payload {
-        IpcPayload::RegisterRoute(req) => handle_register_route(req, &registry),
-        IpcPayload::UnregisterRoute(req) => handle_unregister_route(req, &registry),
-        IpcPayload::ListRoutes => handle_list_routes(&registry),
+        IpcPayload::RegisterRoute(req) => handle_register_route(req, registry),
+        IpcPayload::UnregisterRoute(req) => handle_unregister_route(req, registry),
+        IpcPayload::ListRoutes => handle_list_routes(registry),
         IpcPayload::Ping => IpcMessage::new(IpcPayload::Pong),
         IpcPayload::Shutdown => {
-            // Return OK first, then signal shutdown
             let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
                 message: "Shutting down".to_string(),
             }));
             send_response(writer, &resp).await?;
-
-            // Signal shutdown to the daemon
             signal_shutdown();
             return Ok(());
         }
-        IpcPayload::Status(_) => handle_status(start_time, &registry),
+        IpcPayload::Status(_) => handle_status(start_time, registry),
         _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
             message: "Unknown command".to_string(),
         })),
@@ -132,7 +124,6 @@ pub mod unix_server {
     use super::*;
     use tokio::net::UnixListener;
 
-    /// Start the IPC server that listens for CLI commands
     pub async fn start_ipc_server(
         listener: UnixListener,
         registry: Arc<RouteRegistry>,
@@ -150,12 +141,12 @@ pub mod unix_server {
                 let (read_half, mut write_half) = stream.into_split();
                 let mut reader = BufReader::new(read_half);
 
-                if let Err(e) = handle_stream(
+                if let Err(e) = handle_one_message(
                     &mut reader,
                     &mut write_half,
-                    registry,
+                    &registry,
                     start_time,
-                    last_activity,
+                    &last_activity,
                 )
                 .await
                 {
@@ -170,9 +161,9 @@ pub mod unix_server {
 #[cfg(windows)]
 pub mod windows_server {
     use super::*;
-    use tokio::net::windows::named_pipe::{self, NamedPipeServer, ServerOptions};
+    use tokio::io::AsyncReadExt;
+    use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
-    /// Start the IPC server that listens for CLI commands via named pipes
     pub async fn start_ipc_server(
         registry: Arc<RouteRegistry>,
         start_time: Instant,
@@ -186,27 +177,75 @@ pub mod windows_server {
                 .first_pipe_instance(false)
                 .create(&pipe_name)?;
 
-            // Wait for client to connect
             server.connect().await?;
 
             let registry = Arc::clone(&registry);
             let last_activity = Arc::clone(&last_activity);
 
             tokio::spawn(async move {
-                let mut reader = BufReader::new(&server);
-                let mut writer = server;
+                // Read from the pipe using a temporary buffer
+                let mut buf = vec![0u8; 4096];
+                let n = match server.read(&mut buf).await {
+                    Ok(n) if n > 0 => n,
+                    Ok(_) => return,
+                    Err(e) => {
+                        tracing::error!(error = %e, "IPC read error");
+                        return;
+                    }
+                };
 
-                if let Err(e) = handle_stream(
-                    &mut reader,
-                    &mut writer,
-                    registry,
-                    start_time,
-                    last_activity,
-                )
-                .await
-                {
-                    tracing::error!(error = %e, "IPC connection error");
+                let line = match String::from_utf8(buf[..n].to_vec()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(error = %e, "IPC invalid UTF-8");
+                        return;
+                    }
+                };
+
+                if line.is_empty() {
+                    return;
                 }
+
+                let msg: IpcMessage = match serde_json::from_str(line.trim()) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!(error = %e, "IPC invalid JSON");
+                        return;
+                    }
+                };
+
+                if msg.version != PROTOCOL_VERSION {
+                    tracing::error!("IPC protocol version mismatch");
+                    return;
+                }
+
+                *last_activity.write().await = Instant::now();
+
+                let response = match msg.payload {
+                    IpcPayload::RegisterRoute(req) => handle_register_route(req, &registry),
+                    IpcPayload::UnregisterRoute(req) => handle_unregister_route(req, &registry),
+                    IpcPayload::ListRoutes => handle_list_routes(&registry),
+                    IpcPayload::Ping => IpcMessage::new(IpcPayload::Pong),
+                    IpcPayload::Shutdown => {
+                        let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
+                            message: "Shutting down".to_string(),
+                        }));
+                        // Best effort write
+                        let json = serde_json::to_string(&resp).unwrap_or_default();
+                        let _ = tokio::io::AsyncWriteExt::write_all(&server, json.as_bytes()).await;
+                        let _ = tokio::io::AsyncWriteExt::write_all(&server, b"\n").await;
+                        signal_shutdown();
+                        return;
+                    }
+                    IpcPayload::Status(_) => handle_status(start_time, &registry),
+                    _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
+                        message: "Unknown command".to_string(),
+                    })),
+                };
+
+                let json = serde_json::to_string(&response).unwrap_or_default();
+                let _ = tokio::io::AsyncWriteExt::write_all(&server, json.as_bytes()).await;
+                let _ = tokio::io::AsyncWriteExt::write_all(&server, b"\n").await;
             });
         }
     }
@@ -268,7 +307,7 @@ fn handle_status(start_time: Instant, registry: &RouteRegistry) -> IpcMessage {
     #[cfg(unix)]
     let ipc_path = socket_path().to_string_lossy().into_owned();
     #[cfg(windows)]
-    let ipc_path = pipe_path().to_string_lossy().into_owned();
+    let ipc_path = pipe_path();
 
     IpcMessage::new(IpcPayload::Status(StatusResponse {
         pid: std::process::id(),

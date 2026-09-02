@@ -13,31 +13,17 @@ pub fn is_daemon_running() -> bool {
     #[cfg(windows)]
     {
         // On Windows, try to connect to the named pipe
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-
         let pipe_name = super::server::pipe_path();
-        let wide: Vec<u16> = OsStr::new(&pipe_name)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        unsafe {
-            let handle = windows_sys::Win32::Storage::FileSystem::CreateFileW(
-                wide.as_ptr(),
-                0, // GENERIC_READ
-                0, // FILE_SHARE_NONE
-                std::ptr::null_mut(),
-                3, // OPEN_EXISTING
-                0,
-                0,
-            );
-            if handle != windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
-                windows_sys::Win32::Foundation::CloseHandle(handle);
-                true
-            } else {
-                false
+        match std::net::UdpSocket::bind("127.0.0.1:0") {
+            Ok(socket) => {
+                // If we can create a socket, check if the pipe exists
+                // by trying to open it with a simple path check
+                drop(socket);
+                // Use a simple file-exists check for the pipe
+                // Named pipes on Windows appear as files in \\.\\pipe\\
+                std::path::Path::new(&pipe_name).exists()
             }
+            Err(_) => false,
         }
     }
 }
@@ -63,7 +49,6 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
         write_half.write_all(b"\n").await?;
         write_half.flush().await?;
 
-        // Read response
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();
         reader.read_line(&mut line).await?;
@@ -79,28 +64,29 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ClientOptions;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         let pipe_name = super::server::pipe_path();
 
         let client = ClientOptions::new().open(&pipe_name)?;
 
-        let mut reader = BufReader::new(&client);
-        let mut writer = client;
-
         let msg = IpcMessage::new(payload);
         let json = serde_json::to_string(&msg)?;
-        writer.write_all(json.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
+
+        // Write the message
+        tokio::io::AsyncWriteExt::write_all(&client, json.as_bytes()).await?;
+        tokio::io::AsyncWriteExt::write_all(&client, b"\n").await?;
+        tokio::io::AsyncWriteExt::flush(&client).await?;
 
         // Read response
-        let mut line = String::new();
-        reader.read_line(&mut line).await?;
+        let mut buf = vec![0u8; 4096];
+        let n = client.read(&mut buf).await?;
 
-        if line.is_empty() {
+        if n == 0 {
             anyhow::bail!("Daemon closed connection without response");
         }
 
+        let line = String::from_utf8(buf[..n].to_vec())?;
         let resp: IpcMessage = serde_json::from_str(line.trim())?;
         Ok(resp)
     }
@@ -119,7 +105,6 @@ pub fn send_command_ok(payload: IpcPayload) -> Result<String> {
         IpcPayload::Ok(ok) => Ok(ok.message),
         IpcPayload::Error(err) => Err(anyhow::anyhow!("{}", err.message)),
         IpcPayload::RoutesList(list) => {
-            // Format routes as string
             let mut output = String::new();
             for route in &list.routes {
                 output.push_str(&format!(
