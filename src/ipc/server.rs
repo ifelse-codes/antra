@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+#[allow(unused_imports)]
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 #[cfg(unix)]
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-#[cfg(windows)]
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::BufReader;
 use tokio::sync::{watch, RwLock};
 
 use super::protocol::*;
@@ -175,7 +175,7 @@ pub mod windows_server {
         tracing::info!(pipe = %pipe_name, "IPC server listening (Windows named pipe)");
 
         loop {
-            let server = ServerOptions::new()
+            let mut server = ServerOptions::new()
                 .first_pipe_instance(false)
                 .create(&pipe_name)?;
 
