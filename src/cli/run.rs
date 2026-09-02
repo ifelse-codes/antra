@@ -1,0 +1,323 @@
+use anyhow::Result;
+use clap::Args;
+use colored::Colorize;
+use tokio::process::Command;
+
+use crate::config::global;
+use crate::ipc::client::is_daemon_running;
+use crate::resolver::traits::DomainResolver;
+use crate::util::output;
+use crate::util::port::find_free_port;
+
+#[derive(Args)]
+pub struct RunArgs {
+    /// Domain to proxy (e.g., myapp.localhost)
+    #[arg(long)]
+    pub domain: String,
+
+    /// Port the application listens on (auto-detected if omitted)
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Allow custom (non-.localhost, non-.test) domains
+    #[arg(long)]
+    pub allow_custom_domain: bool,
+
+    /// Skip the trust CA prompt on first run
+    #[arg(long)]
+    pub no_trust_prompt: bool,
+
+    /// Command to run
+    #[arg(trailing_var_arg = true, required = true)]
+    pub command: Vec<String>,
+}
+
+/// Select the appropriate resolver based on the domain suffix.
+fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
+    if domain == "localhost" || domain.ends_with(".localhost") {
+        Ok(Box::new(crate::resolver::localhost::LocalhostResolver))
+    } else if domain.ends_with(".test") {
+        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
+    } else if domain.ends_with(".internal") || domain.ends_with(".local") {
+        // Warn but allow
+        tracing::warn!(%domain, "Using .internal/.local domain — ensure DNS resolves to 127.0.0.1");
+        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
+    } else {
+        // Custom domain — validation happens inside CustomResolver
+        Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
+    }
+}
+
+pub fn execute(args: RunArgs) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async { run_inner(args).await })
+}
+
+/// Prompt the user to install the CA on first run.
+/// Only shows once. Respects the user's choice.
+async fn maybe_prompt_trust(no_trust_prompt: bool) {
+    // Skip if user explicitly opted out
+    if no_trust_prompt {
+        return;
+    }
+
+    // Skip if already prompted before
+    if global::was_trust_prompted() {
+        return;
+    }
+
+    // Check if CA is already trusted
+    match crate::trust::check_trust_status() {
+        Ok(true) => {
+            // Already trusted, mark as prompted and move on
+            let _ = global::mark_trust_prompted();
+            return;
+        }
+        Ok(false) => {}
+        Err(_) => {
+            // Can't check, skip prompt
+            return;
+        }
+    }
+
+    println!();
+    println!(
+        "  {}",
+        "Antra generates a local CA for HTTPS on custom domains.".cyan()
+    );
+    println!(
+        "  {}",
+        "Installing it into your system trust store means".cyan()
+    );
+    println!("  {}", "no browser warnings — forever.".cyan());
+    println!();
+    println!(
+        "  {}",
+        "This requires admin privileges (sudo) and prompts before changes.".dimmed()
+    );
+    println!(
+        "  {}",
+        "The CA is local-only. Nothing is sent anywhere.".dimmed()
+    );
+    println!();
+
+    print!(
+        "  {} ",
+        "Install CA into system trust store? [y/N]".yellow().bold()
+    );
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_ok() {
+        let input = input.trim().to_lowercase();
+        if input == "y" || input == "yes" {
+            println!();
+            if let Err(e) = crate::trust::install_ca() {
+                output::print_warning(&format!("Trust install failed: {e}"));
+                println!("  {}", "You can run 'antra trust' later to retry.".dimmed());
+                println!("  {}", "Run 'antra doctor' to diagnose issues.".dimmed());
+            }
+        } else {
+            println!();
+            output::print_warning("Skipped. HTTPS may show cert warnings for custom domains.");
+            println!("  {}", "Run 'antra trust' when you're ready.".dimmed());
+            println!("  {}", "Run 'antra doctor' to check your setup.".dimmed());
+        }
+    }
+
+    let _ = global::mark_trust_prompted();
+    println!();
+}
+
+/// Ensure the daemon is running, starting it if necessary
+async fn ensure_daemon() -> Result<()> {
+    if is_daemon_running() {
+        return Ok(());
+    }
+
+    output::print_warning("Daemon not running, starting it...");
+
+    // Start the daemon as a separate process
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("proxy")
+        .arg("start")
+        .env("ANTRA_DAEMON", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+
+    let child = cmd.spawn()?;
+    let _child_pid = child.id();
+
+    // Wait for daemon to start
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if is_daemon_running() {
+            output::print_success("Daemon started");
+            return Ok(());
+        }
+    }
+
+    anyhow::bail!("Daemon failed to start within timeout");
+}
+
+async fn run_inner(args: RunArgs) -> Result<()> {
+    output::print_header();
+
+    // 0. Auto-trust prompt (first run only)
+    maybe_prompt_trust(args.no_trust_prompt).await;
+
+    // 1. Determine port
+    let port = match args.port {
+        Some(p) => p,
+        None => find_free_port()?,
+    };
+
+    // 2. Resolve domain to 127.0.0.1 (hosts file or no-op)
+    let resolver = select_resolver(&args.domain)?;
+    resolver.register(&args.domain)?;
+    output::print_success(&format!("Domain resolved: {}", args.domain));
+
+    // 3. Ensure daemon is running
+    ensure_daemon().await?;
+
+    // 4. Register route via IPC
+    match crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
+        crate::ipc::protocol::RegisterRouteRequest {
+            domain: args.domain.clone(),
+            port,
+            pid: None,
+        },
+    ))
+    .await
+    {
+        Ok(msg) => match msg.payload {
+            crate::ipc::protocol::IpcPayload::Ok(ok) => {
+                output::print_success(&ok.message);
+            }
+            crate::ipc::protocol::IpcPayload::Error(err) => {
+                output::print_error(&err.message);
+                return Err(anyhow::anyhow!("{}", err.message));
+            }
+            other => {
+                output::print_error(&format!("Unexpected response: {other:?}"));
+                return Err(anyhow::anyhow!("Unexpected IPC response"));
+            }
+        },
+        Err(e) => {
+            output::print_error(&format!("Failed to register route: {e}"));
+            return Err(e);
+        }
+    }
+
+    println!();
+    println!("  → https://{}", args.domain);
+    println!();
+
+    // 5. Spawn child process
+    let program = args.command.first().unwrap_or(&"".to_string()).clone();
+    let child_args: Vec<String> = args.command[1..].to_vec();
+
+    let mut child = Command::new(&program)
+        .args(&child_args)
+        .env("PORT", port.to_string())
+        .env("HOST", "127.0.0.1")
+        .env("ANTRA_DOMAIN", &args.domain)
+        .env("ANTRA_URL", format!("https://{}", args.domain))
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {e}", program))?;
+
+    output::print_success(&format!("Started: {}", args.command.join(" ")));
+    println!();
+
+    // 6. Wait for child or signal
+    let child_pid = child.id();
+    let domain = args.domain.clone();
+
+    // Set up signal handler
+    #[cfg(unix)]
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    #[cfg(unix)]
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    // Wait for child to exit or signal
+    let exit_code = tokio::select! {
+        status = child.wait() => {
+            match status {
+                Ok(s) => s.code().unwrap_or(1),
+                Err(e) => {
+                    eprintln!("Error waiting for child: {e}");
+                    1
+                }
+            }
+        }
+        _ = async {
+            #[cfg(unix)]
+            {
+                tokio::select! {
+                    _ = sigterm.recv() => {},
+                    _ = sigint.recv() => {},
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                tokio::signal::ctrl_c().await.ok();
+            }
+        } => {
+            // Signal received — forward to child
+            output::print_warning("Signal received, shutting down...");
+
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{killpg, Signal};
+                use nix::unistd::getpgid;
+
+                if let Some(pid) = child_pid {
+                    if let Ok(pgid) = getpgid(Some(nix::unistd::Pid::from_raw(pid as i32))) {
+                        let _ = killpg(pgid, Signal::SIGTERM);
+                    }
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                // On Windows, attempt to kill the process tree via taskkill
+                if let Some(pid) = child_pid {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
+
+            // Wait briefly for child to exit
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                child.wait()
+            ).await {
+                Ok(Ok(s)) => s.code().unwrap_or(1),
+                _ => {
+                    // Force kill
+                    let _ = child.kill().await;
+                    130
+                }
+            }
+        }
+    };
+
+    // 7. Cleanup - unregister route via IPC
+    let _ = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::UnregisterRoute(
+        crate::ipc::protocol::UnregisterRouteRequest {
+            domain: domain.clone(),
+        },
+    ))
+    .await;
+    resolver.unregister(&domain)?;
+    output::print_warning(&format!("Route removed: {domain}"));
+
+    println!();
+    std::process::exit(exit_code);
+}
