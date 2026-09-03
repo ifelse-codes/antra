@@ -233,22 +233,23 @@ fn auto_fix(issues: &[(String, String)]) {
 }
 
 /// Check if a port is held by the Antra daemon process.
+#[cfg(unix)]
 fn is_antra_daemon_port(port: u16) -> bool {
     let pid_path = crate::ipc::server::pid_path();
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            // Check if the process is alive
-            #[cfg(unix)]
-            {
-                use nix::sys::signal::kill;
-                use nix::unistd::Pid;
-                if kill(Pid::from_raw(pid as i32), None).is_ok() {
-                    // Process is alive — check if it holds this port
-                    return check_port_holder(pid, port);
-                }
+            use nix::sys::signal::kill;
+            use nix::unistd::Pid;
+            if kill(Pid::from_raw(pid as i32), None).is_ok() {
+                return check_port_holder(pid, port);
             }
         }
     }
+    false
+}
+
+#[cfg(not(unix))]
+fn is_antra_daemon_port(_port: u16) -> bool {
     false
 }
 
