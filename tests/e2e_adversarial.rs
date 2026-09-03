@@ -1,4 +1,5 @@
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn antra_bin() -> String {
@@ -22,6 +23,38 @@ fn run_antra(args: &[&str]) -> (String, String, i32) {
     let code = output.status.code().unwrap_or(-1);
 
     (stdout, stderr, code)
+}
+
+fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
+    let mut child = Command::new(antra_bin())
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute antra");
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                return (stdout, stderr, status.code().unwrap_or(-1));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return (String::new(), "timeout".to_string(), -1);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                return (String::new(), format!("{e}"), -1);
+            }
+        }
+    }
 }
 
 fn _run_antra_with_stdin(args: &[&str], stdin_data: &str) -> (String, String, i32) {
@@ -70,7 +103,10 @@ fn test_extremely_long_domain() {
 fn test_domain_with_spaces() {
     // Shell splits "my app.localhost" into two args: "my" and "app.localhost"
     // This is expected behavior - domains with spaces aren't valid anyway
-    let (_, _, code) = run_antra(&["run", "--domain", "my app.localhost", "--", "echo"]);
+    let (_, _, code) = run_antra_with_timeout(
+        &["run", "--domain", "my app.localhost", "--", "echo"],
+        Duration::from_secs(5),
+    );
     // Should fail or handle gracefully (shell splits the args)
     assert!(code >= 0); // Don't crash
 }
@@ -106,15 +142,18 @@ fn test_run_without_domain() {
 #[test]
 fn test_port_zero_auto_assigns() {
     // Port 0 means OS auto-assigns a free port - this is valid behavior
-    let (_, _, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "0",
-        "--",
-        "echo",
-    ]);
+    let (_, _, code) = run_antra_with_timeout(
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "0",
+            "--",
+            "echo",
+        ],
+        Duration::from_secs(5),
+    );
     // Should not crash - port 0 triggers auto-assignment
     assert!(code >= 0);
 }
@@ -175,7 +214,10 @@ fn test_public_domain_rejected() {
 #[test]
 fn test_localhost_bare_accepted() {
     // "localhost" is accepted - it resolves via LocalhostResolver (no-op)
-    let (_, _, code) = run_antra(&["run", "--domain", "localhost", "--", "echo", "test"]);
+    let (_, _, code) = run_antra_with_timeout(
+        &["run", "--domain", "localhost", "--", "echo", "test"],
+        Duration::from_secs(5),
+    );
     // Should not crash - localhost is a valid target
     assert!(code >= 0);
 }
@@ -244,13 +286,16 @@ fn test_domain_with_special_characters() {
 
 #[test]
 fn test_command_injection_via_domain() {
-    let (_, _stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--",
-        "echo; rm -rf /tmp/test_injection_marker",
-    ]);
+    let (_, _stderr, code) = run_antra_with_timeout(
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--",
+            "echo; rm -rf /tmp/test_injection_marker",
+        ],
+        Duration::from_secs(5),
+    );
     // The command itself runs, but domain should be safe
     // We just verify antra doesn't crash
     assert!(code == 0 || code != -1);
@@ -259,16 +304,19 @@ fn test_command_injection_via_domain() {
 #[test]
 fn test_run_with_shellescape_command() {
     // This tests that the command runs as-is (not through shell)
-    let (stdout, _, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "19999",
-        "--",
-        "echo",
-        "hello world with spaces",
-    ]);
+    let (stdout, _, code) = run_antra_with_timeout(
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "19999",
+            "--",
+            "echo",
+            "hello world with spaces",
+        ],
+        Duration::from_secs(5),
+    );
     // Should work - command is passed directly, not through shell
     assert!(code == 0 || stdout.contains("hello"));
 }
@@ -411,30 +459,36 @@ fn test_concurrent_status_calls() {
 #[test]
 fn test_port_boundary_valid() {
     // Port 1 is valid (though may need root)
-    let (_, stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "1",
-        "--",
-        "echo",
-    ]);
+    let (_, stderr, code) = run_antra_with_timeout(
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "1",
+            "--",
+            "echo",
+        ],
+        Duration::from_secs(5),
+    );
     // Port 1 may fail due to privileges but shouldn't crash
     assert!(code >= 0 || stderr.contains("error") || stderr.contains("bind"));
 }
 
 #[test]
 fn test_port_max_boundary() {
-    let (_, stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "65535",
-        "--",
-        "echo",
-    ]);
+    let (_, stderr, code) = run_antra_with_timeout(
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "65535",
+            "--",
+            "echo",
+        ],
+        Duration::from_secs(5),
+    );
     // Port 65535 is technically valid
     assert!(code >= 0 || stderr.contains("error"));
 }
@@ -514,7 +568,10 @@ fn test_clean_after_failed_proxy() {
 
 #[test]
 fn test_error_messages_are_human_readable() {
-    let (_, stderr, code) = run_antra(&["run", "--domain", "google.com", "--", "echo"]);
+    let (_, stderr, code) = run_antra_with_timeout(
+        &["run", "--domain", "google.com", "--", "echo"],
+        Duration::from_secs(5),
+    );
     assert_ne!(code, 0);
     // Error should be readable, not a Rust panic trace
     assert!(!stderr.contains("thread 'main' panicked"));
@@ -524,7 +581,10 @@ fn test_error_messages_are_human_readable() {
 
 #[test]
 fn test_missing_command_error_message() {
-    let (_, stderr, code) = run_antra(&["run", "--domain", "test.localhost"]);
+    let (_, stderr, code) = run_antra_with_timeout(
+        &["run", "--domain", "test.localhost"],
+        Duration::from_secs(5),
+    );
     assert_ne!(code, 0);
     assert!(stderr.contains("required") || stderr.contains("error") || stderr.contains("COMMAND"));
 }
