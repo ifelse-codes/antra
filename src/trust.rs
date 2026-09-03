@@ -103,6 +103,85 @@ pub fn install_ca() -> Result<()> {
     }
 }
 
+/// Install the Antra CA into the OS trust store without prompting.
+/// Used by `antra run` for first-time auto-trust.
+pub fn install_ca_noninteractive() -> Result<()> {
+    let store = CertStore::new()?;
+    let ca = store.get_or_create_ca()?;
+    let os_cert =
+        os_truststore::Cert::from_pem(&ca.cert_pem).context("Failed to parse CA certificate")?;
+
+    // Check if already installed
+    let already_installed = os_truststore::is_installed(&os_cert)
+        .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
+
+    if already_installed {
+        return Ok(());
+    }
+
+    // Attempt install without prompting
+    match os_truststore::install(&os_cert) {
+        Ok(_) => Ok(()),
+        Err(os_truststore::TrustError::NeedsElevation { detail }) => {
+            // Try with sudo on macOS
+            #[cfg(target_os = "macos")]
+            {
+                let temp_cert = tempfile::NamedTempFile::new()?;
+                std::fs::write(temp_cert.path(), &ca.cert_pem)?;
+
+                let status = std::process::Command::new("sudo")
+                    .args([
+                        "security",
+                        "add-trusted-cert",
+                        "-d",
+                        "-r",
+                        "trustRoot",
+                        "-k",
+                        "/Library/Keychains/System.keychain",
+                        temp_cert.path().to_str().unwrap(),
+                    ])
+                    .status();
+
+                match status {
+                    Ok(s) if s.success() => return Ok(()),
+                    _ => {}
+                }
+            }
+
+            // Try with sudo on Linux
+            #[cfg(target_os = "linux")]
+            {
+                let cert_path = "/usr/local/share/ca-certificates/antra-ca.crt";
+                let _ = std::fs::write(cert_path, &ca.cert_pem);
+
+                let status = std::process::Command::new("sudo")
+                    .args(["update-ca-certificates"])
+                    .status();
+
+                if let Ok(s) = status {
+                    if s.success() {
+                        return Ok(());
+                    }
+                }
+            }
+
+            anyhow::bail!("Elevation required: {detail}")
+        }
+        Err(os_truststore::TrustError::InteractiveAuthRequired) => {
+            anyhow::bail!("Interactive authentication required (no GUI available)")
+        }
+        Err(os_truststore::TrustError::StoreToolMissing { hint }) => {
+            anyhow::bail!("Trust store tool missing: {hint}")
+        }
+        Err(os_truststore::TrustError::Unsupported) => {
+            anyhow::bail!("Unsupported platform for trust store modification")
+        }
+        Err(e) => {
+            anyhow::bail!("Trust install failed: {e}")
+        }
+    }
+}
+
 /// Remove the Antra CA from the OS trust store.
 /// Prompts the user before making system changes.
 pub fn remove_ca() -> Result<()> {

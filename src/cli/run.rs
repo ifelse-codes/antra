@@ -27,6 +27,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub no_trust_prompt: bool,
 
+    /// Skip prompts and auto-install CA
+    #[arg(short, long)]
+    pub yes: bool,
+
     /// Command to run
     #[arg(trailing_var_arg = true, required = true)]
     pub command: Vec<String>,
@@ -53,9 +57,9 @@ pub fn execute(args: RunArgs) -> Result<()> {
     rt.block_on(async { run_inner(args).await })
 }
 
-/// Prompt the user to install the CA on first run.
-/// Only shows once. Respects the user's choice.
-async fn maybe_prompt_trust(no_trust_prompt: bool) {
+/// Auto-install the CA on first run (no prompt).
+/// Only runs once per install. Falls back gracefully if sudo is unavailable.
+async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
     // Skip if user explicitly opted out
     if no_trust_prompt {
         return;
@@ -69,64 +73,32 @@ async fn maybe_prompt_trust(no_trust_prompt: bool) {
     // Check if CA is already trusted
     match crate::trust::check_trust_status() {
         Ok(true) => {
-            // Already trusted, mark as prompted and move on
             let _ = global::mark_trust_prompted();
             return;
         }
         Ok(false) => {}
         Err(_) => {
-            // Can't check, skip prompt
             return;
         }
     }
 
+    // CA not trusted — auto-install it
     println!();
-    println!(
-        "  {}",
-        "Antra generates a local CA for HTTPS on custom domains.".cyan()
-    );
-    println!(
-        "  {}",
-        "Installing it into your system trust store means".cyan()
-    );
-    println!("  {}", "no browser warnings — forever.".cyan());
-    println!();
-    println!(
-        "  {}",
-        "This requires admin privileges (sudo) and prompts before changes.".dimmed()
-    );
-    println!(
-        "  {}",
-        "The CA is local-only. Nothing is sent anywhere.".dimmed()
-    );
-    println!();
-
-    print!(
-        "  {} ",
-        "Install CA into system trust store? [y/N]".yellow().bold()
-    );
-    use std::io::Write;
-    let _ = std::io::stdout().flush();
-
-    let mut input = String::new();
-    if std::io::stdin().read_line(&mut input).is_ok() {
-        let input = input.trim().to_lowercase();
-        if input == "y" || input == "yes" {
-            println!();
-            if let Err(e) = crate::trust::install_ca() {
-                output::print_warning(&format!("Trust install failed: {e}"));
-                println!("  {}", "You can run 'antra trust' later to retry.".dimmed());
-                println!("  {}", "Run 'antra doctor' to diagnose issues.".dimmed());
-            }
-        } else {
-            println!();
-            output::print_warning("Skipped. HTTPS may show cert warnings for custom domains.");
-            println!("  {}", "Run 'antra trust' when you're ready.".dimmed());
-            println!("  {}", "Run 'antra doctor' to check your setup.".dimmed());
+    println!("  {} Setting up HTTPS (one-time)...", "▸".cyan());
+    match crate::trust::install_ca_noninteractive() {
+        Ok(()) => {
+            println!("  {} CA installed — HTTPS ready", "✓".green().bold());
+            let _ = global::mark_trust_prompted();
+        }
+        Err(e) => {
+            println!("  {} Auto-trust failed: {e}", "⚠".yellow());
+            println!(
+                "  Run {} to install manually, or use {}",
+                "antra trust".bold(),
+                "--no-trust-prompt".bold()
+            );
         }
     }
-
-    let _ = global::mark_trust_prompted();
     println!();
 }
 
@@ -167,7 +139,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     output::print_header();
 
     // 0. Auto-trust prompt (first run only)
-    maybe_prompt_trust(args.no_trust_prompt).await;
+    maybe_prompt_trust(args.no_trust_prompt, args.yes).await;
 
     // 1. Determine port
     let port = match args.port {
@@ -213,7 +185,24 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     }
 
     println!();
-    println!("  → https://{}", args.domain);
+    // Print the actual URL the user should visit
+    if let Ok(status) = crate::ipc::client::get_startup_status() {
+        if status.https_port != 443 {
+            println!(
+                "  {} Note: HTTPS on port {} (port 443 unavailable)",
+                "ℹ".cyan(),
+                status.https_port
+            );
+            println!(
+                "  → https://{}.localhost:{}",
+                args.domain, status.https_port
+            );
+        } else {
+            println!("  → https://{}", args.domain);
+        }
+    } else {
+        println!("  → https://{}", args.domain);
+    }
     println!();
 
     // 5. Spawn child process

@@ -29,6 +29,7 @@ pub enum IpcPayload {
     ListRoutes,
     Ping,
     Shutdown,
+    GetStartupStatus,
 
     // Responses (Daemon → CLI)
     Ok(OkResponse),
@@ -36,6 +37,7 @@ pub enum IpcPayload {
     RoutesList(RoutesListResponse),
     Pong,
     Status(StatusResponse),
+    StartupStatusResponse(StartupStatus),
 }
 
 /// Request to register a route
@@ -86,4 +88,15 @@ pub struct StatusResponse {
     pub uptime_secs: u64,
     pub route_count: usize,
     pub socket_path: String,
+}
+
+/// Startup status of the daemon (which ports actually bound)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartupStatus {
+    pub https_port: u16,
+    pub https_ok: bool,
+    pub https_error: Option<String>,
+    pub http_port: u16,
+    pub http_ok: bool,
+    pub http_error: Option<String>,
 }

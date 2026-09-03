@@ -51,6 +51,10 @@ pub enum Commands {
         /// Remove the CA from trust store
         #[arg(long)]
         remove: bool,
+
+        /// Skip prompts and auto-install
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// Manage the Antra proxy daemon
@@ -60,7 +64,11 @@ pub enum Commands {
     },
 
     /// Remove all Antra state
-    Clean,
+    Clean {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+    },
 
     /// Create a static domain alias to a port
     Alias {
@@ -124,9 +132,13 @@ impl Cli {
             Commands::Dev(args) => dev::execute(args),
             Commands::List => list::execute(),
             Commands::Doctor => doctor::execute(),
-            Commands::Trust { status, remove } => trust::execute(status, remove),
+            Commands::Trust {
+                status,
+                remove,
+                yes,
+            } => trust::execute(status, remove, yes),
             Commands::Proxy { command } => proxy::execute(command),
-            Commands::Clean => clean::execute(),
+            Commands::Clean { yes } => clean::execute(yes),
             Commands::Alias { domain, port } => alias::execute(&domain, port),
             Commands::Open { domain } => open::execute(&domain),
             Commands::Remove { domain } => {

@@ -37,8 +37,8 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     .arg("--http-port")
                     .arg(http_port.to_string())
                     .env("ANTRA_DAEMON", "1")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
                     .stdin(std::process::Stdio::null());
 
                 // Add routes
@@ -53,10 +53,37 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 for _ in 0..20 {
                     std::thread::sleep(std::time::Duration::from_millis(100));
                     if crate::ipc::client::is_daemon_running() {
-                        println!("  ✓ Daemon started (PID: {child_pid})");
-                        println!();
-                        println!("  ✓ HTTPS proxy on 127.0.0.1:{port}");
-                        println!("  ✓ HTTP→HTTPS redirect on 127.0.0.1:{http_port}");
+                        // Query actual startup status
+                        match crate::ipc::client::get_startup_status() {
+                            Ok(status) => {
+                                println!("  ✓ Daemon started (PID: {child_pid})");
+                                println!();
+                                if status.https_ok {
+                                    println!("  ✓ HTTPS proxy on 127.0.0.1:{}", status.https_port);
+                                } else {
+                                    println!(
+                                        "  ⚠ HTTPS proxy on port {}: {}",
+                                        status.https_port,
+                                        status.https_error.unwrap_or_default()
+                                    );
+                                }
+                                if status.http_ok {
+                                    println!(
+                                        "  ✓ HTTP→HTTPS redirect on 127.0.0.1:{}",
+                                        status.http_port
+                                    );
+                                } else {
+                                    println!(
+                                        "  ⚠ HTTP redirect on port {}: {}",
+                                        status.http_port,
+                                        status.http_error.unwrap_or_default()
+                                    );
+                                }
+                            }
+                            Err(_) => {
+                                println!("  ✓ Daemon started (PID: {child_pid})");
+                            }
+                        }
                         println!();
 
                         if !routes.is_empty() {
@@ -97,7 +124,7 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     println!("  ✓ Daemon stopped");
                 }
                 Err(e) => {
-                    eprintln!("  ✗ {e}");
+                    println!("  ✗ {e}");
                 }
             }
             Ok(())

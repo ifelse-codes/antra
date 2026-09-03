@@ -47,6 +47,7 @@ pub fn execute(args: DevArgs) -> Result<()> {
         port: args.port.or(config.server.port),
         allow_custom_domain: config.server.allow_custom_domain,
         no_trust_prompt: args.no_trust_prompt,
+        yes: false,
         command: command_parts,
     };
 

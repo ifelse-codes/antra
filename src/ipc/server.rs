@@ -16,9 +16,18 @@ use crate::routing::types::{Protocol, Route};
 /// Global shutdown signal (set by daemon server)
 static SHUTDOWN_TX: std::sync::OnceLock<watch::Sender<bool>> = std::sync::OnceLock::new();
 
+/// Global startup status (set by daemon server)
+static STARTUP_STATUS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Mutex<StartupStatus>>> =
+    std::sync::OnceLock::new();
+
 /// Initialize the global shutdown signal
 pub fn init_shutdown(tx: watch::Sender<bool>) {
     let _ = SHUTDOWN_TX.set(tx);
+}
+
+/// Set the global startup status
+pub fn set_startup_status(status: Arc<tokio::sync::Mutex<StartupStatus>>) {
+    let _ = STARTUP_STATUS.set(status);
 }
 
 /// Signal shutdown to the daemon
@@ -113,6 +122,7 @@ async fn handle_one_message(
             return Ok(());
         }
         IpcPayload::Status(_) => handle_status(start_time, registry),
+        IpcPayload::GetStartupStatus => handle_get_startup_status().await,
         _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
             message: "Unknown command".to_string(),
         })),
@@ -242,6 +252,7 @@ pub mod windows_server {
                         return;
                     }
                     IpcPayload::Status(_) => handle_status(start_time, &registry),
+                    IpcPayload::GetStartupStatus => handle_get_startup_status().await,
                     _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
                         message: "Unknown command".to_string(),
                     })),
@@ -320,6 +331,18 @@ fn handle_status(start_time: Instant, registry: &RouteRegistry) -> IpcMessage {
         route_count: registry.list().len(),
         socket_path: ipc_path,
     }))
+}
+
+async fn handle_get_startup_status() -> IpcMessage {
+    match STARTUP_STATUS.get() {
+        Some(status) => {
+            let s = status.lock().await;
+            IpcMessage::new(IpcPayload::StartupStatusResponse(s.clone()))
+        }
+        None => IpcMessage::new(IpcPayload::Error(ErrorResponse {
+            message: "Startup status not available".to_string(),
+        })),
+    }
 }
 
 async fn send_response(

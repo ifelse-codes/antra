@@ -5,6 +5,7 @@ use anyhow::Result;
 use tokio::sync::{watch, RwLock};
 
 use crate::certs::cache::CertCache;
+use crate::ipc::protocol::StartupStatus;
 use crate::ipc::server::pid_path;
 #[cfg(unix)]
 use crate::ipc::server::socket_path;
@@ -130,25 +131,91 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         }
     });
 
-    // Start HTTP→HTTPS redirect
+    // Start HTTP→HTTPS redirect with auto-fallback
+    let (http_result_tx, http_result_rx) = tokio::sync::oneshot::channel();
     let http_port = config.http_port;
     tokio::spawn(async move {
-        if let Err(e) = crate::proxy::https::start_http_redirect(http_port).await {
-            tracing::error!(error = %e, "HTTP redirect server error");
-        }
+        let result = crate::proxy::https::start_http_redirect(http_port).await;
+        let _ = http_result_tx.send(result.map_err(|e| e.to_string()));
     });
 
-    // Start HTTPS server
+    // Start HTTPS server with auto-fallback
+    let (https_result_tx, https_result_rx) = tokio::sync::oneshot::channel();
+    let https_port = config.https_port;
     let https_registry = Arc::clone(&registry);
     let https_cert_cache = Arc::clone(&cert_cache);
-    let https_port = config.https_port;
     tokio::spawn(async move {
-        if let Err(e) =
-            crate::proxy::https::start_server(https_port, https_registry, https_cert_cache).await
-        {
-            tracing::error!(error = %e, "HTTPS proxy server error");
-        }
+        let result =
+            crate::proxy::https::start_server(https_port, https_registry, https_cert_cache).await;
+        let _ = https_result_tx.send(result.map_err(|e| e.to_string()));
     });
+
+    // Wait for bind results (with timeout)
+    let http_bind_result = tokio::time::timeout(Duration::from_secs(3), http_result_rx)
+        .await
+        .unwrap_or(Ok(Err("timeout".into())));
+
+    let https_bind_result = tokio::time::timeout(Duration::from_secs(3), https_result_rx)
+        .await
+        .unwrap_or(Ok(Err("timeout".into())));
+
+    // Determine actual ports
+    let (actual_http_port, http_ok, http_error) = match &http_bind_result {
+        Ok(Ok(())) => (http_port, true, None),
+        Ok(Err(e)) => {
+            // Try fallback port
+            let fallback = match http_port {
+                80 => 8080,
+                p => p + 1000,
+            };
+            tracing::warn!(error = %e, port = http_port, "HTTP port failed, trying fallback {}", fallback);
+            match crate::proxy::https::start_http_redirect(fallback).await {
+                Ok(()) => (fallback, true, None),
+                Err(e2) => (
+                    fallback,
+                    false,
+                    Some(format!("Both {http_port} and {fallback} failed: {e2}")),
+                ),
+            }
+        }
+        Err(_) => (http_port, false, Some("timeout".into())),
+    };
+
+    let (actual_https_port, https_ok, https_error) = match &https_bind_result {
+        Ok(Ok(())) => (https_port, true, None),
+        Ok(Err(e)) => {
+            // Try fallback port
+            let fallback = match https_port {
+                443 => 8443,
+                p => p + 1000,
+            };
+            tracing::warn!(error = %e, port = https_port, "HTTPS port failed, trying fallback {}", fallback);
+            let reg = Arc::clone(&registry);
+            let cache = Arc::clone(&cert_cache);
+            match crate::proxy::https::start_server(fallback, reg, cache).await {
+                Ok(()) => (fallback, true, None),
+                Err(e2) => (
+                    fallback,
+                    false,
+                    Some(format!("Both {https_port} and {fallback} failed: {e2}")),
+                ),
+            }
+        }
+        Err(_) => (https_port, false, Some("timeout".into())),
+    };
+
+    // Store startup status for IPC queries
+    let startup_status = Arc::new(tokio::sync::Mutex::new(StartupStatus {
+        https_port: actual_https_port,
+        https_ok,
+        https_error,
+        http_port: actual_http_port,
+        http_ok,
+        http_error,
+    }));
+
+    // Set global startup status for IPC queries
+    crate::ipc::server::set_startup_status(Arc::clone(&startup_status));
 
     // Spawn signal handler for graceful shutdown
     let signal_tx = shutdown_tx;
@@ -253,12 +320,12 @@ pub fn stop_daemon() -> Result<()> {
 
             Ok(())
         }
-        Err(e) => {
-            // Force cleanup
+        Err(_e) => {
+            // Connection failed — likely a stale socket. Clean up and report not running.
             #[cfg(unix)]
             let _ = std::fs::remove_file(&sock_path);
             let _ = std::fs::remove_file(&pid_file);
-            Err(anyhow::anyhow!("Failed to stop daemon: {e}"))
+            anyhow::bail!("Daemon is not running");
         }
     }
 }

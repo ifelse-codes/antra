@@ -111,3 +111,13 @@ pub fn send_command_ok(payload: IpcPayload) -> Result<String> {
         other => Err(anyhow::anyhow!("Unexpected response: {other:?}")),
     }
 }
+
+/// Get the daemon startup status (which ports actually bound)
+pub fn get_startup_status() -> Result<StartupStatus> {
+    let resp = send_command_sync(IpcPayload::GetStartupStatus)?;
+    match resp.payload {
+        IpcPayload::StartupStatusResponse(status) => Ok(status),
+        IpcPayload::Error(err) => Err(anyhow::anyhow!("{}", err.message)),
+        other => Err(anyhow::anyhow!("Unexpected response: {other:?}")),
+    }
+}

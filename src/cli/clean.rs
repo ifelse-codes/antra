@@ -6,7 +6,7 @@ use colored::Colorize;
 use crate::ipc::client::{is_daemon_running, send_command_sync};
 use crate::ipc::protocol::IpcPayload;
 
-pub fn execute() -> Result<()> {
+pub fn execute(yes: bool) -> Result<()> {
     println!("{}", "ANTRA CLEAN".bold());
     println!();
     println!("  This will remove:");
@@ -15,18 +15,20 @@ pub fn execute() -> Result<()> {
     println!("    • Daemon socket and PID file");
     println!();
 
-    // Confirmation prompt
-    print!("  Continue? [y/N] ");
-    std::io::stdout().flush()?;
+    if !yes {
+        // Confirmation prompt
+        print!("  Continue? [y/N] ");
+        std::io::stdout().flush()?;
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let input = input.trim().to_lowercase();
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let input = input.trim().to_lowercase();
 
-    if input != "y" && input != "yes" {
-        println!();
-        println!("  {}", "Cancelled.".dimmed());
-        return Ok(());
+        if input != "y" && input != "yes" {
+            println!();
+            println!("  {}", "Cancelled.".dimmed());
+            return Ok(());
+        }
     }
 
     println!();

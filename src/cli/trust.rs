@@ -3,7 +3,7 @@ use colored::Colorize;
 
 use crate::trust;
 
-pub fn execute(status: bool, remove: bool) -> Result<()> {
+pub fn execute(status: bool, remove: bool, yes: bool) -> Result<()> {
     if status {
         return show_status();
     }
@@ -12,6 +12,10 @@ pub fn execute(status: bool, remove: bool) -> Result<()> {
         println!("{}", "ANTRA TRUST — Remove".bold());
         println!();
         trust::remove_ca()
+    } else if yes {
+        println!("{}", "ANTRA TRUST — Install".bold());
+        println!();
+        trust::install_ca_noninteractive()
     } else {
         println!("{}", "ANTRA TRUST — Install".bold());
         println!();

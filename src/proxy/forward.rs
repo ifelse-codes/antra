@@ -55,10 +55,13 @@ pub async fn forward_request(
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
         .build_http();
 
-    let upstream_response = client
-        .request(upstream_req)
-        .await
-        .map_err(|e| anyhow::anyhow!("Upstream connection failed: {e}"))?;
+    let upstream_response = client.request(upstream_req).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Connection to {}:{} refused — is your server running? ({e})",
+            route.host,
+            route.port
+        )
+    })?;
 
     // Convert response body to Full<Bytes>
     let (resp_parts, body) = upstream_response.into_parts();

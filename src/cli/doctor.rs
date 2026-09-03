@@ -131,16 +131,24 @@ pub fn execute() -> Result<()> {
                     );
                 }
                 Err(_) => {
-                    println!(
-                        "  {} {}",
-                        "⚠".yellow().bold(),
-                        format!("Port {port} ({name}) in use").yellow()
-                    );
-                    if port == 443 {
-                        issues.push((
-                            format!("Port {port} ({name}) in use"),
-                            "antra proxy start --port 8443 --http-port 8080".to_string(),
-                        ));
+                    if is_antra_daemon_port(port) {
+                        println!(
+                            "  {} {}",
+                            "✓".green().bold(),
+                            format!("Port {port} ({name}) — Antra daemon active").green()
+                        );
+                    } else {
+                        println!(
+                            "  {} {}",
+                            "⚠".yellow().bold(),
+                            format!("Port {port} ({name}) in use by another process").yellow()
+                        );
+                        if port == 443 {
+                            issues.push((
+                                format!("Port {port} ({name}) in use"),
+                                "antra proxy start --port 8443 --http-port 8080".to_string(),
+                            ));
+                        }
                     }
                 }
             }
@@ -221,5 +229,46 @@ fn auto_fix(issues: &[(String, String)]) {
             }
         }
         println!();
+    }
+}
+
+/// Check if a port is held by the Antra daemon process.
+fn is_antra_daemon_port(port: u16) -> bool {
+    let pid_path = crate::ipc::server::pid_path();
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            // Check if the process is alive
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::kill;
+                use nix::unistd::Pid;
+                if kill(Pid::from_raw(pid as i32), None).is_ok() {
+                    // Process is alive — check if it holds this port
+                    return check_port_holder(pid, port);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a specific PID holds a port.
+#[cfg(unix)]
+fn check_port_holder(pid: u32, port: u16) -> bool {
+    // Use lsof to check if the PID holds the port
+    let output = std::process::Command::new("lsof")
+        .args([
+            "-p",
+            &pid.to_string(),
+            "-i",
+            &format!(":{port}"),
+            "-n",
+            "-P",
+        ])
+        .output();
+
+    match output {
+        Ok(o) => o.status.success() && !o.stdout.is_empty(),
+        Err(_) => false,
     }
 }

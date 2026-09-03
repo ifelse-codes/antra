@@ -121,10 +121,11 @@ fn test_proxy_status_when_not_running() {
 
 #[test]
 fn test_proxy_stop_when_not_running() {
-    let (stdout, _, _) = run_antra(&["proxy", "stop"]);
-    // "Daemon is not running" goes to stdout, exit code 0
+    let (stdout, stderr, _) = run_antra(&["proxy", "stop"]);
+    let combined = format!("{stdout}{stderr}");
     assert!(
-        stdout.contains("not running") || stdout.contains("Daemon") || stdout.contains("error")
+        combined.contains("not running") || combined.contains("Daemon not running"),
+        "Expected 'not running' in output.\nstdout: {stdout}\nstderr: {stderr}"
     );
 }
 

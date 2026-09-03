@@ -59,6 +59,9 @@ os-truststore = "0.0.2"
 rand = "0.9"
 base64 = "0.22"
 
+# Temp files for CA install
+tempfile = "3"
+
 # Unix APIs (signals, process groups)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "process"] }

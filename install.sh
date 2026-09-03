@@ -197,14 +197,32 @@ ask_trust() {
     echo "  ${DIM}This requires admin privileges (sudo) on macOS/Linux.${RESET}"
     echo "  ${DIM}The CA is local-only. Nothing is sent anywhere.${RESET}"
     echo ""
-    printf "  Install CA into system trust store? [y/N] "
-    read -r response < /dev/tty
+
+    # Detect TTY availability
+    if [ -t 0 ] 2>/dev/null; then
+        # Stdin is a terminal
+        printf "  Install CA into system trust store? [Y/n] "
+        read -r response
+    elif [ -e /dev/tty ] 2>/dev/null; then
+        # Can read from /dev/tty even when piped
+        printf "  Install CA into system trust store? [Y/n] "
+        read -r response < /dev/tty
+    else
+        # Non-interactive: default to YES (auto-install)
+        echo "  Non-interactive mode — auto-installing CA..."
+        response="y"
+    fi
 
     case "$response" in
-        [yY][eE][sS]|[yY])
+        [nN][oO]|[nN])
+            echo ""
+            warn "Skipped. You can run 'antra trust' later."
+            warn "HTTPS for custom domains may show cert warnings until then."
+            ;;
+        *)
             echo ""
             info "Installing CA into system trust store..."
-            if "$binary_path" trust; then
+            if "$binary_path" trust --yes; then
                 ok "CA installed. HTTPS will work with no warnings."
             else
                 echo ""
@@ -212,12 +230,6 @@ ask_trust() {
                 warn "You can run 'antra trust' later to try again."
                 warn "You can run 'antra doctor' to diagnose issues."
             fi
-            ;;
-        *)
-            echo ""
-            warn "Skipped. You can run 'antra trust' later."
-            warn "HTTPS for custom domains may show cert warnings until then."
-            warn "You can run 'antra doctor' to check your setup anytime."
             ;;
     esac
 }

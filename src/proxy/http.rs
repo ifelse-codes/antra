@@ -36,12 +36,19 @@ pub async fn handle_request(
         Some(route) => route,
         None => {
             tracing::warn!(%domain, "No route found");
+            let body = format!(
+                "502 Bad Gateway\n\n\
+                 Domain: {domain}\n\n\
+                 No route is registered for this domain.\n\n\
+                 Fix this:\n\
+                 1. Register a route: antra run --domain {domain} --port <port> -- <your-command>\n\
+                 2. Or add a static route: antra proxy start --route {domain}:<port>\n\
+                 3. Check routes: antra list\n"
+            );
             let response = Response::builder()
                 .status(502)
                 .header("content-type", "text/plain")
-                .body(Either::Left(Full::new(Bytes::from(
-                    "502 Bad Gateway: No route for this domain",
-                ))))
+                .body(Either::Left(Full::new(Bytes::from(body))))
                 .unwrap();
             return Ok(response);
         }
@@ -61,12 +68,20 @@ pub async fn handle_request(
             Ok(response) => Ok(response.map(Either::Right)),
             Err(e) => {
                 tracing::error!(%domain, error = %e, "WebSocket upgrade failed");
+                let body = format!(
+                    "502 Bad Gateway\n\n\
+                     Domain:   {domain}\n\
+                     Upstream: {}:{}\n\
+                     Error:    WebSocket upgrade failed: {e}\n\n\
+                     Fix this:\n\
+                     1. Is your server running on port {}?\n\
+                     2. Does it support WebSocket connections?\n",
+                    route.host, route.port, route.port
+                );
                 let response = Response::builder()
                     .status(502)
                     .header("content-type", "text/plain")
-                    .body(Either::Left(Full::new(Bytes::from(format!(
-                        "502 Bad Gateway: WebSocket upgrade failed: {e}"
-                    )))))
+                    .body(Either::Left(Full::new(Bytes::from(body))))
                     .unwrap();
                 Ok(response)
             }
@@ -77,12 +92,21 @@ pub async fn handle_request(
             Ok(response) => Ok(response.map(Either::Left)),
             Err(e) => {
                 tracing::error!(%domain, error = %e, "Upstream request failed");
+                let body = format!(
+                    "503 Service Unavailable\n\n\
+                     Domain:   {domain}\n\
+                     Upstream: {}:{}\n\
+                     Error:    {e}\n\n\
+                     Fix this:\n\
+                     1. Is your server running on port {}?\n\
+                     2. Start it: antra run --domain {domain} --port {} -- <your-command>\n\
+                     3. Check routes: antra list\n",
+                    route.host, route.port, route.port, route.port
+                );
                 let response = Response::builder()
                     .status(503)
                     .header("content-type", "text/plain")
-                    .body(Either::Left(Full::new(Bytes::from(format!(
-                        "503 Service Unavailable: {e}"
-                    )))))
+                    .body(Either::Left(Full::new(Bytes::from(body))))
                     .unwrap();
                 Ok(response)
             }
