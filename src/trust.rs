@@ -73,7 +73,12 @@ pub fn install_ca() -> Result<()> {
             eprintln!("{}", "  ✗ Elevated privileges required.".red());
             eprintln!("    {detail}");
             eprintln!();
-            eprintln!("    Run with sudo, or follow the manual steps above.");
+            eprintln!(
+                "    Try: {}",
+                "sudo antra trust".bold()
+            );
+            eprintln!("    Or install manually to your login keychain:");
+            eprintln!("      security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db <ca.pem>");
             anyhow::bail!("Elevation required to install CA")
         }
         Err(os_truststore::TrustError::InteractiveAuthRequired) => {
@@ -82,6 +87,10 @@ pub fn install_ca() -> Result<()> {
                 "  ✗ Interactive authentication required (macOS GUI prompt).".red()
             );
             eprintln!("    This command needs a terminal with GUI access.");
+            eprintln!(
+                "    Try: {}",
+                "sudo antra trust".bold()
+            );
             anyhow::bail!("Interactive auth required")
         }
         Err(os_truststore::TrustError::StoreToolMissing { hint }) => {
@@ -119,66 +128,90 @@ pub fn install_ca_noninteractive() -> Result<()> {
         return Ok(());
     }
 
-    // Attempt install without prompting
+    // Try default install (may work without elevation on some systems)
     match os_truststore::install(&os_cert) {
-        Ok(_) => Ok(()),
-        Err(os_truststore::TrustError::NeedsElevation { detail }) => {
-            // Try with sudo on macOS
-            #[cfg(target_os = "macos")]
-            {
-                let temp_cert = tempfile::NamedTempFile::new()?;
-                std::fs::write(temp_cert.path(), &ca.cert_pem)?;
+        Ok(_) => return Ok(()),
+        _ => {}
+    }
 
-                let status = std::process::Command::new("sudo")
-                    .args([
-                        "security",
-                        "add-trusted-cert",
-                        "-d",
-                        "-r",
-                        "trustRoot",
-                        "-k",
-                        "/Library/Keychains/System.keychain",
-                        temp_cert.path().to_str().unwrap(),
-                    ])
-                    .status();
+    anyhow::bail!(
+        "Could not install CA automatically. Run: {}",
+        "sudo antra trust".bold()
+    )
+}
 
-                match status {
-                    Ok(s) if s.success() => return Ok(()),
-                    _ => {}
-                }
+/// Install the Antra CA into the user's login keychain (no sudo needed).
+/// macOS only: installs to ~/Library/Keychains/login.keychain-db
+pub fn install_ca_user_level() -> Result<()> {
+    let store = CertStore::new()?;
+    let ca = store.get_or_create_ca()?;
+    let os_cert =
+        os_truststore::Cert::from_pem(&ca.cert_pem).context("Failed to parse CA certificate")?;
+
+    // Check if already installed
+    let already_installed = os_truststore::is_installed(&os_cert)
+        .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
+
+    if already_installed {
+        println!("{}", "  Antra CA is already trusted by the system.".green());
+        return Ok(());
+    }
+
+    // macOS: install to user login keychain
+    #[cfg(target_os = "macos")]
+    {
+        let temp_cert = tempfile::NamedTempFile::new()?;
+        std::fs::write(temp_cert.path(), &ca.cert_pem)?;
+
+        let status = std::process::Command::new("security")
+            .args([
+                "add-trusted-cert",
+                "-r",
+                "trustRoot",
+                "-k",
+                "~/Library/Keychains/login.keychain-db",
+                temp_cert.path().to_str().unwrap(),
+            ])
+            .status();
+
+        match status {
+            Ok(s) if s.success() => {
+                println!(
+                    "{}",
+                    "  ✓ CA certificate installed into user login keychain.".green()
+                );
+                println!(
+                    "    {}",
+                    "No sudo required. HTTPS for custom domains is ready.".dimmed()
+                );
+                return Ok(());
             }
-
-            // Try with sudo on Linux
-            #[cfg(target_os = "linux")]
-            {
-                let cert_path = "/usr/local/share/ca-certificates/antra-ca.crt";
-                let _ = std::fs::write(cert_path, &ca.cert_pem);
-
-                let status = std::process::Command::new("sudo")
-                    .args(["update-ca-certificates"])
-                    .status();
-
-                if let Ok(s) = status {
-                    if s.success() {
-                        return Ok(());
-                    }
-                }
+            Ok(s) => {
+                anyhow::bail!(
+                    "Failed to install to user keychain (exit code: {}). \
+                     Try: sudo antra trust",
+                    s
+                );
             }
+            Err(e) => {
+                anyhow::bail!("Failed to run security command: {e}");
+            }
+        }
+    }
 
-            anyhow::bail!("Elevation required: {detail}")
-        }
-        Err(os_truststore::TrustError::InteractiveAuthRequired) => {
-            anyhow::bail!("Interactive authentication required (no GUI available)")
-        }
-        Err(os_truststore::TrustError::StoreToolMissing { hint }) => {
-            anyhow::bail!("Trust store tool missing: {hint}")
-        }
-        Err(os_truststore::TrustError::Unsupported) => {
-            anyhow::bail!("Unsupported platform for trust store modification")
-        }
-        Err(e) => {
-            anyhow::bail!("Trust install failed: {e}")
-        }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Linux/Windows, user-level trust store is not straightforward
+        // Fall back to suggesting sudo
+        println!(
+            "{}",
+            "  User-level trust install is only supported on macOS.".yellow()
+        );
+        println!(
+            "  On this platform, try: {}",
+            "sudo antra trust".bold()
+        );
+        anyhow::bail!("User-level trust install not supported on this platform")
     }
 }
 
@@ -232,7 +265,10 @@ pub fn remove_ca() -> Result<()> {
             eprintln!("{}", "  ✗ Elevated privileges required.".red());
             eprintln!("    {detail}");
             eprintln!();
-            eprintln!("    Run with sudo, or follow the manual steps above.");
+            eprintln!(
+                "    Try: {}",
+                "sudo antra trust --remove".bold()
+            );
             anyhow::bail!("Elevation required to remove CA")
         }
         Err(os_truststore::TrustError::InteractiveAuthRequired) => {
@@ -241,6 +277,10 @@ pub fn remove_ca() -> Result<()> {
                 "  ✗ Interactive authentication required (macOS GUI prompt).".red()
             );
             eprintln!("    This command needs a terminal with GUI access.");
+            eprintln!(
+                "    Try: {}",
+                "sudo antra trust --remove".bold()
+            );
             anyhow::bail!("Interactive auth required")
         }
         Err(e) => {

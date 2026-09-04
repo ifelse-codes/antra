@@ -7,7 +7,7 @@ use crate::config::global;
 use crate::ipc::client::is_daemon_running;
 use crate::resolver::traits::DomainResolver;
 use crate::util::output;
-use crate::util::port::find_free_port;
+use crate::util::port::{detect_port_from_command, find_free_port, prompt_for_port};
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -93,9 +93,8 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
         Err(e) => {
             println!("  {} Auto-trust failed: {e}", "⚠".yellow());
             println!(
-                "  Run {} to install manually, or use {}",
-                "antra trust".bold(),
-                "--no-trust-prompt".bold()
+                "  Run {} to install the CA, then re-run your command",
+                "sudo antra trust".bold()
             );
         }
     }
@@ -144,7 +143,30 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 1. Determine port
     let port = match args.port {
         Some(p) => p,
-        None => find_free_port()?,
+        None => {
+            // Try to detect port from command arguments
+            if let Some(detected) = detect_port_from_command(&args.command) {
+                tracing::debug!(port = detected, "Auto-detected port from command args");
+                output::print_warning(&format!(
+                    "No --port specified, detected port {detected} from command"
+                ));
+                detected
+            } else {
+                tracing::debug!(command = ?args.command, "Could not auto-detect port from command");
+                // Detection failed — prompt the user
+                match prompt_for_port() {
+                    Some(p) => p,
+                    None => {
+                        // Last resort: use a random free port (with a warning)
+                        output::print_warning("Could not determine port. Using random free port.");
+                        output::print_warning(
+                            "The proxy may return 503 if your server isn't on this port.",
+                        );
+                        find_free_port()?
+                    }
+                }
+            }
+        }
     };
 
     // 2. Resolve domain to 127.0.0.1 (hosts file or no-op)
@@ -186,17 +208,21 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 
     println!();
     // Print the actual URL the user should visit
-    if let Ok(status) = crate::ipc::client::get_startup_status() {
+    if let Ok(status) = crate::ipc::client::get_startup_status_async().await {
         if status.https_port != 443 {
             println!(
-                "  {} Note: HTTPS on port {} (port 443 unavailable)",
+                "  {} Note: HTTPS on port {} (port 443 unavailable — try {})",
                 "ℹ".cyan(),
-                status.https_port
+                status.https_port,
+                "sudo antra proxy start".bold()
             );
-            println!(
-                "  → https://{}.localhost:{}",
-                args.domain, status.https_port
-            );
+            // Build clean URL — don't double-append .localhost
+            let host = if args.domain.ends_with(".localhost") {
+                args.domain.clone()
+            } else {
+                format!("{}.localhost", args.domain)
+            };
+            println!("  → https://{}:{}", host, status.https_port);
         } else {
             println!("  → https://{}", args.domain);
         }

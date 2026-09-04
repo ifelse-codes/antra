@@ -131,78 +131,81 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         }
     });
 
-    // Start HTTP→HTTPS redirect with auto-fallback
-    let (http_result_tx, http_result_rx) = tokio::sync::oneshot::channel();
+    // Probe HTTP port and start with auto-fallback
     let http_port = config.http_port;
-    tokio::spawn(async move {
-        let result = crate::proxy::https::start_http_redirect(http_port).await;
-        let _ = http_result_tx.send(result.map_err(|e| e.to_string()));
-    });
+    let actual_http_port;
+    let http_ok;
+    let http_error;
 
-    // Start HTTPS server with auto-fallback
-    let (https_result_tx, https_result_rx) = tokio::sync::oneshot::channel();
-    let https_port = config.https_port;
-    let https_registry = Arc::clone(&registry);
-    let https_cert_cache = Arc::clone(&cert_cache);
-    tokio::spawn(async move {
-        let result =
-            crate::proxy::https::start_server(https_port, https_registry, https_cert_cache).await;
-        let _ = https_result_tx.send(result.map_err(|e| e.to_string()));
-    });
-
-    // Wait for bind results (with timeout)
-    let http_bind_result = tokio::time::timeout(Duration::from_secs(3), http_result_rx)
-        .await
-        .unwrap_or(Ok(Err("timeout".into())));
-
-    let https_bind_result = tokio::time::timeout(Duration::from_secs(3), https_result_rx)
-        .await
-        .unwrap_or(Ok(Err("timeout".into())));
-
-    // Determine actual ports
-    let (actual_http_port, http_ok, http_error) = match &http_bind_result {
-        Ok(Ok(())) => (http_port, true, None),
-        Ok(Err(e)) => {
-            // Try fallback port
-            let fallback = match http_port {
-                80 => 8080,
-                p => p + 1000,
-            };
-            tracing::warn!(error = %e, port = http_port, "HTTP port failed, trying fallback {}", fallback);
-            match crate::proxy::https::start_http_redirect(fallback).await {
-                Ok(()) => (fallback, true, None),
-                Err(e2) => (
-                    fallback,
-                    false,
-                    Some(format!("Both {http_port} and {fallback} failed: {e2}")),
-                ),
-            }
+    if crate::proxy::https::probe_port(http_port).await.is_ok() {
+        actual_http_port = http_port;
+        http_ok = true;
+        http_error = None;
+        let listener = crate::proxy::https::bind_http_redirect(http_port).await;
+        if let Ok(l) = listener {
+            crate::proxy::https::run_http_redirect(l);
         }
-        Err(_) => (http_port, false, Some("timeout".into())),
-    };
+    } else {
+        let fallback = match http_port {
+            80 => 8080,
+            p => p + 1000,
+        };
+        tracing::warn!(port = http_port, "HTTP port in use, trying fallback {}", fallback);
+        if crate::proxy::https::probe_port(fallback).await.is_ok() {
+            actual_http_port = fallback;
+            http_ok = true;
+            http_error = None;
+            if let Ok(l) = crate::proxy::https::bind_http_redirect(fallback).await {
+                crate::proxy::https::run_http_redirect(l);
+            }
+        } else {
+            actual_http_port = fallback;
+            http_ok = false;
+            http_error = Some(format!("Both {http_port} and {fallback} are in use"));
+        }
+    }
 
-    let (actual_https_port, https_ok, https_error) = match &https_bind_result {
-        Ok(Ok(())) => (https_port, true, None),
-        Ok(Err(e)) => {
-            // Try fallback port
-            let fallback = match https_port {
-                443 => 8443,
-                p => p + 1000,
-            };
-            tracing::warn!(error = %e, port = https_port, "HTTPS port failed, trying fallback {}", fallback);
+    // Probe HTTPS port and start with auto-fallback
+    let https_port = config.https_port;
+    let actual_https_port;
+    let https_ok;
+    let https_error;
+
+    if crate::proxy::https::probe_port(https_port).await.is_ok() {
+        actual_https_port = https_port;
+        https_ok = true;
+        https_error = None;
+        let https_registry = Arc::clone(&registry);
+        let https_cert_cache = Arc::clone(&cert_cache);
+        let port = https_port;
+        tokio::spawn(async move {
+            if let Err(e) = crate::proxy::https::start_server(port, https_registry, https_cert_cache).await {
+                tracing::error!(error = %e, "HTTPS server failed");
+            }
+        });
+    } else {
+        let fallback = match https_port {
+            443 => 8443,
+            p => p + 1000,
+        };
+        tracing::warn!(port = https_port, "HTTPS port in use, trying fallback {}", fallback);
+        if crate::proxy::https::probe_port(fallback).await.is_ok() {
+            actual_https_port = fallback;
+            https_ok = true;
+            https_error = None;
             let reg = Arc::clone(&registry);
             let cache = Arc::clone(&cert_cache);
-            match crate::proxy::https::start_server(fallback, reg, cache).await {
-                Ok(()) => (fallback, true, None),
-                Err(e2) => (
-                    fallback,
-                    false,
-                    Some(format!("Both {https_port} and {fallback} failed: {e2}")),
-                ),
-            }
+            tokio::spawn(async move {
+                if let Err(e) = crate::proxy::https::start_server(fallback, reg, cache).await {
+                    tracing::error!(error = %e, "HTTPS fallback server failed");
+                }
+            });
+        } else {
+            actual_https_port = fallback;
+            https_ok = false;
+            https_error = Some(format!("Both {https_port} and {fallback} are in use"));
         }
-        Err(_) => (https_port, false, Some("timeout".into())),
-    };
+    }
 
     // Store startup status for IPC queries
     let startup_status = Arc::new(tokio::sync::Mutex::new(StartupStatus {

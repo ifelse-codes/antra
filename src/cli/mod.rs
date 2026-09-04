@@ -26,6 +26,10 @@ use crate::resolver::traits::DomainResolver;
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// Enable verbose debug output
+    #[arg(long, short, global = true)]
+    pub verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -55,6 +59,10 @@ pub enum Commands {
         /// Skip prompts and auto-install
         #[arg(short, long)]
         yes: bool,
+
+        /// Install to user login keychain (no sudo needed, macOS only)
+        #[arg(long)]
+        user_level: bool,
     },
 
     /// Manage the Antra proxy daemon
@@ -136,7 +144,8 @@ impl Cli {
                 status,
                 remove,
                 yes,
-            } => trust::execute(status, remove, yes),
+                user_level,
+            } => trust::execute(status, remove, yes, user_level),
             Commands::Proxy { command } => proxy::execute(command),
             Commands::Clean { yes } => clean::execute(yes),
             Commands::Alias { domain, port } => alias::execute(&domain, port),
@@ -144,13 +153,50 @@ impl Cli {
             Commands::Remove { domain } => {
                 println!("  {} Removing route for {}", "→".cyan().bold(), domain);
 
+                // Check if daemon is running
+                if !is_daemon_running() {
+                    println!(
+                        "  {} {}",
+                        "⚠".yellow().bold(),
+                        "Daemon is not running".yellow()
+                    );
+                    println!("  Start it with: antra proxy start");
+                    std::process::exit(1);
+                }
+
+                // Check if route exists before attempting removal
+                let mut route_found = false;
+                if let Ok(resp) = send_command_sync(IpcPayload::ListRoutes) {
+                    if let IpcPayload::RoutesList(list) = resp.payload {
+                        if list.routes.iter().any(|r| r.domain == *domain) {
+                            route_found = true;
+                        }
+                    }
+                }
+
+                if !route_found {
+                    println!(
+                        "  {} {}",
+                        "⚠".yellow().bold(),
+                        format!("No route found for '{domain}'").yellow()
+                    );
+                    std::process::exit(1);
+                }
+
                 // Unregister route via IPC
-                if is_daemon_running() {
-                    use crate::ipc::protocol::UnregisterRouteRequest;
-                    let _ =
-                        send_command_sync(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
-                            domain: domain.clone(),
-                        }));
+                use crate::ipc::protocol::UnregisterRouteRequest;
+                match send_command_sync(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
+                    domain: domain.clone(),
+                })) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!(
+                            "  {} {}",
+                            "✗".red().bold(),
+                            format!("Failed to remove route: {e}").red()
+                        );
+                        std::process::exit(1);
+                    }
                 }
 
                 // Unresolve domain (remove from hosts if needed)

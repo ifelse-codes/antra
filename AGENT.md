@@ -47,6 +47,14 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 **Current state:** All phases (0-10) complete. Antra is fully built with cross-platform support, CI/CD, and release workflow.
 
+### Landing Page
+
+- **Location:** `landing/index.html`
+- **Deployed to:** Cloudflare Pages → `https://antra.iifelse.com`
+- **Project name:** `antra-landing`
+- **Design language:** Mudra (dark, surgical, violet accent)
+- **To update:** `wrangler pages deploy . --project-name antra-landing`
+
 ---
 
 ## Critical Rules — DO NOT DEVIATE
