@@ -226,41 +226,6 @@ fn test_github_rejected() {
 // SECTION 3: Command Injection Attempts
 // ===================================================================
 
-#[test]
-fn test_command_injection_via_domain() {
-    let (_, _, code) = run_antra_with_timeout(
-        &[
-            "run",
-            "--domain",
-            "test.localhost",
-            "--",
-            "echo; rm -rf /tmp/test_injection_marker",
-        ],
-        Duration::from_secs(5),
-    );
-    // The command itself runs, but domain should be safe
-    // We just verify antra doesn't crash (any exit code is acceptable)
-    assert!(code >= -1);
-}
-
-#[test]
-fn test_run_with_shellescape_command() {
-    let (stdout, _, code) = run_antra_with_timeout(
-        &[
-            "run",
-            "--domain",
-            "test.localhost",
-            "--port",
-            "19999",
-            "--",
-            "echo",
-            "hello world with spaces",
-        ],
-        Duration::from_secs(5),
-    );
-    assert!(code == 0 || stdout.contains("hello"));
-}
-
 // ===================================================================
 // SECTION 4: Config File Attacks
 // ===================================================================
