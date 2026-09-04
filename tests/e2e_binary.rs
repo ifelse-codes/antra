@@ -37,7 +37,6 @@ fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, 
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
-                    let _ = child.wait();
                     return (String::new(), "timeout".to_string(), -1);
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -78,7 +77,6 @@ fn run_antra_with_dir_timeout(
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
-                    let _ = child.wait();
                     return (String::new(), "timeout".to_string(), -1);
                 }
                 std::thread::sleep(Duration::from_millis(50));
