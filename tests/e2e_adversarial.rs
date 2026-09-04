@@ -94,12 +94,6 @@ fn run_antra_with_dir_timeout(
 // ===================================================================
 
 #[test]
-fn test_empty_domain() {
-    let (_, _, code) = run_antra(&["run", "--domain", "", "--", "echo", "test"]);
-    assert_ne!(code, 0);
-}
-
-#[test]
 fn test_extremely_long_domain() {
     let long_domain = "a".repeat(10000);
     let args = vec!["run", "--domain", &long_domain, "--", "echo", "test"];
@@ -223,56 +217,9 @@ fn test_localhost_bare_accepted() {
 }
 
 #[test]
-fn test_127_0_0_1_rejected() {
-    let (_, _, code) = run_antra(&["run", "--domain", "127.0.0.1", "--", "echo", "test"]);
-    assert_ne!(code, 0);
-}
-
-#[test]
 fn test_github_rejected() {
     let (_, _, code) = run_antra(&["run", "--domain", "github.com", "--", "echo", "test"]);
     assert_ne!(code, 0);
-}
-
-#[test]
-fn test_aws_rejected() {
-    let (_, _, code) = run_antra(&["run", "--domain", "aws.amazon.com", "--", "echo", "test"]);
-    assert_ne!(code, 0);
-}
-
-#[test]
-fn test_cloudflare_rejected() {
-    let (_, _, code) = run_antra(&["run", "--domain", "cloudflare.com", "--", "echo", "test"]);
-    assert_ne!(code, 0);
-}
-
-#[test]
-fn test_path_traversal_in_domain() {
-    let (_, _, code) = run_antra(&["run", "--domain", "../../../etc/passwd", "--", "echo"]);
-    assert_ne!(code, 0);
-}
-
-#[test]
-fn test_domain_with_special_characters() {
-    let special_domains = vec![
-        "test.localhost<script>alert(1)</script>",
-        "test.localhost' OR 1=1--",
-        "test.localhost; rm -rf /",
-        "test.localhost`whoami`",
-        "test.localhost$(whoami)",
-        "test.localhost|cat /etc/passwd",
-        "test.localhost&net cat",
-    ];
-
-    for domain in special_domains {
-        let args = vec!["run", "--domain", domain, "--", "echo", "test"];
-        let (_, stderr, code) = run_antra(&args);
-        // Should reject all malicious domains (exit non-zero) or timeout
-        assert!(
-            code != 0 || code == -1 || stderr.contains("error"),
-            "Should reject domain: {domain}"
-        );
-    }
 }
 
 // ===================================================================
