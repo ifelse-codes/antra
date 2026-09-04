@@ -157,42 +157,42 @@ antra doctor
 ## Implementation Checklist
 
 ```
-[ ] Fix daemon lifecycle (P0-1)
-    [ ] Add health check after fork
-    [ ] Log errors to daemon.log
-    [ ] Verify PID alive before reporting success
+[x] Fix daemon lifecycle (P0-1)
+    [x] Add health check after fork
+    [x] Log errors to daemon.log
+    [x] Verify PID alive before reporting success
 
-[ ] Fix port binding (P0-2)
-    [ ] Verify socket is actually listening
-    [ ] Print clear error on bind failure
-    [ ] Add auto-fallback to 8443/8080
+[x] Fix port binding (P0-2)
+    [x] Verify socket is actually listening
+    [x] Print clear error on bind failure
+    [x] Add auto-fallback to 8443/8080
 
-[ ] Fix auto-port detection (P1-3)
-    [ ] Parse common server patterns
-    [ ] Prompt user if detection fails
-    [ ] Make --port required when detection fails
+[x] Fix auto-port detection (P1-3)
+    [x] Parse common server patterns
+    [x] Prompt user if detection fails
+    [x] Make --port required when detection fails
 
-[ ] Fix trust error messaging (P1-4)
-    [ ] Detect permission error
-    [ ] Suggest sudo or user-level install
-    [ ] Add --user-level flag
+[x] Fix trust error messaging (P1-4)
+    [x] Detect permission error
+    [x] Suggest sudo or user-level install
+    [x] Add --user-level flag
 
-[ ] Fix remove on non-existent route (P2-5)
-    [ ] Check route existence before removal
-    [ ] Print warning for missing routes
-    [ ] Non-zero exit code
+[x] Fix remove on non-existent route (P2-5)
+    [x] Check route existence before removal
+    [x] Print warning for missing routes
+    [x] Non-zero exit code
 
-[ ] Fix doctor summary count (P2-6)
-    [ ] Count warnings and errors separately
-    [ ] Update summary text
+[x] Fix doctor summary count (P2-6)
+    [x] Count warnings and errors separately
+    [x] Update summary text
 
-[ ] Add --verbose flag (P3-7)
-    [ ] Add flag to all commands
-    [ ] Log detailed operation info
+[x] Add --verbose flag (P3-7)
+    [x] Add flag to all commands
+    [x] Log detailed operation info
 
-[ ] Document antra.toml (P3-8)
-    [ ] Add example to repo
-    [ ] Test antra dev command
+[x] Document antra.toml (P3-8)
+    [x] Add example to repo
+    [x] Test antra dev command
 ```
 
 ---
