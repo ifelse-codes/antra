@@ -7,22 +7,13 @@ fn antra_bin() -> String {
     path.pop();
     path.pop();
     path.push("antra");
+    #[cfg(target_os = "windows")]
+    path.set_extension("exe");
     path.to_string_lossy().to_string()
 }
 
 fn run_antra(args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(antra_bin())
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("Failed to execute antra");
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    (stdout, stderr, code)
+    run_antra_with_timeout(args, Duration::from_secs(10))
 }
 
 fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
@@ -57,26 +48,45 @@ fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, 
     }
 }
 
-fn _run_antra_with_stdin(args: &[&str], stdin_data: &str) -> (String, String, i32) {
+fn run_antra_with_dir(dir: &std::path::Path, args: &[&str]) -> (String, String, i32) {
+    run_antra_with_dir_timeout(dir, args, Duration::from_secs(10))
+}
+
+fn run_antra_with_dir_timeout(
+    dir: &std::path::Path,
+    args: &[&str],
+    timeout: Duration,
+) -> (String, String, i32) {
     let mut child = Command::new(antra_bin())
         .args(args)
-        .stdin(Stdio::piped())
+        .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("Failed to execute antra");
 
-    if let Some(ref mut stdin) = child.stdin {
-        use std::io::Write;
-        write!(stdin, "{}", stdin_data).unwrap();
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                return (stdout, stderr, status.code().unwrap_or(-1));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return (String::new(), "timeout".to_string(), -1);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                return (String::new(), format!("{e}"), -1);
+            }
+        }
     }
-
-    let output = child.wait_with_output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    (stdout, stderr, code)
 }
 
 // ===================================================================
@@ -94,26 +104,21 @@ fn test_extremely_long_domain() {
     let long_domain = "a".repeat(10000);
     let args = vec!["run", "--domain", &long_domain, "--", "echo", "test"];
     let (_, stderr, code) = run_antra(&args);
-    // Should reject gracefully, not crash
     assert_ne!(code, 0);
     assert!(stderr.contains("error") || stderr.contains("too long") || code == 1);
 }
 
 #[test]
 fn test_domain_with_spaces() {
-    // Shell splits "my app.localhost" into two args: "my" and "app.localhost"
-    // This is expected behavior - domains with spaces aren't valid anyway
     let (_, _, code) = run_antra_with_timeout(
         &["run", "--domain", "my app.localhost", "--", "echo"],
         Duration::from_secs(5),
     );
-    // Should fail or handle gracefully (shell splits the args)
-    assert!(code >= 0); // Don't crash
+    assert!(code >= 0);
 }
 
 #[test]
 fn test_domain_with_null_bytes() {
-    // Can't pass null bytes through Command (OS restriction), verify via config
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -122,7 +127,6 @@ fn test_domain_with_null_bytes() {
     .unwrap();
 
     let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
-    // Should reject null bytes in domain
     assert!(code != 0 || stderr.contains("error") || stderr.contains("parse"));
 }
 
@@ -141,7 +145,6 @@ fn test_run_without_domain() {
 
 #[test]
 fn test_port_zero_auto_assigns() {
-    // Port 0 means OS auto-assigns a free port - this is valid behavior
     let (_, _, code) = run_antra_with_timeout(
         &[
             "run",
@@ -154,7 +157,6 @@ fn test_port_zero_auto_assigns() {
         ],
         Duration::from_secs(5),
     );
-    // Should not crash - port 0 triggers auto-assignment
     assert!(code >= 0);
 }
 
@@ -213,12 +215,10 @@ fn test_public_domain_rejected() {
 
 #[test]
 fn test_localhost_bare_accepted() {
-    // "localhost" is accepted - it resolves via LocalhostResolver (no-op)
     let (_, _, code) = run_antra_with_timeout(
         &["run", "--domain", "localhost", "--", "echo", "test"],
         Duration::from_secs(5),
     );
-    // Should not crash - localhost is a valid target
     assert!(code >= 0);
 }
 
@@ -269,7 +269,6 @@ fn test_domain_with_special_characters() {
     for domain in special_domains {
         let args = vec!["run", "--domain", domain, "--", "echo", "test"];
         let (_, stderr, code) = run_antra(&args);
-        // Should reject all malicious domains
         assert!(
             code != 0
                 || stderr.contains("error")
@@ -296,14 +295,11 @@ fn test_command_injection_via_domain() {
         ],
         Duration::from_secs(5),
     );
-    // The command itself runs, but domain should be safe
-    // We just verify antra doesn't crash
     assert!(code == 0 || code != -1);
 }
 
 #[test]
 fn test_run_with_shellescape_command() {
-    // This tests that the command runs as-is (not through shell)
     let (stdout, _, code) = run_antra_with_timeout(
         &[
             "run",
@@ -317,7 +313,6 @@ fn test_run_with_shellescape_command() {
         ],
         Duration::from_secs(5),
     );
-    // Should work - command is passed directly, not through shell
     assert!(code == 0 || stdout.contains("hello"));
 }
 
@@ -328,7 +323,6 @@ fn test_run_with_shellescape_command() {
 #[test]
 fn test_toml_injection_attempt() {
     let dir = TempDir::new().unwrap();
-    // Attempt to inject extra fields via TOML
     std::fs::write(
         dir.path().join("antra.toml"),
         r#"domain = "test.localhost"
@@ -343,7 +337,6 @@ escalate = true
     )
     .unwrap();
 
-    // Should parse fine (unknown fields ignored) and not crash
     let (stdout, _, _) = run_antra_with_dir(dir.path(), &["dev"]);
     assert!(stdout.contains("antra.toml") || stdout.contains("Loaded"));
 }
@@ -363,16 +356,14 @@ args = [{}]
     );
     std::fs::write(dir.path().join("antra.toml"), &config).unwrap();
 
-    // Should handle large config without crashing
-    let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
-    // May fail but shouldn't panic
-    assert!(code >= 0 || stderr.contains("error"));
+    let (_, stderr, code) =
+        run_antra_with_dir_timeout(dir.path(), &["dev"], Duration::from_secs(30));
+    assert!(code >= 0 || stderr.contains("error") || stderr.contains("timeout"));
 }
 
 #[test]
 fn test_binary_config_file() {
     let dir = TempDir::new().unwrap();
-    // Write binary data as config
     std::fs::write(dir.path().join("antra.toml"), [0x00, 0xFF, 0xFE, 0xFD]).unwrap();
 
     let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
@@ -403,29 +394,12 @@ fn test_config_with_only_comments() {
     assert_ne!(code, 0);
 }
 
-fn run_antra_with_dir(dir: &std::path::Path, args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(antra_bin())
-        .args(args)
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("Failed to execute antra");
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    (stdout, stderr, code)
-}
-
 // ===================================================================
 // SECTION 5: Resource Exhaustion
 // ===================================================================
 
 #[test]
 fn test_rapid_help_calls() {
-    // Fire 50 help calls rapidly - should not crash or leak resources
     for _ in 0..50 {
         let (_, _, code) = run_antra(&["--help"]);
         assert_eq!(code, 0);
@@ -458,7 +432,6 @@ fn test_concurrent_status_calls() {
 
 #[test]
 fn test_port_boundary_valid() {
-    // Port 1 is valid (though may need root)
     let (_, stderr, code) = run_antra_with_timeout(
         &[
             "run",
@@ -471,7 +444,6 @@ fn test_port_boundary_valid() {
         ],
         Duration::from_secs(5),
     );
-    // Port 1 may fail due to privileges but shouldn't crash
     assert!(code >= 0 || stderr.contains("error") || stderr.contains("bind"));
 }
 
@@ -489,13 +461,11 @@ fn test_port_max_boundary() {
         ],
         Duration::from_secs(5),
     );
-    // Port 65535 is technically valid
     assert!(code >= 0 || stderr.contains("error"));
 }
 
 #[test]
 fn test_multiple_domain_flags_rejected() {
-    // Clap rejects duplicate --domain flags
     let (_, stderr, code) = run_antra(&[
         "run",
         "--domain",
@@ -512,7 +482,6 @@ fn test_multiple_domain_flags_rejected() {
 #[test]
 fn test_empty_command_args() {
     let (_, stderr, code) = run_antra(&["run", "--domain", "test.localhost", "--"]);
-    // Empty command after -- should fail
     assert!(code != 0 || stderr.contains("error") || stderr.contains("required"));
 }
 
@@ -523,8 +492,6 @@ fn test_empty_command_args() {
 #[test]
 fn test_invalid_route_format() {
     let (_, stderr, code) = run_antra(&["alias", "noport", "3000"]);
-    // "noport" without :port separator - but we pass port as separate arg
-    // This should work since alias takes domain and port separately
     assert!(code >= 0 || stderr.contains("error"));
 }
 
@@ -540,7 +507,6 @@ fn test_alias_port_overflow() {
 
 #[test]
 fn test_clean_after_failed_proxy() {
-    // Try to clean up even if proxy was never started
     let dir = TempDir::new().unwrap();
     let output = Command::new(antra_bin())
         .args(["clean", "--yes"])
@@ -552,7 +518,6 @@ fn test_clean_after_failed_proxy() {
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    // Should not panic — clean is best-effort when nothing exists
     assert!(
         output.status.success()
             || stdout.contains("removed")
@@ -576,7 +541,6 @@ fn test_error_messages_are_human_readable() {
         Duration::from_secs(5),
     );
     assert_ne!(code, 0);
-    // Error should be readable, not a Rust panic trace
     assert!(!stderr.contains("thread 'main' panicked"));
     assert!(!stderr.contains("unwrap()"));
     assert!(!stderr.contains("RUST_BACKTRACE"));

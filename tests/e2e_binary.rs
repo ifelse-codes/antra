@@ -1,44 +1,93 @@
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use tempfile::TempDir;
 
 fn antra_bin() -> String {
     let mut path = std::env::current_exe().unwrap();
-    path.pop(); // remove test binary name
-    path.pop(); // remove deps
+    path.pop();
+    path.pop();
     path.push("antra");
+    #[cfg(target_os = "windows")]
+    path.set_extension("exe");
     path.to_string_lossy().to_string()
 }
 
 fn run_antra(args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(antra_bin())
+    run_antra_with_timeout(args, Duration::from_secs(10))
+}
+
+fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
+    let mut child = Command::new(antra_bin())
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .spawn()
         .expect("Failed to execute antra");
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    (stdout, stderr, code)
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                return (stdout, stderr, status.code().unwrap_or(-1));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return (String::new(), "timeout".to_string(), -1);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                return (String::new(), format!("{e}"), -1);
+            }
+        }
+    }
 }
 
 fn run_antra_with_dir(dir: &std::path::Path, args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(antra_bin())
+    run_antra_with_dir_timeout(dir, args, Duration::from_secs(10))
+}
+
+fn run_antra_with_dir_timeout(
+    dir: &std::path::Path,
+    args: &[&str],
+    timeout: Duration,
+) -> (String, String, i32) {
+    let mut child = Command::new(antra_bin())
         .args(args)
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .spawn()
         .expect("Failed to execute antra");
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    (stdout, stderr, code)
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                return (stdout, stderr, status.code().unwrap_or(-1));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return (String::new(), "timeout".to_string(), -1);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                return (String::new(), format!("{e}"), -1);
+            }
+        }
+    }
 }
 
 // ===================================================================
@@ -110,7 +159,6 @@ fn test_unknown_subcommand() {
 #[test]
 fn test_proxy_status_when_not_running() {
     let (stdout, _, _) = run_antra(&["proxy", "status"]);
-    // May show "not running" or may show error depending on format
     assert!(
         stdout.contains("not running")
             || stdout.contains("Daemon")
@@ -123,7 +171,6 @@ fn test_proxy_status_when_not_running() {
 fn test_proxy_stop_when_not_running() {
     let (stdout, stderr, _) = run_antra(&["proxy", "stop"]);
     let combined = format!("{stdout}{stderr}");
-    // Accepts "not running", "Daemon stopped", or "Daemon not running"
     assert!(
         combined.contains("not running")
             || combined.contains("Daemon stopped")
@@ -161,8 +208,6 @@ port = 3456
     .unwrap();
 
     let (stdout, _, _code) = run_antra_with_dir(dir.path(), &["dev"]);
-    // Command will fail because daemon isn't running on privileged ports,
-    // but it should at least load the config
     let output = stdout;
     assert!(output.contains("antra.toml") || output.contains("Loaded"));
 }
@@ -183,7 +228,6 @@ port = 3456
     .unwrap();
 
     let (stdout, _, _) = run_antra_with_dir(dir.path(), &["dev", "--domain", "override.localhost"]);
-    // Should use overridden domain
     let output = stdout;
     assert!(output.contains("override.localhost") || output.contains("antra.toml"));
 }
@@ -224,7 +268,6 @@ command = "echo"
 #[test]
 fn test_list_when_daemon_not_running() {
     let (stdout, _, _) = run_antra(&["list"]);
-    // Shows "⚠ Daemon not running" in stdout
     assert!(
         stdout.contains("not running")
             || stdout.contains("ACTIVE ROUTES")
@@ -240,7 +283,6 @@ fn test_list_when_daemon_not_running() {
 #[test]
 fn test_doctor_runs_without_panic() {
     let (stdout, _stderr, code) = run_antra(&["doctor"]);
-    // Doctor should always complete (may have warnings but shouldn't crash)
     assert!(stdout.contains("ANTRA DOCTOR") || stdout.contains("Checking") || code == 0);
 }
 
@@ -263,7 +305,6 @@ fn test_doctor_checks_ports() {
 #[test]
 fn test_clean_cancels_on_no() {
     let dir = TempDir::new().unwrap();
-    // Write "n" to stdin to cancel
     let mut child = Command::new(antra_bin())
         .args(["clean"])
         .current_dir(dir.path())
@@ -280,7 +321,6 @@ fn test_clean_cancels_on_no() {
 
     let output = child.wait_with_output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    // Should show cancelled
     assert!(stdout.contains("Cancelled") || stdout.contains("cancel") || !output.status.success());
 }
 
@@ -291,7 +331,6 @@ fn test_clean_cancels_on_no() {
 #[test]
 fn test_alias_requires_daemon() {
     let (stdout, _, _) = run_antra(&["alias", "test.localhost", "3000"]);
-    // Shows "⚠ Daemon not running" in stdout, exit 0
     assert!(
         stdout.contains("daemon")
             || stdout.contains("running")
@@ -308,7 +347,6 @@ fn test_alias_requires_daemon() {
 #[test]
 fn test_remove_requires_daemon() {
     let (stdout, _, _) = run_antra(&["remove", "test.localhost"]);
-    // Shows "Removing route" or "Route removed" in stdout, exit 0
     assert!(
         stdout.contains("daemon")
             || stdout.contains("running")
@@ -323,8 +361,6 @@ fn test_remove_requires_daemon() {
 
 #[test]
 fn test_open_doesnt_panic() {
-    // open tries to open browser - should not crash even if browser isn't available
     let (stdout, _, code) = run_antra(&["open", "test.localhost"]);
-    // It may fail to open browser but shouldn't panic
     assert!(code == 0 || stdout.contains("error") || code != -1);
 }
