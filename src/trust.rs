@@ -73,10 +73,7 @@ pub fn install_ca() -> Result<()> {
             eprintln!("{}", "  ✗ Elevated privileges required.".red());
             eprintln!("    {detail}");
             eprintln!();
-            eprintln!(
-                "    Try: {}",
-                "sudo antra trust".bold()
-            );
+            eprintln!("    Try: {}", "sudo antra trust".bold());
             eprintln!("    Or install manually to your login keychain:");
             eprintln!("      security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db <ca.pem>");
             anyhow::bail!("Elevation required to install CA")
@@ -87,10 +84,7 @@ pub fn install_ca() -> Result<()> {
                 "  ✗ Interactive authentication required (macOS GUI prompt).".red()
             );
             eprintln!("    This command needs a terminal with GUI access.");
-            eprintln!(
-                "    Try: {}",
-                "sudo antra trust".bold()
-            );
+            eprintln!("    Try: {}", "sudo antra trust".bold());
             anyhow::bail!("Interactive auth required")
         }
         Err(os_truststore::TrustError::StoreToolMissing { hint }) => {
@@ -129,9 +123,8 @@ pub fn install_ca_noninteractive() -> Result<()> {
     }
 
     // Try default install (may work without elevation on some systems)
-    match os_truststore::install(&os_cert) {
-        Ok(_) => return Ok(()),
-        _ => {}
+    if os_truststore::install(&os_cert).is_ok() {
+        return Ok(());
     }
 
     anyhow::bail!(
@@ -184,7 +177,7 @@ pub fn install_ca_user_level() -> Result<()> {
                     "    {}",
                     "No sudo required. HTTPS for custom domains is ready.".dimmed()
                 );
-                return Ok(());
+                Ok(())
             }
             Ok(s) => {
                 anyhow::bail!(
@@ -207,10 +200,7 @@ pub fn install_ca_user_level() -> Result<()> {
             "{}",
             "  User-level trust install is only supported on macOS.".yellow()
         );
-        println!(
-            "  On this platform, try: {}",
-            "sudo antra trust".bold()
-        );
+        println!("  On this platform, try: {}", "sudo antra trust".bold());
         anyhow::bail!("User-level trust install not supported on this platform")
     }
 }
@@ -265,10 +255,7 @@ pub fn remove_ca() -> Result<()> {
             eprintln!("{}", "  ✗ Elevated privileges required.".red());
             eprintln!("    {detail}");
             eprintln!();
-            eprintln!(
-                "    Try: {}",
-                "sudo antra trust --remove".bold()
-            );
+            eprintln!("    Try: {}", "sudo antra trust --remove".bold());
             anyhow::bail!("Elevation required to remove CA")
         }
         Err(os_truststore::TrustError::InteractiveAuthRequired) => {
@@ -277,10 +264,7 @@ pub fn remove_ca() -> Result<()> {
                 "  ✗ Interactive authentication required (macOS GUI prompt).".red()
             );
             eprintln!("    This command needs a terminal with GUI access.");
-            eprintln!(
-                "    Try: {}",
-                "sudo antra trust --remove".bold()
-            );
+            eprintln!("    Try: {}", "sudo antra trust --remove".bold());
             anyhow::bail!("Interactive auth required")
         }
         Err(e) => {

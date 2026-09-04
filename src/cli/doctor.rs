@@ -146,8 +146,7 @@ pub fn execute() -> Result<()> {
                             "⚠".yellow().bold(),
                             format!("Port {port} ({name}) in use by another process").yellow()
                         );
-                        warnings
-                            .push(format!("Port {port} ({name}) in use by another process"));
+                        warnings.push(format!("Port {port} ({name}) in use by another process"));
                         if port == 443 {
                             issues.push((
                                 format!("Port {port} ({name}) in use"),
@@ -170,10 +169,7 @@ pub fn execute() -> Result<()> {
         // Build summary line
         let mut parts = Vec::new();
         if error_count > 0 {
-            parts.push(format!(
-                "{} error(s)",
-                error_count.to_string().red().bold()
-            ));
+            parts.push(format!("{} error(s)", error_count.to_string().red().bold()));
         }
         if warning_count > 0 {
             parts.push(format!(

@@ -101,7 +101,6 @@ async fn test_concurrent_connections() {
 
     let mut handles = vec![];
     for i in 0..5 {
-        let addr = addr;
         handles.push(tokio::spawn(async move {
             let response = send_raw_request(
                 addr,

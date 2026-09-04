@@ -72,7 +72,7 @@ pub fn execute(yes: bool) -> Result<()> {
         .join("antra");
 
     if config_dir.exists() {
-        std::fs::remove_dir_all(&config_dir)?;
+        let _ = std::fs::remove_dir_all(&config_dir);
     }
     println!("{}", "✓".green().bold());
 

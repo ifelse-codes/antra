@@ -61,8 +61,9 @@ pub fn run_http_redirect(listener: TcpListener) {
                     Ok::<_, anyhow::Error>(response)
                 });
 
-                let builder =
-                    hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+                let builder = hyper_util::server::conn::auto::Builder::new(
+                    hyper_util::rt::TokioExecutor::new(),
+                );
                 let conn = builder.serve_connection(io, service);
 
                 if let Err(e) = conn.await {

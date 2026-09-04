@@ -150,7 +150,11 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
             80 => 8080,
             p => p + 1000,
         };
-        tracing::warn!(port = http_port, "HTTP port in use, trying fallback {}", fallback);
+        tracing::warn!(
+            port = http_port,
+            "HTTP port in use, trying fallback {}",
+            fallback
+        );
         if crate::proxy::https::probe_port(fallback).await.is_ok() {
             actual_http_port = fallback;
             http_ok = true;
@@ -179,7 +183,9 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         let https_cert_cache = Arc::clone(&cert_cache);
         let port = https_port;
         tokio::spawn(async move {
-            if let Err(e) = crate::proxy::https::start_server(port, https_registry, https_cert_cache).await {
+            if let Err(e) =
+                crate::proxy::https::start_server(port, https_registry, https_cert_cache).await
+            {
                 tracing::error!(error = %e, "HTTPS server failed");
             }
         });
@@ -188,7 +194,11 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
             443 => 8443,
             p => p + 1000,
         };
-        tracing::warn!(port = https_port, "HTTPS port in use, trying fallback {}", fallback);
+        tracing::warn!(
+            port = https_port,
+            "HTTPS port in use, trying fallback {}",
+            fallback
+        );
         if crate::proxy::https::probe_port(fallback).await.is_ok() {
             actual_https_port = fallback;
             https_ok = true;

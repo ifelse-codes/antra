@@ -29,9 +29,7 @@ fn main() -> Result<()> {
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
     };
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     cli.execute()
 }

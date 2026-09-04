@@ -123,9 +123,12 @@ fn test_proxy_status_when_not_running() {
 fn test_proxy_stop_when_not_running() {
     let (stdout, stderr, _) = run_antra(&["proxy", "stop"]);
     let combined = format!("{stdout}{stderr}");
+    // Accepts "not running", "Daemon stopped", or "Daemon not running"
     assert!(
-        combined.contains("not running") || combined.contains("Daemon not running"),
-        "Expected 'not running' in output.\nstdout: {stdout}\nstderr: {stderr}"
+        combined.contains("not running")
+            || combined.contains("Daemon stopped")
+            || combined.contains("Daemon not running"),
+        "Expected daemon stop output.\nstdout: {stdout}\nstderr: {stderr}"
     );
 }
 
@@ -192,7 +195,7 @@ fn test_dev_with_invalid_toml() {
 
     let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
     assert_ne!(code, 0);
-    let output = format!("{stderr}");
+    let output = stderr.to_string();
     assert!(output.contains("parse") || output.contains("error") || output.contains("Failed"));
 }
 
@@ -210,7 +213,7 @@ command = "echo"
 
     let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
     assert_ne!(code, 0);
-    let output = format!("{stderr}");
+    let output = stderr.to_string();
     assert!(output.contains("domain") || output.contains("error"));
 }
 

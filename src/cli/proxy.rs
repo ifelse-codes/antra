@@ -93,8 +93,7 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     // Daemon never reported ready — check if process died
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     if !is_pid_alive(child_pid) {
-                        let log_contents = std::fs::read_to_string(&log_path)
-                            .unwrap_or_default();
+                        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
                         let tail = log_contents
                             .lines()
                             .rev()
@@ -116,8 +115,7 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
 
                 // Daemon is listening — now verify PID is actually alive
                 if !is_pid_alive(child_pid) {
-                    let log_contents = std::fs::read_to_string(&log_path)
-                        .unwrap_or_default();
+                    let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
                     let tail = log_contents
                         .lines()
                         .rev()
@@ -208,11 +206,7 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 }
 
                 println!();
-                println!(
-                    "  {} Log file: {}",
-                    "ℹ".cyan(),
-                    log_path.display()
-                );
+                println!("  {} Log file: {}", "ℹ".cyan(), log_path.display());
                 println!();
                 return Ok(());
             }
