@@ -1,2 +1,4 @@
 /target
 .lyzo/
+.wrangler/
+landing/.wrangler/

@@ -274,6 +274,7 @@ pub use unix_server::start_ipc_server;
 pub use windows_server::start_ipc_server;
 
 fn handle_register_route(req: RegisterRouteRequest, registry: &RouteRegistry) -> IpcMessage {
+    tracing::debug!(domain = %req.domain, port = req.port, "Registering route");
     let route = Route {
         domain: req.domain.clone(),
         host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
@@ -294,6 +295,7 @@ fn handle_register_route(req: RegisterRouteRequest, registry: &RouteRegistry) ->
 }
 
 fn handle_unregister_route(req: UnregisterRouteRequest, registry: &RouteRegistry) -> IpcMessage {
+    tracing::debug!(domain = %req.domain, "Unregistering route");
     match registry.unregister(&req.domain) {
         Ok(()) => IpcMessage::new(IpcPayload::Ok(OkResponse {
             message: format!("Route unregistered: {}", req.domain),

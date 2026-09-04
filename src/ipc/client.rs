@@ -121,3 +121,13 @@ pub fn get_startup_status() -> Result<StartupStatus> {
         other => Err(anyhow::anyhow!("Unexpected response: {other:?}")),
     }
 }
+
+/// Async version of get_startup_status for use inside tokio runtimes.
+pub async fn get_startup_status_async() -> Result<StartupStatus> {
+    let resp = send_command(IpcPayload::GetStartupStatus).await?;
+    match resp.payload {
+        IpcPayload::StartupStatusResponse(status) => Ok(status),
+        IpcPayload::Error(err) => Err(anyhow::anyhow!("{}", err.message)),
+        other => Err(anyhow::anyhow!("Unexpected response: {other:?}")),
+    }
+}

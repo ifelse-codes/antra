@@ -13,6 +13,7 @@ pub fn execute() -> Result<()> {
     println!();
 
     let mut issues: Vec<(String, String)> = Vec::new(); // (issue, fix_command)
+    let mut warnings: Vec<String> = Vec::new(); // warning messages
 
     // 1. Check CA generation
     match CertStore::new() {
@@ -66,6 +67,7 @@ pub fn execute() -> Result<()> {
                 "?".yellow().bold(),
                 format!("Could not check trust status: {e}").yellow()
             );
+            warnings.push(format!("Could not check trust status: {e}"));
         }
     }
 
@@ -110,6 +112,7 @@ pub fn execute() -> Result<()> {
             "⚠".yellow().bold(),
             "Proxy daemon not running".yellow()
         );
+        warnings.push("Proxy daemon not running".to_string());
         issues.push((
             "Proxy daemon not running".to_string(),
             "antra proxy start".to_string(),
@@ -143,6 +146,8 @@ pub fn execute() -> Result<()> {
                             "⚠".yellow().bold(),
                             format!("Port {port} ({name}) in use by another process").yellow()
                         );
+                        warnings
+                            .push(format!("Port {port} ({name}) in use by another process"));
                         if port == 443 {
                             issues.push((
                                 format!("Port {port} ({name}) in use"),
@@ -156,14 +161,38 @@ pub fn execute() -> Result<()> {
     }
 
     println!();
-    if issues.is_empty() {
+    let error_count = issues.len();
+    let warning_count = warnings.len();
+
+    if error_count == 0 && warning_count == 0 {
         println!("  {}", "Everything looks good!".green().bold());
     } else {
-        println!(
-            "  {} issue(s) found:",
-            issues.len().to_string().red().bold()
-        );
+        // Build summary line
+        let mut parts = Vec::new();
+        if error_count > 0 {
+            parts.push(format!(
+                "{} error(s)",
+                error_count.to_string().red().bold()
+            ));
+        }
+        if warning_count > 0 {
+            parts.push(format!(
+                "{} warning(s)",
+                warning_count.to_string().yellow().bold()
+            ));
+        }
+        println!("  {} found:", parts.join(", "));
         println!();
+
+        // Print warnings first (non-blocking)
+        for warning in &warnings {
+            println!("  {} {}", "⚠".yellow(), warning.yellow());
+        }
+        if !warnings.is_empty() && !issues.is_empty() {
+            println!();
+        }
+
+        // Print errors (blocking issues)
         for (issue, fix) in &issues {
             println!("  {} {}", "•".red(), issue.red());
             println!("    {} {}", "→".cyan(), fix.cyan());
@@ -192,6 +221,14 @@ pub fn execute() -> Result<()> {
     }
 
     println!();
+
+    // Exit with appropriate code: 0=clean, 1=warnings only, 2=errors
+    if error_count > 0 {
+        std::process::exit(2);
+    } else if warning_count > 0 {
+        std::process::exit(1);
+    }
+
     Ok(())
 }
 
@@ -241,23 +278,20 @@ fn is_antra_daemon_port(port: u16) -> bool {
             use nix::sys::signal::kill;
             use nix::unistd::Pid;
             if kill(Pid::from_raw(pid as i32), None).is_ok() {
-                return check_port_holder(pid, port);
+                // Process is alive — check if it holds the port via /proc or lsof with timeout
+                return check_port_holder_with_timeout(pid, port);
             }
         }
     }
     false
 }
 
-#[cfg(not(unix))]
-fn is_antra_daemon_port(_port: u16) -> bool {
-    false
-}
-
-/// Check if a specific PID holds a port.
+/// Check if a PID holds a port, with a timeout to avoid hanging.
 #[cfg(unix)]
-fn check_port_holder(pid: u32, port: u16) -> bool {
-    // Use lsof to check if the PID holds the port
-    let output = std::process::Command::new("lsof")
+fn check_port_holder_with_timeout(pid: u32, port: u16) -> bool {
+    use std::process::Command;
+
+    let output = Command::new("lsof")
         .args([
             "-p",
             &pid.to_string(),
@@ -266,10 +300,17 @@ fn check_port_holder(pid: u32, port: u16) -> bool {
             "-n",
             "-P",
         ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .output();
 
     match output {
         Ok(o) => o.status.success() && !o.stdout.is_empty(),
         Err(_) => false,
     }
+}
+
+#[cfg(not(unix))]
+fn is_antra_daemon_port(_port: u16) -> bool {
+    false
 }
