@@ -124,8 +124,6 @@ fn install_launchd() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn install_systemd() -> Result<()> {
-    use std::path::PathBuf;
-
     let home_dir =
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let config_dir = home_dir.join(".config/antra");

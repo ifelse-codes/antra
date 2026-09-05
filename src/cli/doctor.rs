@@ -196,7 +196,10 @@ pub fn execute() -> Result<()> {
         println!();
 
         // Offer auto-fix (only if stdin is a TTY)
+        #[cfg(unix)]
         let is_tty = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
+        #[cfg(not(unix))]
+        let is_tty = true; // On Windows, assume TTY for simplicity
         if is_tty {
             print!("  {} ", "Auto-fix all issues? [y/N]".yellow().bold());
             use std::io::Write;
