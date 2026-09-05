@@ -118,14 +118,57 @@ pub fn detect_port_from_command(command: &[String]) -> Option<u16> {
 
     // 4. Ruby: rackup, rails server, etc.
     if joined.contains("rackup") || joined.contains("rails server") {
-        if let Some(rest) = joined.strip_prefix("-p ") {
-            if let Ok(port) = rest.trim().parse::<u16>() {
-                return Some(port);
+        // Look for -p PORT flag in command args
+        for i in 0..command.len() {
+            if command[i] == "-p" && i + 1 < command.len() {
+                if let Ok(port) = command[i + 1].parse::<u16>() {
+                    return Some(port);
+                }
+            }
+            if let Some(rest) = command[i].strip_prefix("-p=") {
+                if let Ok(port) = rest.parse::<u16>() {
+                    return Some(port);
+                }
             }
         }
     }
 
-    // 5. Go: air, gin, etc. — typically use --port already handled above
+    // 5. Django: python manage.py runserver [PORT]
+    if joined.contains("manage.py") && joined.contains("runserver") {
+        // Django port is the last numeric arg after runserver
+        if let Some(pos) = command.iter().position(|a| a == "runserver") {
+            for arg in command.iter().skip(pos + 1) {
+                if let Ok(port) = arg.parse::<u16>() {
+                    return Some(port);
+                }
+                // Stop if we hit a flag (skip non-numeric args like --noreload)
+                if arg.starts_with('-') {
+                    break;
+                }
+            }
+        }
+    }
+
+    // 6. npm scripts forwarding: npm run dev -- --port PORT
+    if joined.contains("npm") && joined.contains("--") {
+        // Look for --port after the -- separator
+        if let Some(dash_pos) = command.iter().position(|a| a == "--") {
+            for i in (dash_pos + 1)..command.len() {
+                if (command[i] == "--port" || command[i] == "-p") && i + 1 < command.len() {
+                    if let Ok(port) = command[i + 1].parse::<u16>() {
+                        return Some(port);
+                    }
+                }
+                if let Some(rest) = command[i].strip_prefix("--port=") {
+                    if let Ok(port) = rest.parse::<u16>() {
+                        return Some(port);
+                    }
+                }
+            }
+        }
+    }
+
+    // 7. Go: air, gin, etc. — typically use --port already handled above
 
     None
 }
