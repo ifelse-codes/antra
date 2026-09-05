@@ -115,7 +115,7 @@ pub async fn start_server(
             let tls_stream = match acceptor.accept(stream).await {
                 Ok(ts) => ts,
                 Err(e) => {
-                    tracing::error!(%remote_addr, error = %e, "TLS handshake failed");
+                    tracing::error!(%remote_addr, error = %e, "TLS handshake failed — this usually means no certificate is available for the requested SNI hostname");
                     return;
                 }
             };

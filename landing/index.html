@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antra — Stable HTTPS domains for local development</title>
+<meta name="description" content="One command. Real HTTPS. Your app at myapp.localhost. No ports, no hosts edits, no browser warnings.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0A0A0C;--bg-recessed:#0D0D11;--bg-card:#121217;--bg-elevated:#16161C;
+  --text-heading:#ECECEF;--text-body:#A4A4AE;--text-muted:#6A6A75;
+  --violet:#8B7CF6;--violet-bright:#B7AEFF;--violet-fill:rgba(139,124,246,0.12);--violet-hairline:rgba(139,124,246,0.28);
+  --line:rgba(255,255,255,0.075);--line-strong:rgba(255,255,255,0.14);
+  --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',monospace;
+  --max-w:1080px;--pad:28px;--pad-m:20px;
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{background:var(--bg);color:var(--text-body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+
+/* ── Mandala ──────────────────────────────────────── */
+.mandala{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;opacity:0.028}
+.mandala svg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:140vmax;height:140vmax;animation:mandala-spin 240s linear infinite}
+@keyframes mandala-spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.mandala svg{animation:none}}
+
+/* ── Nav ──────────────────────────────────────────── */
+nav{position:sticky;top:0;z-index:100;background:rgba(10,10,12,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad);height:56px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--text-heading);letter-spacing:-0.02em}
+.nav-logo span{color:var(--violet)}
+.nav-links{display:flex;gap:34px;align-items:center}
+.nav-links a{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);transition:color 0.3s}
+.nav-links a:hover{color:var(--text-heading)}
+.nav-cta{background:transparent;border:1px solid var(--violet);color:var(--violet);padding:6px 16px;border-radius:6px;font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.14em;cursor:pointer;transition:all 0.3s}
+.nav-cta:hover{background:var(--violet);color:var(--bg)}
+
+/* ── Container ────────────────────────────────────── */
+.container{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad)}
+section{position:relative;z-index:1}
+
+/* ── Eyebrow ──────────────────────────────────────── */
+.eyebrow{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.eyebrow::before{content:'◆';color:var(--violet);font-size:8px}
+
+/* ── Hero ─────────────────────────────────────────── */
+.hero{padding:120px 0 104px;text-align:center}
+.hero h1{font-size:clamp(2.4rem,5.5vw,4.2rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.035em;line-height:1.1;margin-bottom:20px;max-width:18ch;margin-left:auto;margin-right:auto}
+.hero h1 em{font-style:normal;color:var(--violet-bright)}
+.hero-sub{font-size:16px;color:var(--text-body);max-width:52ch;margin:0 auto 48px;line-height:1.6}
+
+/* ── Install Block ────────────────────────────────── */
+.install-block{background:var(--bg-card);border:1px solid var(--line);border-radius:6px;padding:24px;max-width:580px;margin:0 auto 20px}
+.install-label{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);margin-bottom:12px}
+.install-cmd{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px 16px;cursor:pointer;transition:border-color 0.3s}
+.install-cmd:hover{border-color:var(--violet-hairline)}
+.install-cmd code{font-family:var(--font-mono);font-size:13px;color:var(--violet);user-select:all;flex:1;text-align:left}
+.copy-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:4px;transition:color 0.3s;text-transform:uppercase;letter-spacing:0.1em}
+.copy-btn:hover{color:var(--violet)}
+.hero-alt{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:16px}
+.hero-alt code{color:var(--text-body)}
+
+/* ── Hairline Divider ─────────────────────────────── */
+.divider{border:none;border-top:1px solid var(--line);margin:0}
+
+/* ── Problem / Solution ───────────────────────────── */
+.problem{padding:104px 0}
+.problem-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:40px}
+.problem-cell{background:var(--bg-card);padding:32px}
+.problem-cell.muted{background:var(--bg-recessed)}
+.problem-cell h3{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);margin-bottom:16px}
+.problem-cell h3::before{content:'→ ';color:var(--violet)}
+.problem-cell:not(.muted) h3::before{content:'✓ '}
+.problem-cell ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+.problem-cell li{font-size:14px;color:var(--text-body);display:flex;align-items:baseline;gap:8px}
+.problem-cell li::before{content:'—';color:var(--text-muted);flex-shrink:0}
+.problem-cell.muted li{color:var(--text-muted);text-decoration:line-through;text-decoration-color:rgba(255,255,255,0.15)}
+
+/* ── Features ─────────────────────────────────────── */
+.features{padding:104px 0}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:40px}
+.feature-card{background:var(--bg-card);padding:32px;transition:transform 0.3s,border-color 0.3s}
+.feature-card:hover{transform:translateY(-2px);border-color:var(--line-strong)}
+.feature-index{font-family:var(--font-mono);font-size:11px;color:var(--violet);margin-bottom:12px}
+.feature-card h3{font-size:16px;font-weight:600;color:var(--text-heading);letter-spacing:-0.025em;margin-bottom:8px}
+.feature-card p{font-size:13.5px;color:var(--text-muted);line-height:1.5}
+
+/* ── Architecture ─────────────────────────────────── */
+.architecture{padding:104px 0}
+.arch-diagram{background:var(--bg-card);border:1px solid var(--line);border-radius:6px;padding:40px;margin-top:40px;font-family:var(--font-mono);font-size:13px;line-height:1.7;color:var(--text-muted);overflow-x:auto;white-space:pre}
+.arch-diagram .highlight{color:var(--violet)}
+.arch-diagram .label{color:var(--text-heading)}
+
+/* ── Code Example ─────────────────────────────────── */
+.code-section{padding:104px 0}
+.code-block{background:var(--bg-card);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:40px}
+.code-header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--line)}
+.code-header span{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted)}
+.code-dots{display:flex;gap:6px}
+.code-dots span{width:10px;height:10px;border-radius:50%;background:var(--line-strong)}
+.code-body{padding:24px;font-family:var(--font-mono);font-size:13px;line-height:1.8;color:var(--text-body);overflow-x:auto}
+.code-body .prompt{color:var(--text-muted)}
+.code-body .cmd{color:var(--violet)}
+.code-body .output{color:var(--text-muted)}
+.code-body .success{color:#4ade80}
+
+/* ── Comparison ───────────────────────────────────── */
+.comparison{padding:104px 0}
+.comparison-table{width:100%;border-collapse:collapse;margin-top:40px;font-size:13.5px}
+.comparison-table th,.comparison-table td{padding:14px 20px;text-align:left;border-bottom:1px solid var(--line)}
+.comparison-table th{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);font-weight:400}
+.comparison-table td{color:var(--text-body)}
+.comparison-table td:first-child{color:var(--text-heading);font-weight:500}
+.comparison-table tr:last-child td{border-bottom:none}
+.comparison-table .check{color:var(--violet)}
+.comparison-table .cross{color:var(--text-muted);opacity:0.4}
+.comparison-table .highlight-row td{background:var(--violet-fill)}
+
+/* ── CTA ──────────────────────────────────────────── */
+.cta{padding:104px 0;text-align:center}
+.cta h2{font-size:clamp(1.8rem,4vw,2.8rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;margin-bottom:16px}
+.cta p{font-size:15px;color:var(--text-muted);margin-bottom:40px;max-width:48ch;margin-left:auto;margin-right:auto}
+.cta-buttons{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn-primary{background:var(--violet);color:var(--bg);padding:10px 24px;border-radius:6px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:0.14em;border:none;cursor:pointer;transition:opacity 0.3s}
+.btn-primary:hover{opacity:0.85}
+.btn-secondary{background:transparent;color:var(--text-heading);padding:10px 24px;border-radius:6px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:0.14em;border:1px solid var(--line-strong);cursor:pointer;transition:border-color 0.3s}
+.btn-secondary:hover{border-color:var(--violet-hairline)}
+
+/* ── Footer ───────────────────────────────────────── */
+footer{border-top:1px solid var(--line);padding:48px 0}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
+.footer-left{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.22em}
+.footer-links{display:flex;gap:24px}
+.footer-links a{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.14em;transition:color 0.3s}
+.footer-links a:hover{color:var(--violet)}
+
+/* ── Reveal Animation ─────────────────────────────── */
+.reveal{opacity:0;transform:translateY(18px);transition:opacity 0.7s cubic-bezier(0.22,0.61,0.36,1),transform 0.7s cubic-bezier(0.22,0.61,0.36,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+
+/* ── Focus ────────────────────────────────────────── */
+:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+
+/* ── Mobile ───────────────────────────────────────── */
+@media(max-width:768px){
+  :root{--pad:var(--pad-m)}
+  .nav-links a:not(.nav-cta){display:none}
+  .hero{padding:80px 0 64px}
+  .hero h1{font-size:clamp(1.8rem,7vw,2.8rem)}
+  .problem-grid,.features-grid{grid-template-columns:1fr}
+  .comparison-table{font-size:12px}
+  .comparison-table th,.comparison-table td{padding:10px 12px}
+  .cta-buttons{flex-direction:column;align-items:center}
+  .footer-inner{flex-direction:column;text-align:center}
+}
+</style>
+</head>
+<body>
+
+<!-- Mandala -->
+<div class="mandala" aria-hidden="true">
+<svg viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+<g fill="none" stroke="#8B7CF6" stroke-width="0.5">
+<circle cx="400" cy="400" r="380"/>
+<circle cx="400" cy="400" r="340"/>
+<circle cx="400" cy="400" r="300"/>
+<circle cx="400" cy="400" r="260"/>
+<circle cx="400" cy="400" r="220"/>
+<circle cx="400" cy="400" r="180"/>
+<circle cx="400" cy="400" r="140"/>
+<circle cx="400" cy="400" r="100"/>
+<circle cx="400" cy="400" r="60"/>
+<g stroke-width="0.3">
+<line x1="400" y1="20" x2="400" y2="780"/>
+<line x1="20" y1="400" x2="780" y2="400"/>
+<line x1="131" y1="131" x2="669" y2="669"/>
+<line x1="669" y1="131" x2="131" y2="669"/>
+<line x1="400" y1="20" x2="131" y2="669"/>
+<line x1="400" y1="20" x2="669" y2="669"/>
+<line x1="400" y1="780" x2="131" y2="131"/>
+<line x1="400" y1="780" x2="669" y2="131"/>
+<line x1="20" y1="400" x2="669" y2="131"/>
+<line x1="20" y1="400" x2="669" y2="669"/>
+<line x1="780" y1="400" x2="131" y2="131"/>
+<line x1="780" y1="400" x2="131" y2="669"/>
+</g>
+<polygon points="400,20 669,131 780,400 669,669 400,780 131,669 20,400 131,131" stroke-width="0.4"/>
+<polygon points="400,100 620,180 700,400 620,620 400,700 180,620 100,400 180,180" stroke-width="0.3"/>
+<polygon points="400,180 570,230 620,400 570,570 400,620 230,570 180,400 230,230" stroke-width="0.3"/>
+</g>
+</svg>
+</div>
+
+<!-- Nav -->
+<nav>
+<div class="nav-inner">
+  <div class="nav-logo"><span>a</span>ntra</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="https://github.com/ifelse-codes/antra">GitHub</a>
+    <a href="https://github.com/ifelse-codes/antra/blob/main/README.md">Docs</a>
+    <button class="nav-cta" onclick="document.getElementById('install').scrollIntoView({behavior:'smooth'})">Install</button>
+  </div>
+</div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+<div class="container">
+  <div class="eyebrow">Local development, upgraded</div>
+  <h1>Your app deserves a <em>real URL</em>, even on your laptop</h1>
+  <p class="hero-sub">Stable HTTPS domains for local development. No ports. No /etc/hosts. No certificate warnings. One command and you're there.</p>
+  <div class="install-block" id="install">
+    <div class="install-label">Install</div>
+    <div class="install-cmd" onclick="copyInstall(this)">
+      <code>curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash</code>
+      <button class="copy-btn" onclick="event.stopPropagation();copyInstall(this.parentElement)">copy</button>
+    </div>
+  </div>
+  <div class="hero-alt">or <code>brew install ifelse-codes/antra/antra</code></div>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- Problem -->
+<section class="problem">
+<div class="container">
+  <div class="eyebrow">The problem</div>
+  <h2 style="font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;max-width:20ch">Local development still looks like 2009.</h2>
+  <div class="problem-grid reveal">
+    <div class="problem-cell muted">
+      <h3>What you got</h3>
+      <ul>
+        <li>localhost:5173</li>
+        <li>A red lock and "proceed anyway"</li>
+        <li>A spreadsheet of ports</li>
+        <li>"This is not a secure context"</li>
+        <li>"wait, which port was auth on?"</li>
+      </ul>
+    </div>
+    <div class="problem-cell">
+      <h3>What you wanted</h3>
+      <ul>
+        <li>A real URL</li>
+        <li>HTTPS that just works</li>
+        <li>Multiple services, one address</li>
+        <li>Cookies, Service Workers, WebCrypto</li>
+        <li>A teammate can hit the same app</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- Features -->
+<section class="features" id="features">
+<div class="container">
+  <div class="eyebrow">Capabilities</div>
+  <h2 style="font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;max-width:18ch">Everything the workaround stack does, minus the work.</h2>
+  <div class="features-grid reveal">
+    <div class="feature-card">
+      <div class="feature-index">01</div>
+      <h3>One command</h3>
+      <p>antra run --domain myapp.localhost -- pnpm dev. That's it.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-index">02</div>
+      <h3>Real HTTPS</h3>
+      <p>Local CA, SNI certs, zero browser warnings. One-time trust, then forget.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-index">03</div>
+      <h3>No ports</h3>
+      <p>Visit https://myapp.localhost. No :5173. No :3000. Done.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-index">04</div>
+      <h3>HMR works</h3>
+      <p>Transparent WebSocket tunnel. Vite, Next, Rails, anything.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-index">05</div>
+      <h3>Multi-app routing</h3>
+      <p>Run antra run N times. Each app gets its own domain. The daemon handles it.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-index">06</div>
+      <h3>Project config</h3>
+      <p>Drop an antra.toml. Run antra dev. The whole team gets the same setup.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- How it works -->
+<section class="architecture" id="how-it-works">
+<div class="container">
+  <div class="eyebrow">Architecture</div>
+  <h2 style="font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;max-width:18ch">A daemon, a cert cache, and a route table. That's the whole system.</h2>
+  <div class="arch-diagram reveal"><span class="label">Browser</span>
+   │  https://myapp.localhost
+   ▼
+┌──────────────────────────────────────────┐
+│  <span class="highlight">Antra daemon</span>                            │
+│                                          │
+│  :80   HTTP → HTTPS redirect             │
+│  :443  TLS termination (SNI → leaf cert) │
+│                                          │
+│  Route table                             │
+│    myapp.localhost  →  127.0.0.1:5173    │
+│    api.localhost    →  127.0.0.1:8080    │
+└──────────────────────┬───────────────────┘
+                       │  X-Forwarded-*
+                       ▼
+                  <span class="label">Your process</span></div>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- Code -->
+<section class="code-section">
+<div class="container">
+  <div class="eyebrow">In practice</div>
+  <h2 style="font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;max-width:20ch">One command. A real URL. Your process unchanged.</h2>
+  <div class="code-block reveal">
+    <div class="code-header">
+      <span>Terminal</span>
+      <div class="code-dots"><span></span><span></span><span></span></div>
+    </div>
+    <div class="code-body">
+<span class="prompt">$</span> <span class="cmd">antra run --domain myapp.localhost -- pnpm dev</span>
+
+<span class="success">✓</span> Domain resolved: myapp.localhost
+<span class="success">✓</span> Proxy ready
+<span class="success">✓</span> HTTPS ready
+<span class="success">✓</span> Route registered
+
+  → <span class="highlight">https://myapp.localhost</span>
+    </div>
+  </div>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- Comparison -->
+<section class="comparison">
+<div class="container">
+  <div class="eyebrow">Comparison</div>
+  <h2 style="font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--text-heading);letter-spacing:-0.03em;max-width:22ch">Antra vs the usual suspects.</h2>
+  <table class="comparison-table reveal">
+    <thead>
+      <tr>
+        <th></th>
+        <th>localhost:port</th>
+        <th>mkcert + Caddy</th>
+        <th>ngrok</th>
+        <th>Antra</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Stable local domain</td>
+        <td class="cross">—</td>
+        <td>Manual</td>
+        <td>Random / paid</td>
+        <td class="check">.localhost / .test</td>
+      </tr>
+      <tr>
+        <td>HTTPS without warnings</td>
+        <td class="cross">—</td>
+        <td>Manual</td>
+        <td class="check">Yes</td>
+        <td class="check">antra trust once</td>
+      </tr>
+      <tr>
+        <td>Hosts file edits</td>
+        <td>n/a</td>
+        <td>You edit it</td>
+        <td class="check">No</td>
+        <td class="check">Only for .test</td>
+      </tr>
+      <tr>
+        <td>WebSocket / HMR</td>
+        <td class="check">Yes</td>
+        <td>Config-dependent</td>
+        <td class="check">Yes</td>
+        <td class="check">Transparent</td>
+      </tr>
+      <tr>
+        <td>Multi-app routing</td>
+        <td>DIY</td>
+        <td>Config file</td>
+        <td>Extra tunnels</td>
+        <td class="check">antra run x N</td>
+      </tr>
+      <tr>
+        <td>Cloud account</td>
+        <td class="check">No</td>
+        <td class="check">No</td>
+        <td class="cross">Yes</td>
+        <td class="check">No</td>
+      </tr>
+      <tr class="highlight-row">
+        <td>One-command UX</td>
+        <td class="cross">—</td>
+        <td class="cross">—</td>
+        <td>Close</td>
+        <td class="check">Yes</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<hr class="divider">
+
+<!-- CTA -->
+<section class="cta">
+<div class="container">
+  <div class="eyebrow">Get started</div>
+  <h2>Stop typing :5173.</h2>
+  <p>Install Antra. Run your app. Visit a real URL. That's the whole product.</p>
+  <div class="cta-buttons">
+    <button class="btn-primary" onclick="copyInstall(document.querySelector('.install-cmd'))">Install now</button>
+    <a href="https://github.com/ifelse-codes/antra" class="btn-secondary">View on GitHub</a>
+  </div>
+</div>
+</section>
+
+<!-- Footer -->
+<footer>
+<div class="container">
+  <div class="footer-inner">
+    <div class="footer-left">Antra — Built in Rust. No cloud. No accounts. No telemetry.</div>
+    <div class="footer-links">
+      <a href="https://github.com/ifelse-codes/antra">GitHub</a>
+      <a href="https://github.com/ifelse-codes/antra/blob/main/README.md">Docs</a>
+      <a href="https://github.com/ifelse-codes/antra/releases">Releases</a>
+    </div>
+  </div>
+</div>
+</footer>
+
+<script>
+// Copy install command
+function copyInstall(el){
+  const cmd='curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash';
+  navigator.clipboard.writeText(cmd).then(()=>{
+    const btn=el.querySelector('.copy-btn')||el;
+    const orig=btn.textContent;
+    btn.textContent='copied!';
+    setTimeout(()=>btn.textContent=orig,1500);
+  });
+}
+
+// Scroll reveal
+const observer=new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}});
+},{threshold:0.1});
+document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+</script>
+</body>
+</html>

@@ -238,9 +238,13 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     if let Ok(status) = crate::ipc::client::get_startup_status_async().await {
         if status.https_port != 443 {
             println!(
-                "  {} Note: HTTPS on port {} (port 443 unavailable — try {})",
+                "  {} Note: HTTPS on port {} (port 443 is in use by another service)",
                 "ℹ".cyan(),
-                status.https_port,
+                status.https_port
+            );
+            println!(
+                "  {} To use port 443: {}",
+                "ℹ".cyan(),
                 "sudo antra proxy start".bold()
             );
             // Build clean URL — don't double-append .localhost

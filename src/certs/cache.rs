@@ -45,14 +45,33 @@ impl CertCache {
     /// Resolve or generate a certificate for the given hostname.
     fn resolve_cert(&self, hostname: &str) -> Option<Arc<rustls::sign::CertifiedKey>> {
         // 1. Check memory cache
-        if let Some(cert) = self.certs.read().ok()?.get(hostname) {
-            return Some(Arc::clone(cert));
+        match self.certs.read() {
+            Ok(certs) => {
+                if let Some(cert) = certs.get(hostname) {
+                    return Some(Arc::clone(cert));
+                }
+            }
+            Err(e) => {
+                tracing::error!(%hostname, error = %e, "Failed to read cert cache");
+            }
         }
 
         // 2. Check disk cache / generate new
-        let leaf = self.store.get_or_create_leaf(hostname, &self.ca).ok()?;
+        let leaf = match self.store.get_or_create_leaf(hostname, &self.ca) {
+            Ok(leaf) => leaf,
+            Err(e) => {
+                tracing::error!(%hostname, error = %e, "Failed to generate leaf certificate");
+                return None;
+            }
+        };
 
-        let certified_key = leaf.to_certified_key().ok()?;
+        let certified_key = match leaf.to_certified_key() {
+            Ok(key) => key,
+            Err(e) => {
+                tracing::error!(%hostname, error = %e, "Failed to create CertifiedKey");
+                return None;
+            }
+        };
 
         let key = Arc::new(certified_key);
 
@@ -72,7 +91,13 @@ impl CertCache {
 
 impl ResolvesServerCert for CertCache {
     fn resolve(&self, hello: ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        let sni = hello.server_name()?;
+        let sni = match hello.server_name() {
+            Some(sni) => sni,
+            None => {
+                tracing::warn!("TLS handshake failed: no SNI provided by client");
+                return None;
+            }
+        };
         let hostname = sni.to_string();
         tracing::debug!(%hostname, "SNI resolution request");
         self.resolve_cert(&hostname)
