@@ -17,6 +17,7 @@ impl HostsResolver {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_path(path: PathBuf) -> Self {
         Self { hosts_path: path }
     }

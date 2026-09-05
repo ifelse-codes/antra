@@ -50,11 +50,7 @@ fn sync_hosts() -> Result<()> {
     };
 
     if routes.is_empty() {
-        println!(
-            "  {} {}",
-            "✓".green().bold(),
-            "No routes to sync".green()
-        );
+        println!("  {} {}", "✓".green().bold(), "No routes to sync".green());
         return Ok(());
     }
 

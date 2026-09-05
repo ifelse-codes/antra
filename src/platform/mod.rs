@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 /// Returns the IPC socket/pipe path for the daemon.
 #[cfg(unix)]
+#[allow(dead_code)]
 pub fn ipc_path() -> PathBuf {
     let dir = dirs::runtime_dir()
         .or_else(dirs::data_local_dir)
@@ -11,6 +12,7 @@ pub fn ipc_path() -> PathBuf {
 
 /// Returns the IPC socket/pipe path for the daemon.
 #[cfg(windows)]
+#[allow(dead_code)]
 pub fn ipc_path() -> PathBuf {
     // Windows named pipes use a special path format, but we store
     // the PID file in a regular directory
@@ -19,6 +21,7 @@ pub fn ipc_path() -> PathBuf {
 }
 
 /// Returns the path to the daemon PID file.
+#[allow(dead_code)]
 pub fn pid_file_path() -> PathBuf {
     #[cfg(unix)]
     {
@@ -42,6 +45,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 /// Set restrictive permissions on a key file (0o600 on Unix, no-op on Windows).
+#[allow(dead_code)]
 pub fn set_key_permissions(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

@@ -46,9 +46,8 @@ fn install_service() -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn install_launchd() -> Result<()> {
-    use std::path::PathBuf;
-
-    let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let launch_agents_dir = home_dir.join("Library/LaunchAgents");
     let plist_path = launch_agents_dir.join("com.antra.proxy.plist");
     let antra_path = std::env::current_exe()?;
@@ -103,12 +102,12 @@ fn install_launchd() -> Result<()> {
         .output()?;
 
     if output.status.success() {
-        println!(
-            "  {} Service loaded and enabled",
-            "✓".green().bold()
-        );
+        println!("  {} Service loaded and enabled", "✓".green().bold());
         println!();
-        println!("  {}", "Antra proxy will start automatically on login".dimmed());
+        println!(
+            "  {}",
+            "Antra proxy will start automatically on login".dimmed()
+        );
         println!("  {}", "URLs will survive reboots".dimmed());
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -127,7 +126,8 @@ fn install_launchd() -> Result<()> {
 fn install_systemd() -> Result<()> {
     use std::path::PathBuf;
 
-    let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let config_dir = home_dir.join(".config/antra");
     let service_dir = config_dir.join("systemd/user");
     let service_path = service_dir.join("antra-proxy.service");
@@ -167,10 +167,7 @@ WantedBy=default.target
         .output()?;
 
     if output.status.success() {
-        println!(
-            "  {} Service enabled",
-            "✓".green().bold()
-        );
+        println!("  {} Service enabled", "✓".green().bold());
 
         // Start the service
         let start_output = std::process::Command::new("systemctl")
@@ -178,10 +175,7 @@ WantedBy=default.target
             .output()?;
 
         if start_output.status.success() {
-            println!(
-                "  {} Service started",
-                "✓".green().bold()
-            );
+            println!("  {} Service started", "✓".green().bold());
         }
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -193,7 +187,10 @@ WantedBy=default.target
     }
 
     println!();
-    println!("  {}", "Antra proxy will start automatically on login".dimmed());
+    println!(
+        "  {}",
+        "Antra proxy will start automatically on login".dimmed()
+    );
     println!("  {}", "URLs will survive reboots".dimmed());
     println!();
     Ok(())
@@ -272,7 +269,8 @@ fn uninstall_service() -> Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         let plist_path = home_dir.join("Library/LaunchAgents/com.antra.proxy.plist");
 
         if plist_path.exists() {
@@ -284,10 +282,7 @@ fn uninstall_service() -> Result<()> {
             // Remove the plist file
             std::fs::remove_file(&plist_path)?;
 
-            println!(
-                "  {} Service uninstalled",
-                "✓".green().bold()
-            );
+            println!("  {} Service uninstalled", "✓".green().bold());
         } else {
             println!(
                 "  {} {}",
@@ -309,17 +304,15 @@ fn uninstall_service() -> Result<()> {
             .output();
 
         // Remove the service file
-        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home_dir =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         let service_path = home_dir.join(".config/antra/systemd/user/antra-proxy.service");
 
         if service_path.exists() {
             std::fs::remove_file(&service_path)?;
         }
 
-        println!(
-            "  {} Service uninstalled",
-            "✓".green().bold()
-        );
+        println!("  {} Service uninstalled", "✓".green().bold());
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]

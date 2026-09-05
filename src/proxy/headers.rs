@@ -6,6 +6,7 @@ use hyper::{
 use crate::routing::types::Protocol;
 
 /// Set X-Forwarded-* headers using a mutable Request reference.
+#[allow(dead_code)]
 pub fn set_forwarded_headers<B>(req: &mut Request<B>, original_host: &str, protocol: Protocol) {
     set_forwarded_headers_with_parts(req.headers_mut(), original_host, protocol);
 }

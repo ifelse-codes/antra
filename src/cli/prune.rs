@@ -34,11 +34,7 @@ pub fn execute() -> Result<()> {
     };
 
     if routes.is_empty() {
-        println!(
-            "  {} {}",
-            "✓".green().bold(),
-            "No routes to prune".green()
-        );
+        println!("  {} {}", "✓".green().bold(), "No routes to prune".green());
         return Ok(());
     }
 
@@ -53,11 +49,7 @@ pub fn execute() -> Result<()> {
             Some(pid) => pid,
             None => {
                 // No PID recorded — can't check if alive, skip
-                println!(
-                    "  {} {} (no PID recorded)",
-                    "→".cyan(),
-                    route.domain
-                );
+                println!("  {} {} (no PID recorded)", "→".cyan(), route.domain);
                 alive_count += 1;
                 continue;
             }
@@ -84,18 +76,11 @@ pub fn execute() -> Result<()> {
                 domain: route.domain.clone(),
             })) {
                 Ok(_) => {
-                    println!(
-                        "    {} Removed",
-                        "✓".green()
-                    );
+                    println!("    {} Removed", "✓".green());
                     pruned_count += 1;
                 }
                 Err(e) => {
-                    println!(
-                        "    {} Failed to remove: {}",
-                        "✗".red(),
-                        e
-                    );
+                    println!("    {} Failed to remove: {}", "✗".red(), e);
                 }
             }
         }

@@ -22,11 +22,7 @@ const PORT_PATTERNS: &[&str] = &[
 ///
 /// Spawns a tokio task that monitors the child's stdout for lines containing
 /// port information. When a new port is detected, it updates the route in the daemon.
-pub fn watch_port_changes(
-    stdout: ChildStdout,
-    domain: String,
-    initial_port: u16,
-) {
+pub fn watch_port_changes(stdout: ChildStdout, domain: String, initial_port: u16) {
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -45,20 +41,19 @@ pub fn watch_port_changes(
                     ));
 
                     // Unregister old route
-                    let _ = send_command_sync(IpcPayload::UnregisterRoute(
-                        UnregisterRouteRequest {
+                    let _ =
+                        send_command_sync(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
                             domain: domain.clone(),
-                        },
-                    ));
+                        }));
 
                     // Register new route
-                    if let Err(e) = send_command_sync(IpcPayload::RegisterRoute(
-                        RegisterRouteRequest {
+                    if let Err(e) =
+                        send_command_sync(IpcPayload::RegisterRoute(RegisterRouteRequest {
                             domain: domain.clone(),
                             port: new_port,
                             pid: None,
-                        },
-                    )) {
+                        }))
+                    {
                         output::print_error(&format!(
                             "Failed to update route for port change: {e}"
                         ));
@@ -107,7 +102,7 @@ fn extract_port_from_url(line: &str) -> Option<u16> {
     for part in &parts {
         let cleaned: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
         if let Ok(port) = cleaned.parse::<u16>() {
-            if port >= 1024 && port <= 65535 {
+            if (1024..=65535).contains(&port) {
                 if let Some(before) = line.split(&format!(":{cleaned}")).next() {
                     let before_trimmed = before.trim_end();
                     if before_trimmed.ends_with("127.0.0.1")
@@ -134,7 +129,7 @@ fn extract_port_from_text(line: &str) -> Option<u16> {
             let after = &line[pos + keyword.len()..];
             let num: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(port) = num.parse::<u16>() {
-                if port >= 1024 && port <= 65535 {
+                if (1024..=65535).contains(&port) {
                     return Some(port);
                 }
             }

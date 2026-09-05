@@ -152,11 +152,7 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
     println!();
     if let Ok(status) = crate::ipc::client::get_startup_status() {
         if status.https_port != 443 {
-            println!(
-                "  {} Note: HTTPS on port {}",
-                "ℹ".cyan(),
-                status.https_port
-            );
+            println!("  {} Note: HTTPS on port {}", "ℹ".cyan(), status.https_port);
             let host = if domain.ends_with(".localhost") {
                 domain.clone()
             } else {
@@ -203,7 +199,10 @@ fn execute_wrap_script(args: WrapScriptArgs) -> Result<()> {
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("scripts is not a JSON object"))?;
 
-    let antra_script = format!("antra run --domain {}.localhost --port {} -- {}", args.name, args.port, args.command);
+    let antra_script = format!(
+        "antra run --domain {}.localhost --port {} -- {}",
+        args.name, args.port, args.command
+    );
     let key = format!("antra:{}", args.name);
 
     if scripts.contains_key(&key) && !args.force {
@@ -221,10 +220,22 @@ fn execute_wrap_script(args: WrapScriptArgs) -> Result<()> {
     fs::write(&package_json_path, updated)?;
 
     println!();
-    output::print_success(&format!("Added script '{}' to {}", key, package_json_path.display()));
+    output::print_success(&format!(
+        "Added script '{}' to {}",
+        key,
+        package_json_path.display()
+    ));
     println!();
-    println!("  {} Run with: {}", "→".cyan().bold(), format!("npm run {key}").bold());
-    println!("  {} Or directly: {}", "→".cyan().bold(), antra_script.bold());
+    println!(
+        "  {} Run with: {}",
+        "→".cyan().bold(),
+        format!("npm run {key}").bold()
+    );
+    println!(
+        "  {} Or directly: {}",
+        "→".cyan().bold(),
+        antra_script.bold()
+    );
     println!();
 
     Ok(())

@@ -49,8 +49,7 @@ pub fn execute(args: DevArgs) -> Result<()> {
     }
 
     // No antra.toml found — try auto-detection
-    let current_dir = std::env::current_dir()
-        .context("Failed to get current directory")?;
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
 
     let detected = detect::detect_project(&current_dir)
         .context("Failed to detect project type")?
@@ -80,9 +79,9 @@ pub fn execute(args: DevArgs) -> Result<()> {
     ));
 
     // Build domain from project name
-    let domain = args.domain.unwrap_or_else(|| {
-        format!("{}.localhost", detected.name)
-    });
+    let domain = args
+        .domain
+        .unwrap_or_else(|| format!("{}.localhost", detected.name));
 
     // Build command
     let mut command_parts = vec![detected.command];

@@ -139,6 +139,7 @@ pub async fn start_server(
 }
 
 /// Start an HTTP server that redirects all requests to HTTPS.
+#[allow(dead_code)]
 pub async fn start_http_redirect(port: u16) -> Result<()> {
     let listener = bind_http_redirect(port).await?;
     run_http_redirect(listener);

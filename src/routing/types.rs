@@ -7,6 +7,7 @@ pub struct Route {
     pub host: IpAddr,
     pub port: u16,
     pub pid: Option<u32>,
+    #[allow(dead_code)]
     pub protocol: Protocol,
     pub created_at: Instant,
 }
@@ -18,6 +19,7 @@ pub enum Protocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ResolutionStatus {
     Active,
     Inactive,

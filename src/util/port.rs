@@ -26,17 +26,22 @@ pub fn find_free_port_in_range() -> anyhow::Result<u16> {
 /// Returns the actual port assigned (may differ from preferred).
 pub fn find_free_port_with_fallback(preferred: u16) -> anyhow::Result<u16> {
     // If preferred is in range and available, use it
-    if preferred >= 4000 && preferred < 5000 && is_port_available(preferred) {
+    if (4000..5000).contains(&preferred) && is_port_available(preferred) {
         return Ok(preferred);
     }
 
     // Scan forward from preferred (wrap around at 5000)
-    let start = if preferred >= 4000 && preferred < 5000 { preferred } else { 4000 };
+    let start = if (4000..5000).contains(&preferred) {
+        preferred
+    } else {
+        4000
+    };
     for port in start..5000 {
         if is_port_available(port) {
             if port != preferred {
                 tracing::debug!(
-                    preferred, assigned = port,
+                    preferred,
+                    assigned = port,
                     "Preferred port unavailable, auto-assigned new port"
                 );
             }
@@ -48,7 +53,8 @@ pub fn find_free_port_with_fallback(preferred: u16) -> anyhow::Result<u16> {
     for port in 4000..start {
         if is_port_available(port) {
             tracing::debug!(
-                preferred, assigned = port,
+                preferred,
+                assigned = port,
                 "Preferred port unavailable, auto-assigned new port"
             );
             return Ok(port);
@@ -193,16 +199,16 @@ pub fn inject_port_flag(command: &[String], port: u16) -> Vec<String> {
         "ng" => true,
         // Expo / React Native
         "expo" => true,
-        "npx" if rest.first().map_or(false, |s| s == "expo") => true,
+        "npx" if rest.first().is_some_and(|s| s == "expo") => true,
         // Create React App
         "react-scripts" => true,
         // Vue CLI
         "vue" => true,
-        "npx" if rest.first().map_or(false, |s| s == "vue") => true,
+        "npx" if rest.first().is_some_and(|s| s == "vue") => true,
         // Svelte
-        "npx" if rest.first().map_or(false, |s| s.starts_with("svelte")) => true,
+        "npx" if rest.first().is_some_and(|s| s.starts_with("svelte")) => true,
         // Solid
-        "npx" if rest.first().map_or(false, |s| s.starts_with("solid")) => true,
+        "npx" if rest.first().is_some_and(|s| s.starts_with("solid")) => true,
         _ => false,
     };
 
@@ -212,9 +218,7 @@ pub fn inject_port_flag(command: &[String], port: u16) -> Vec<String> {
 
     // Check if --port is already present
     let has_port_flag = command.windows(2).any(|w| {
-        (w[0] == "--port" || w[0] == "-p")
-            || w[0].starts_with("--port=")
-            || w[0].starts_with("-p=")
+        (w[0] == "--port" || w[0] == "-p") || w[0].starts_with("--port=") || w[0].starts_with("-p=")
     });
 
     if has_port_flag {
@@ -230,6 +234,7 @@ pub fn inject_port_flag(command: &[String], port: u16) -> Vec<String> {
 
 /// Prompt the user for the port their server listens on.
 /// Returns None if the user doesn't provide a valid port.
+#[allow(dead_code)]
 pub fn prompt_for_port() -> Option<u16> {
     use colored::Colorize;
 

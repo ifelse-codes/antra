@@ -7,7 +7,10 @@ use crate::config::global;
 use crate::ipc::client::is_daemon_running;
 use crate::resolver::util::select_resolver;
 use crate::util::output;
-use crate::util::port::{detect_port_from_command, find_free_port_in_range, find_free_port_with_fallback, inject_port_flag};
+use crate::util::port::{
+    detect_port_from_command, find_free_port_in_range, find_free_port_with_fallback,
+    inject_port_flag,
+};
 use crate::util::port_watcher;
 
 #[derive(Args)]
@@ -167,20 +170,22 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 
     // 1b. Handle --force: kill existing route if present
     if args.force {
-        if let Ok(resp) = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await {
+        if let Ok(resp) =
+            crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await
+        {
             if let crate::ipc::protocol::IpcPayload::RoutesList(list) = resp.payload {
                 if let Some(existing) = list.routes.iter().find(|r| r.domain == domain) {
                     output::print_warning(&format!(
                         "Domain {} already in use (port {}, PID {:?})",
                         existing.domain, existing.port, existing.pid
                     ));
-                    
+
                     // Kill the existing process if PID is known
                     if let Some(pid) = existing.pid {
                         output::print_warning(&format!("Killing process {pid}..."));
                         kill_process(pid);
                     }
-                    
+
                     // Unregister the old route
                     let _ = crate::ipc::client::send_command(
                         crate::ipc::protocol::IpcPayload::UnregisterRoute(
@@ -188,8 +193,9 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                                 domain: domain.clone(),
                             },
                         ),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     output::print_success("Old route removed");
                 }
             }
@@ -288,7 +294,8 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         }
     }
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {e}", final_program))?;
 
     // Capture stdout for port watching
@@ -394,10 +401,10 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 fn kill_process(pid: u32) {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
-    
+
     // Try SIGTERM first for graceful shutdown
     let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
-    
+
     // Wait a bit, then force kill if still alive
     std::thread::sleep(std::time::Duration::from_millis(500));
     if is_pid_alive(pid) {

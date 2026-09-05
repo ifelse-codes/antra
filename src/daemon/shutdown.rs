@@ -3,11 +3,13 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 /// Graceful shutdown coordinator
+#[allow(dead_code)]
 pub struct Shutdown {
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
 }
 
+#[allow(dead_code)]
 impl Shutdown {
     pub fn new() -> Self {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -47,6 +49,7 @@ impl Default for Shutdown {
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 pub async fn setup_signal_handlers(shutdown: std::sync::Arc<Shutdown>) -> anyhow::Result<()> {
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;

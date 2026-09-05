@@ -87,10 +87,11 @@ fn detect_node_command(dir: &Path, pkg: &PackageJson) -> (String, Vec<String>, O
     let has_dev_dep = |name: &str| -> bool {
         pkg.dev_dependencies
             .as_ref()
-            .map_or(false, |d| d.contains_key(name))
-            || pkg.dependencies
+            .is_some_and(|d| d.contains_key(name))
+            || pkg
+                .dependencies
                 .as_ref()
-                .map_or(false, |d| d.contains_key(name))
+                .is_some_and(|d| d.contains_key(name))
     };
 
     // Check for lock files to determine package manager
@@ -138,11 +139,19 @@ fn detect_node_command(dir: &Path, pkg: &PackageJson) -> (String, Vec<String>, O
     }
 
     if has_dev_dep("next") {
-        return ("npx".to_string(), vec!["next".to_string(), "dev".to_string()], Some(3000));
+        return (
+            "npx".to_string(),
+            vec!["next".to_string(), "dev".to_string()],
+            Some(3000),
+        );
     }
 
     if has_dev_dep("nuxt") || has_dev_dep("nuxt3") {
-        return ("npx".to_string(), vec!["nuxt".to_string(), "dev".to_string()], Some(3000));
+        return (
+            "npx".to_string(),
+            vec!["nuxt".to_string(), "dev".to_string()],
+            Some(3000),
+        );
     }
 
     if has_dev_dep("react-scripts") {
@@ -150,7 +159,11 @@ fn detect_node_command(dir: &Path, pkg: &PackageJson) -> (String, Vec<String>, O
     }
 
     if has_dev_dep("angular-cli") || has_dev_dep("@angular/cli") {
-        return ("npx".to_string(), vec!["ng".to_string(), "serve".to_string()], Some(4200));
+        return (
+            "npx".to_string(),
+            vec!["ng".to_string(), "serve".to_string()],
+            Some(4200),
+        );
     }
 
     // Fallback: try npm start or just node
@@ -172,13 +185,14 @@ fn try_cargo_toml(dir: &Path) -> Result<Option<DetectedProject>> {
     let content = std::fs::read_to_string(&path)?;
     let cargo: CargoToml = toml::from_str(&content)?;
 
-    let name = cargo.package
+    let name = cargo
+        .package
         .as_ref()
         .and_then(|p| p.name.clone())
         .unwrap_or_else(|| dir_name(dir));
 
     // Check if it's a web framework
-    let is_web = cargo.dependencies.as_ref().map_or(false, |deps| {
+    let is_web = cargo.dependencies.as_ref().is_some_and(|deps| {
         deps.contains_key("actix-web")
             || deps.contains_key("axum")
             || deps.contains_key("warp")
@@ -277,7 +291,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
         .project
         .as_ref()
         .and_then(|p| p.dependencies.as_ref())
-        .map_or(false, |deps| {
+        .is_some_and(|deps| {
             deps.iter().any(|d| {
                 d.starts_with("django")
                     || d.starts_with("flask")
@@ -293,7 +307,10 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
             .project
             .as_ref()
             .and_then(|p| p.dependencies.as_ref())
-            .map_or(false, |deps| deps.iter().any(|d| d.starts_with("fastapi") || d.starts_with("uvicorn")))
+            .is_some_and(|deps| {
+                deps.iter()
+                    .any(|d| d.starts_with("fastapi") || d.starts_with("uvicorn"))
+            })
         {
             return Ok(Some(DetectedProject {
                 name,
@@ -308,7 +325,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
             .project
             .as_ref()
             .and_then(|p| p.dependencies.as_ref())
-            .map_or(false, |deps| deps.iter().any(|d| d.starts_with("django")))
+            .is_some_and(|deps| deps.iter().any(|d| d.starts_with("django")))
         {
             return Ok(Some(DetectedProject {
                 name,
@@ -323,7 +340,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
             .project
             .as_ref()
             .and_then(|p| p.dependencies.as_ref())
-            .map_or(false, |deps| deps.iter().any(|d| d.starts_with("flask")))
+            .is_some_and(|deps| deps.iter().any(|d| d.starts_with("flask")))
         {
             return Ok(Some(DetectedProject {
                 name,
@@ -360,7 +377,11 @@ fn try_gemfile(dir: &Path) -> Result<Option<DetectedProject>> {
         return Ok(Some(DetectedProject {
             name,
             command: "bundle".to_string(),
-            args: vec!["exec".to_string(), "rails".to_string(), "server".to_string()],
+            args: vec![
+                "exec".to_string(),
+                "rails".to_string(),
+                "server".to_string(),
+            ],
             default_port: Some(3000),
             framework: "Ruby on Rails".to_string(),
         }));
@@ -427,7 +448,8 @@ fn try_composer_json(dir: &Path) -> Result<Option<DetectedProject>> {
 
     let content = std::fs::read_to_string(&path)?;
     let composer: ComposerJson = serde_json::from_str(&content)?;
-    let name = composer.name
+    let name = composer
+        .name
         .map(|n| n.rsplit('/').next().unwrap_or(&n).to_string())
         .unwrap_or_else(|| dir_name(dir));
 

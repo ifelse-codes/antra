@@ -8,5 +8,6 @@ pub trait DomainResolver: Send + Sync {
     fn unregister(&self, domain: &str) -> anyhow::Result<()>;
 
     /// Check the resolution status of a domain
+    #[allow(dead_code)]
     fn status(&self, domain: &str) -> anyhow::Result<ResolutionStatus>;
 }

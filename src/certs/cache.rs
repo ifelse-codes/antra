@@ -84,6 +84,7 @@ impl CertCache {
     }
 
     /// Get the CA certificate PEM (for trust store installation).
+    #[allow(dead_code)]
     pub fn ca_cert_pem(&self) -> &str {
         &self.ca.cert_pem
     }
