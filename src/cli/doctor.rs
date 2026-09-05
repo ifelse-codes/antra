@@ -195,24 +195,33 @@ pub fn execute() -> Result<()> {
         }
         println!();
 
-        // Offer auto-fix
-        print!("  {} ", "Auto-fix all issues? [y/N]".yellow().bold());
-        use std::io::Write;
-        let _ = std::io::stdout().flush();
+        // Offer auto-fix (only if stdin is a TTY)
+        let is_tty = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
+        if is_tty {
+            print!("  {} ", "Auto-fix all issues? [y/N]".yellow().bold());
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
 
-        let mut input = String::new();
-        if std::io::stdin().read_line(&mut input).is_ok() {
-            let input = input.trim().to_lowercase();
-            if input == "y" || input == "yes" {
-                println!();
-                auto_fix(&issues);
-            } else {
-                println!();
-                println!(
-                    "  {}",
-                    "Run the commands above manually to fix issues.".dimmed()
-                );
+            let mut input = String::new();
+            if std::io::stdin().read_line(&mut input).is_ok() {
+                let input = input.trim().to_lowercase();
+                if input == "y" || input == "yes" {
+                    println!();
+                    auto_fix(&issues);
+                } else {
+                    println!();
+                    println!(
+                        "  {}",
+                        "Run the commands above manually to fix issues.".dimmed()
+                    );
+                }
             }
+        } else {
+            println!();
+            println!(
+                "  {}",
+                "Run the commands above manually to fix issues.".dimmed()
+            );
         }
     }
 

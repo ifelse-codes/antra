@@ -62,6 +62,32 @@ pub async fn handle_request(
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
 
+    // Loop detection: max 5 hops
+    const MAX_HOPS: u32 = 5;
+    if hops >= MAX_HOPS {
+        tracing::warn!(%domain, hops, "Loop detected — max hops exceeded");
+        let body = format!(
+            "508 Loop Detected\n\n\
+             Domain:   {domain}\n\
+             Upstream: {}:{}\n\
+             Hops:     {hops} (max: {MAX_HOPS})\n\n\
+             This usually means:\n\
+             1. Your app is proxying to another Antra-managed domain\n\
+             2. The Host header is pointing to the wrong upstream\n\n\
+             Fix this:\n\
+             1. Check your app's proxy configuration\n\
+             2. Ensure the Host header matches the upstream server\n\
+             3. Use direct localhost URLs instead of Antra domains\n",
+            route.host, route.port
+        );
+        let response = Response::builder()
+            .status(508)
+            .header("content-type", "text/plain")
+            .body(Either::Left(Full::new(Bytes::from(body))))
+            .unwrap();
+        return Ok(response);
+    }
+
     // Handle WebSocket upgrade
     if is_ws {
         match websocket::handle_upgrade(req, &route, hops).await {
@@ -88,7 +114,7 @@ pub async fn handle_request(
         }
     } else {
         // Regular HTTP forwarding
-        match forward::forward_request(req, &route).await {
+        match forward::forward_request(req, &route, hops).await {
             Ok(response) => Ok(response.map(Either::Left)),
             Err(e) => {
                 tracing::error!(%domain, error = %e, "Upstream request failed");

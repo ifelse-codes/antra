@@ -3,7 +3,7 @@ use colored::Colorize;
 
 use crate::ipc::client::{is_daemon_running, send_command_sync};
 use crate::ipc::protocol::{IpcPayload, RegisterRouteRequest};
-use crate::resolver::traits::DomainResolver;
+use crate::resolver::util::select_resolver;
 
 pub fn execute(domain: &str, port: u16) -> Result<()> {
     println!("{}", "ANTRA ALIAS".bold());
@@ -54,14 +54,4 @@ pub fn execute(domain: &str, port: u16) -> Result<()> {
     println!("  → {}", format!("https://{domain}").underline());
     println!();
     Ok(())
-}
-
-fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
-    if domain == "localhost" || domain.ends_with(".localhost") {
-        Ok(Box::new(crate::resolver::localhost::LocalhostResolver))
-    } else if domain.ends_with(".test") {
-        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
-    } else {
-        Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
-    }
 }

@@ -1,11 +1,15 @@
+pub mod add;
 pub mod alias;
 pub mod clean;
 pub mod dev;
 pub mod doctor;
+pub mod hosts;
 pub mod list;
 pub mod open;
 pub mod proxy;
+pub mod prune;
 pub mod run;
+pub mod service;
 pub mod trust;
 
 use anyhow::Result;
@@ -14,7 +18,41 @@ use colored::Colorize;
 
 use crate::ipc::client::{is_daemon_running, send_command_sync};
 use crate::ipc::protocol::IpcPayload;
-use crate::resolver::traits::DomainResolver;
+use crate::resolver::util::select_resolver;
+use crate::util::output;
+
+/// Ensure the daemon is running, starting it if necessary.
+/// Returns Ok(true) if daemon was already running, Ok(false) if we started it.
+pub(crate) fn ensure_daemon() -> Result<bool> {
+    if is_daemon_running() {
+        return Ok(true);
+    }
+
+    output::print_warning("Daemon not running, starting it...");
+
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("proxy")
+        .arg("start")
+        .env("ANTRA_DAEMON", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null());
+
+    let child = cmd.spawn()?;
+    let _child_pid = child.id();
+
+    // Wait for daemon to start
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if is_daemon_running() {
+            output::print_success("Daemon started");
+            return Ok(false);
+        }
+    }
+
+    anyhow::bail!("Daemon failed to start within timeout");
+}
 
 #[derive(Parser)]
 #[command(
@@ -37,8 +75,11 @@ pub enum Commands {
     /// Run a command behind a proxied domain
     Run(run::RunArgs),
 
-    /// Run using antra.toml config
+    /// Auto-detect project and run dev server (zero-config)
     Dev(dev::DevArgs),
+
+    /// Add a route to an existing running server (no process spawned)
+    Add(add::AddArgs),
 
     /// List active routes
     List,
@@ -98,14 +139,20 @@ pub enum Commands {
         /// Domain to remove
         domain: String,
     },
-}
 
-#[derive(Subcommand)]
-pub enum Commands2 {
-    /// Stop a running route
-    Stop {
-        /// Domain to stop
-        domain: String,
+    /// Kill orphaned dev servers from crashed sessions
+    Prune,
+
+    /// Manage /etc/hosts entries for Safari compatibility
+    Hosts {
+        #[command(subcommand)]
+        command: hosts::HostsCommands,
+    },
+
+    /// Manage Antra as a system service
+    Service {
+        #[command(subcommand)]
+        command: service::ServiceCommands,
     },
 }
 
@@ -138,7 +185,11 @@ impl Cli {
         match self.command {
             Commands::Run(args) => run::execute(args),
             Commands::Dev(args) => dev::execute(args),
-            Commands::List => list::execute(),
+            Commands::Add(args) => add::execute(args),
+            Commands::List => {
+                let _ = ensure_daemon();
+                list::execute()
+            }
             Commands::Doctor => doctor::execute(),
             Commands::Trust {
                 status,
@@ -148,21 +199,17 @@ impl Cli {
             } => trust::execute(status, remove, yes, user_level),
             Commands::Proxy { command } => proxy::execute(command),
             Commands::Clean { yes } => clean::execute(yes),
-            Commands::Alias { domain, port } => alias::execute(&domain, port),
-            Commands::Open { domain } => open::execute(&domain),
+            Commands::Alias { domain, port } => {
+                let _ = ensure_daemon();
+                alias::execute(&domain, port)
+            }
+            Commands::Open { domain } => {
+                let _ = ensure_daemon();
+                open::execute(&domain)
+            }
             Commands::Remove { domain } => {
+                let _ = ensure_daemon();
                 println!("  {} Removing route for {}", "→".cyan().bold(), domain);
-
-                // Check if daemon is running
-                if !is_daemon_running() {
-                    println!(
-                        "  {} {}",
-                        "⚠".yellow().bold(),
-                        "Daemon is not running".yellow()
-                    );
-                    println!("  Start it with: antra proxy start");
-                    std::process::exit(1);
-                }
 
                 // Check if route exists before attempting removal
                 let mut route_found = false;
@@ -209,16 +256,12 @@ impl Cli {
                 );
                 Ok(())
             }
+            Commands::Prune => {
+                let _ = ensure_daemon();
+                prune::execute()
+            }
+            Commands::Hosts { command } => hosts::execute(command),
+            Commands::Service { command } => service::execute(command),
         }
-    }
-}
-
-fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
-    if domain == "localhost" || domain.ends_with(".localhost") {
-        Ok(Box::new(crate::resolver::localhost::LocalhostResolver))
-    } else if domain.ends_with(".test") {
-        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
-    } else {
-        Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
     }
 }

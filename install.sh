@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Antra — One-line installer
-# Usage: curl -fsSL https://antra.iifelse.com/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash
 #
 # This script:
 #   1. Detects your OS and architecture

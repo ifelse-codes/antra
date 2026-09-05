@@ -5,9 +5,10 @@ use tokio::process::Command;
 
 use crate::config::global;
 use crate::ipc::client::is_daemon_running;
-use crate::resolver::traits::DomainResolver;
+use crate::resolver::util::select_resolver;
 use crate::util::output;
-use crate::util::port::{detect_port_from_command, find_free_port, prompt_for_port};
+use crate::util::port::{detect_port_from_command, find_free_port_in_range, find_free_port_with_fallback, inject_port_flag};
+use crate::util::port_watcher;
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -18,6 +19,10 @@ pub struct RunArgs {
     /// Port the application listens on (auto-detected if omitted)
     #[arg(long)]
     pub port: Option<u16>,
+
+    /// Custom TLD (e.g., dev.example.com for myapp.dev.example.com)
+    #[arg(long)]
+    pub tld: Option<String>,
 
     /// Allow custom (non-.localhost, non-.test) domains
     #[arg(long)]
@@ -31,25 +36,13 @@ pub struct RunArgs {
     #[arg(short, long)]
     pub yes: bool,
 
+    /// Kill existing process and take over the route
+    #[arg(long)]
+    pub force: bool,
+
     /// Command to run
     #[arg(trailing_var_arg = true, required = true)]
     pub command: Vec<String>,
-}
-
-/// Select the appropriate resolver based on the domain suffix.
-fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
-    if domain == "localhost" || domain.ends_with(".localhost") {
-        Ok(Box::new(crate::resolver::localhost::LocalhostResolver))
-    } else if domain.ends_with(".test") {
-        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
-    } else if domain.ends_with(".internal") || domain.ends_with(".local") {
-        // Warn but allow
-        tracing::warn!(%domain, "Using .internal/.local domain — ensure DNS resolves to 127.0.0.1");
-        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
-    } else {
-        // Custom domain — validation happens inside CustomResolver
-        Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
-    }
 }
 
 pub fn execute(args: RunArgs) -> Result<()> {
@@ -140,9 +133,21 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 0. Auto-trust prompt (first run only)
     maybe_prompt_trust(args.no_trust_prompt, args.yes).await;
 
+    // 0b. Handle custom TLD
+    let domain = if let Some(tld) = &args.tld {
+        // Build domain with custom TLD: appname.tld
+        let app_name = args.domain.split('.').next().unwrap_or(&args.domain);
+        format!("{app_name}.{tld}")
+    } else {
+        args.domain.clone()
+    };
+
     // 1. Determine port
     let port = match args.port {
-        Some(p) => p,
+        Some(p) => {
+            // User specified a port — use fallback to auto-resolve conflicts
+            find_free_port_with_fallback(p)?
+        }
         None => {
             // Try to detect port from command arguments
             if let Some(detected) = detect_port_from_command(&args.command) {
@@ -153,26 +158,48 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                 detected
             } else {
                 tracing::debug!(command = ?args.command, "Could not auto-detect port from command");
-                // Detection failed — prompt the user
-                match prompt_for_port() {
-                    Some(p) => p,
-                    None => {
-                        // Last resort: use a random free port (with a warning)
-                        output::print_warning("Could not determine port. Using random free port.");
-                        output::print_warning(
-                            "The proxy may return 503 if your server isn't on this port.",
-                        );
-                        find_free_port()?
-                    }
-                }
+                // Use a free port in the 4000-4999 range
+                output::print_warning("No --port specified, auto-assigning port.");
+                find_free_port_in_range()?
             }
         }
     };
 
+    // 1b. Handle --force: kill existing route if present
+    if args.force {
+        if let Ok(resp) = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await {
+            if let crate::ipc::protocol::IpcPayload::RoutesList(list) = resp.payload {
+                if let Some(existing) = list.routes.iter().find(|r| r.domain == domain) {
+                    output::print_warning(&format!(
+                        "Domain {} already in use (port {}, PID {:?})",
+                        existing.domain, existing.port, existing.pid
+                    ));
+                    
+                    // Kill the existing process if PID is known
+                    if let Some(pid) = existing.pid {
+                        output::print_warning(&format!("Killing process {pid}..."));
+                        kill_process(pid);
+                    }
+                    
+                    // Unregister the old route
+                    let _ = crate::ipc::client::send_command(
+                        crate::ipc::protocol::IpcPayload::UnregisterRoute(
+                            crate::ipc::protocol::UnregisterRouteRequest {
+                                domain: domain.clone(),
+                            },
+                        ),
+                    ).await;
+                    
+                    output::print_success("Old route removed");
+                }
+            }
+        }
+    }
+
     // 2. Resolve domain to 127.0.0.1 (hosts file or no-op)
-    let resolver = select_resolver(&args.domain)?;
-    resolver.register(&args.domain)?;
-    output::print_success(&format!("Domain resolved: {}", args.domain));
+    let resolver = select_resolver(&domain)?;
+    resolver.register(&domain)?;
+    output::print_success(&format!("Domain resolved: {}", domain));
 
     // 3. Ensure daemon is running
     ensure_daemon().await?;
@@ -180,7 +207,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 4. Register route via IPC
     match crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
         crate::ipc::protocol::RegisterRouteRequest {
-            domain: args.domain.clone(),
+            domain: domain.clone(),
             port,
             pid: None,
         },
@@ -217,41 +244,62 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                 "sudo antra proxy start".bold()
             );
             // Build clean URL — don't double-append .localhost
-            let host = if args.domain.ends_with(".localhost") {
-                args.domain.clone()
+            let host = if domain.ends_with(".localhost") {
+                domain.clone()
             } else {
-                format!("{}.localhost", args.domain)
+                format!("{}.localhost", domain)
             };
             println!("  → https://{}:{}", host, status.https_port);
         } else {
-            println!("  → https://{}", args.domain);
+            println!("  → https://{}", domain);
         }
     } else {
-        println!("  → https://{}", args.domain);
+        println!("  → https://{}", domain);
     }
     println!();
 
     // 5. Spawn child process
     let program = args.command.first().unwrap_or(&"".to_string()).clone();
-    let child_args: Vec<String> = args.command[1..].to_vec();
 
-    let mut child = Command::new(&program)
-        .args(&child_args)
+    // Inject --port flag for frameworks that ignore PORT env var
+    let final_args = inject_port_flag(&args.command, port);
+    let final_program = final_args.first().unwrap_or(&program).clone();
+    let final_child_args: Vec<String> = final_args[1..].to_vec();
+
+    // Build environment with CA cert path for Node.js TLS trust
+    let mut cmd = Command::new(&final_program);
+    cmd.args(&final_child_args)
         .env("PORT", port.to_string())
         .env("HOST", "127.0.0.1")
-        .env("ANTRA_DOMAIN", &args.domain)
-        .env("ANTRA_URL", format!("https://{}", args.domain))
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {e}", program))?;
+        .env("ANTRA_DOMAIN", &domain)
+        .env("ANTRA_URL", format!("https://{}", domain))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit());
 
-    output::print_success(&format!("Started: {}", args.command.join(" ")));
+    // Inject NODE_EXTRA_CA_CERTS if CA exists
+    if let Ok(store) = crate::certs::store::CertStore::new() {
+        let ca_path = store.config_dir.join("ca.pem");
+        if ca_path.exists() {
+            cmd.env("NODE_EXTRA_CA_CERTS", ca_path.to_string_lossy().to_string());
+        }
+    }
+
+    let mut child = cmd.spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {e}", final_program))?;
+
+    // Capture stdout for port watching
+    let child_stdout = child.stdout.take();
+
+    output::print_success(&format!("Started: {}", final_args.join(" ")));
     println!();
+
+    // Start port watcher if stdout is captured
+    if let Some(stdout) = child_stdout {
+        port_watcher::watch_port_changes(stdout, domain.clone(), port);
+    }
 
     // 6. Wait for child or signal
     let child_pid = child.id();
-    let domain = args.domain.clone();
 
     // Set up signal handler
     #[cfg(unix)]
@@ -335,4 +383,39 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 
     println!();
     std::process::exit(exit_code);
+}
+
+/// Kill a process by PID.
+#[cfg(unix)]
+fn kill_process(pid: u32) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+    
+    // Try SIGTERM first for graceful shutdown
+    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+    
+    // Wait a bit, then force kill if still alive
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if is_pid_alive(pid) {
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process(_pid: u32) {
+    // On Windows, would need taskkill
+    // For now, no-op
+}
+
+/// Check if a PID is alive.
+#[cfg(unix)]
+fn is_pid_alive(pid: u32) -> bool {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+    kill(Pid::from_raw(pid as i32), None).is_ok()
+}
+
+#[cfg(not(unix))]
+fn is_pid_alive(_pid: u32) -> bool {
+    true
 }

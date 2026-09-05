@@ -74,11 +74,11 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     #[cfg(unix)]
     let listener = tokio::net::UnixListener::bind(&sock_path)?;
 
-    // Set permissions on socket (owner read/write, others read/write)
+    // Set permissions on socket (owner read/write only)
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&sock_path, PermissionsExt::from_mode(0o666));
+        let _ = std::fs::set_permissions(&sock_path, PermissionsExt::from_mode(0o600));
     }
 
     let registry = Arc::new(RouteRegistry::new());
