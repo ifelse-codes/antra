@@ -73,7 +73,7 @@ The workaround stack is worse than the problem: edit `/etc/hosts`, run `mkcert`,
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://antra.iifelse.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash
 ```
 
 **Homebrew:**
@@ -372,7 +372,7 @@ Read [`docs/security.md`](docs/security.md) before running `antra trust` on a sh
 **One-liner (macOS / Linux):**
 
 ```bash
-curl -fsSL https://antra.iifelse.com/install | bash
+curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash
 ```
 
 **Homebrew:**

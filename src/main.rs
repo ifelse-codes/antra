@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod certs;
 mod cli;
 mod config;

@@ -11,6 +11,7 @@ use crate::routing::types::{Protocol, Route};
 pub async fn forward_request(
     req: Request<Incoming>,
     route: &Route,
+    hops: u32,
 ) -> Result<Response<Full<Bytes>>> {
     let original_host = req
         .headers()
@@ -48,6 +49,15 @@ pub async fn forward_request(
     // For Phase 4, we assume the proxy received HTTPS from the client
     // (since we terminate TLS). The original protocol is "https".
     headers::set_forwarded_headers_with_parts(&mut parts.headers, &original_host, Protocol::Https);
+
+    // Increment hop count for loop detection
+    parts.headers.insert(
+        "x-antra-hops",
+        (hops + 1)
+            .to_string()
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid hop header: {e}"))?,
+    );
 
     let upstream_req = Request::from_parts(parts, body);
 
