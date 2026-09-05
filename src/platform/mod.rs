@@ -58,6 +58,7 @@ pub fn set_key_permissions(path: &std::path::Path) -> std::io::Result<()> {
 
 /// Returns the Windows named pipe path for the daemon IPC.
 #[cfg(windows)]
+#[allow(dead_code)]
 pub fn named_pipe_path() -> String {
     r"\\.\pipe\antra-daemon".to_string()
 }
