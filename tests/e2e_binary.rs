@@ -113,7 +113,7 @@ fn test_version_flag() {
     let (stdout, _, code) = run_antra(&["--version"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("antra"));
-    assert!(stdout.contains("0.1.0"));
+    assert!(stdout.contains("0.2.0"));
 }
 
 #[test]
