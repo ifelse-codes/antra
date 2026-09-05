@@ -427,6 +427,7 @@ fn is_pid_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn is_pid_alive(_pid: u32) -> bool {
     true
 }
