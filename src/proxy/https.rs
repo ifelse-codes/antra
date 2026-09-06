@@ -17,7 +17,9 @@ pub async fn bind_http_redirect(port: u16) -> Result<TcpListener> {
 }
 
 /// Run the HTTP→HTTPS redirect server on an already-bound listener.
-pub fn run_http_redirect(listener: TcpListener) {
+/// `https_port` is preserved in the Location header when it isn't the
+/// default 443 (otherwise fallback-port users get a dead redirect).
+pub fn run_http_redirect(listener: TcpListener, https_port: u16) {
     tokio::spawn(async move {
         loop {
             let (stream, remote_addr) = match listener.accept().await {
@@ -47,7 +49,11 @@ pub fn run_http_redirect(listener: TcpListener) {
                         .map(|pq| pq.as_str())
                         .unwrap_or("/");
 
-                    let redirect_url = format!("https://{host}{path}");
+                    let redirect_url = if https_port == 443 {
+                        format!("https://{host}{path}")
+                    } else {
+                        format!("https://{host}:{https_port}{path}")
+                    };
 
                     let response = hyper::Response::builder()
                         .status(301)
@@ -140,8 +146,8 @@ pub async fn start_server(
 
 /// Start an HTTP server that redirects all requests to HTTPS.
 #[allow(dead_code)]
-pub async fn start_http_redirect(port: u16) -> Result<()> {
+pub async fn start_http_redirect(port: u16, https_port: u16) -> Result<()> {
     let listener = bind_http_redirect(port).await?;
-    run_http_redirect(listener);
+    run_http_redirect(listener, https_port);
     Ok(())
 }

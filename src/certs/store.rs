@@ -1,10 +1,15 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use rustls::pki_types::CertificateDer;
 
 use crate::certs::ca::{self, CaCert};
 use crate::certs::leaf::{self, LeafCert};
+
+/// Leaf certificate format version. Bump to invalidate cached leafs.
+/// v2 leafs carry subject CN + AuthorityKeyIdentifier + serverAuth EKU so they
+/// chain to the Antra CA; pre-v2 leafs are self-signed-looking and untrusted.
+const LEAF_VERSION: &str = "2";
 
 /// Manages CA and leaf certificate storage on disk.
 pub struct CertStore {
@@ -20,6 +25,7 @@ impl CertStore {
             .join("antra");
         let certs_dir = config_dir.join("certs");
         std::fs::create_dir_all(&certs_dir)?;
+        ensure_leaf_version(&certs_dir)?;
         Ok(Self {
             config_dir,
             certs_dir,
@@ -123,4 +129,52 @@ fn load_pem_cert(pem: &str) -> Result<CertificateDer<'static>> {
     let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
     let der = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)?;
     Ok(CertificateDer::from(der))
+}
+
+/// Purge cached leaf certs when the leaf format version changes.
+/// Old leafs can't chain to the CA, so serving them would keep browsers
+/// warning even after `antra trust`. The CA itself is kept (re-trust not needed).
+fn ensure_leaf_version(certs_dir: &Path) -> Result<()> {
+    let marker = certs_dir.join(".leaf-version");
+    let current = std::fs::read_to_string(&marker).unwrap_or_default();
+    if current.trim() == LEAF_VERSION {
+        return Ok(());
+    }
+    if let Ok(entries) = std::fs::read_dir(certs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "pem") {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    std::fs::write(&marker, LEAF_VERSION)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ensure_leaf_version_purges_stale_leafs() {
+        let dir = tempfile::tempdir().unwrap();
+        let certs = dir.path();
+        // Simulate a pre-v2 cache: stale leaf + old marker.
+        std::fs::write(certs.join("old.localhost.pem"), "stale").unwrap();
+        std::fs::write(certs.join(".leaf-version"), "1").unwrap();
+
+        ensure_leaf_version(certs).unwrap();
+
+        assert!(!certs.join("old.localhost.pem").exists());
+        assert_eq!(
+            std::fs::read_to_string(certs.join(".leaf-version")).unwrap(),
+            LEAF_VERSION
+        );
+
+        // Second run is a no-op: fresh leafs survive.
+        std::fs::write(certs.join("new.localhost.pem"), "fresh").unwrap();
+        ensure_leaf_version(certs).unwrap();
+        assert!(certs.join("new.localhost.pem").exists());
+    }
 }

@@ -22,3 +22,14 @@ pub fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
         Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
     }
 }
+
+/// True when the domain falls through to `CustomResolver` (i.e. not
+/// `.localhost` / `.test` / `.internal` / `.local`). Used to gate
+/// `--allow-custom-domain` overrides.
+pub fn is_custom_domain(domain: &str) -> bool {
+    !(domain == "localhost"
+        || domain.ends_with(".localhost")
+        || domain.ends_with(".test")
+        || domain.ends_with(".internal")
+        || domain.ends_with(".local"))
+}

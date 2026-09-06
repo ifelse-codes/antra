@@ -70,7 +70,10 @@ pub fn install_ca() -> Result<()> {
             Ok(())
         }
         Err(os_truststore::TrustError::NeedsElevation { detail }) => {
-            eprintln!("{}", "  ✗ Elevated privileges required for system trust store.".red());
+            eprintln!(
+                "{}",
+                "  ✗ Elevated privileges required for system trust store.".red()
+            );
             eprintln!("    {detail}");
             eprintln!();
             // Try user-level keychain on macOS
@@ -79,10 +82,7 @@ pub fn install_ca() -> Result<()> {
                 eprintln!("  Trying user login keychain instead (no sudo)...");
                 match install_ca_user_level_silent(&ca) {
                     Ok(()) => {
-                        println!(
-                            "{}",
-                            "  ✓ CA installed into user login keychain.".green()
-                        );
+                        println!("{}", "  ✓ CA installed into user login keychain.".green());
                         println!(
                             "    {}",
                             "No sudo required. HTTPS for custom domains is ready.".dimmed()

@@ -133,13 +133,27 @@ pub fn execute() -> Result<()> {
                         format!("Port {port} ({name}) available").green()
                     );
                 }
-                Err(_) => {
+                Err(e) => {
                     if is_antra_daemon_port(port) {
                         println!(
                             "  {} {}",
                             "✓".green().bold(),
                             format!("Port {port} ({name}) — Antra daemon active").green()
                         );
+                    } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        // Privileged port + non-root: NOT "in use", just not permitted.
+                        println!(
+                            "  {} {}",
+                            "⚠".yellow().bold(),
+                            format!("Port {port} ({name}) needs elevated privileges").yellow()
+                        );
+                        warnings.push(format!(
+                            "Port {port} ({name}) needs elevated privileges (run with sudo or use fallback ports)"
+                        ));
+                        issues.push((
+                            format!("Port {port} ({name}) needs elevated privileges"),
+                            "sudo antra proxy start  OR  antra proxy start --port 8443 --http-port 8080".to_string(),
+                        ));
                     } else {
                         println!(
                             "  {} {}",
@@ -312,8 +326,15 @@ fn check_port_holder_with_timeout(pid: u32, port: u16) -> bool {
         .stderr(std::process::Stdio::null())
         .output();
 
+    // lsof exits 0 even with no matches on some platforms, so require an
+    // actual LISTEN line for the port instead of trusting the exit code.
     match output {
-        Ok(o) => o.status.success() && !o.stdout.is_empty(),
+        Ok(o) => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            let port_marker = format!(":{port}");
+            out.lines()
+                .any(|l| l.contains("LISTEN") && l.contains(&port_marker))
+        }
         Err(_) => false,
     }
 }

@@ -18,7 +18,7 @@ Antra runs locally and modifies system configuration (hosts file, trust store). 
 | `*.localhost`, `localhost` | ✅ Always safe — browsers resolve natively |
 | `*.test` | ✅ Always safe — IANA reserved |
 | `*.internal`, `*.local` | ⚠️ Warn but allow |
-| Known public domains (google.com, github.com, etc.) | ❌ Reject unless `--allow-public-domain` |
+| Known public domains (google.com, github.com, etc.) | ❌ Reject unless `--allow-custom-domain` |
 | Any other custom domain | ⚠️ Require explicit `--allow-custom-domain` flag |
 
 ### CA Key Safety

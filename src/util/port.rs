@@ -21,52 +21,8 @@ pub fn find_free_port_in_range() -> anyhow::Result<u16> {
     find_free_port()
 }
 
-/// Find a free port starting from a preferred port, scanning forward in range.
-/// If the preferred port is taken, automatically try the next one.
-/// Returns the actual port assigned (may differ from preferred).
-pub fn find_free_port_with_fallback(preferred: u16) -> anyhow::Result<u16> {
-    // If preferred is in range and available, use it
-    if (4000..5000).contains(&preferred) && is_port_available(preferred) {
-        return Ok(preferred);
-    }
-
-    // Scan forward from preferred (wrap around at 5000)
-    let start = if (4000..5000).contains(&preferred) {
-        preferred
-    } else {
-        4000
-    };
-    for port in start..5000 {
-        if is_port_available(port) {
-            if port != preferred {
-                tracing::debug!(
-                    preferred,
-                    assigned = port,
-                    "Preferred port unavailable, auto-assigned new port"
-                );
-            }
-            return Ok(port);
-        }
-    }
-
-    // Wrap around and try 4000..start
-    for port in 4000..start {
-        if is_port_available(port) {
-            tracing::debug!(
-                preferred,
-                assigned = port,
-                "Preferred port unavailable, auto-assigned new port"
-            );
-            return Ok(port);
-        }
-    }
-
-    // Fallback to any free port
-    find_free_port()
-}
-
-/// Check if a port is available
-fn is_port_available(port: u16) -> bool {
+/// Check if a port is available for binding on 127.0.0.1.
+pub fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
@@ -295,5 +251,32 @@ pub fn describe_port_conflict(port: u16) -> Option<String> {
             }
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_port_available_roundtrip() {
+        // Grab a free port, hold it, release it.
+        let held = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        assert!(
+            !is_port_available(port),
+            "held port {port} must report unavailable"
+        );
+        drop(held);
+        assert!(
+            is_port_available(port),
+            "released port {port} must report available"
+        );
+    }
+
+    #[test]
+    fn test_find_free_port_is_available() {
+        let port = find_free_port().unwrap();
+        assert!(is_port_available(port));
     }
 }

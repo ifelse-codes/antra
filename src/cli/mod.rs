@@ -126,6 +126,10 @@ pub enum Commands {
 
         /// Target port (e.g., 8080)
         port: u16,
+
+        /// Allow known-public custom domains (not recommended)
+        #[arg(long)]
+        allow_custom_domain: bool,
     },
 
     /// Open a domain in the default browser
@@ -186,10 +190,7 @@ impl Cli {
             Commands::Run(args) => run::execute(args),
             Commands::Dev(args) => dev::execute(args),
             Commands::Add(args) => add::execute(args),
-            Commands::List => {
-                let _ = ensure_daemon();
-                list::execute()
-            }
+            Commands::List => list::execute(),
             Commands::Doctor => doctor::execute(),
             Commands::Trust {
                 status,
@@ -199,16 +200,26 @@ impl Cli {
             } => trust::execute(status, remove, yes, user_level),
             Commands::Proxy { command } => proxy::execute(command),
             Commands::Clean { yes } => clean::execute(yes),
-            Commands::Alias { domain, port } => {
+            Commands::Alias {
+                domain,
+                port,
+                allow_custom_domain,
+            } => {
                 let _ = ensure_daemon();
-                alias::execute(&domain, port)
+                alias::execute(&domain, port, allow_custom_domain)
             }
-            Commands::Open { domain } => {
-                let _ = ensure_daemon();
-                open::execute(&domain)
-            }
+            Commands::Open { domain } => open::execute(&domain),
             Commands::Remove { domain } => {
-                let _ = ensure_daemon();
+                // Read-only when the daemon is down: there are no routes to remove.
+                if !is_daemon_running() {
+                    println!("  {} Removing route for {}", "→".cyan().bold(), domain);
+                    println!(
+                        "  {} {}",
+                        "⚠".yellow().bold(),
+                        "Daemon not running — no routes to remove".yellow()
+                    );
+                    std::process::exit(1);
+                }
                 println!("  {} Removing route for {}", "→".cyan().bold(), domain);
 
                 // Check if route exists before attempting removal
@@ -256,10 +267,7 @@ impl Cli {
                 );
                 Ok(())
             }
-            Commands::Prune => {
-                let _ = ensure_daemon();
-                prune::execute()
-            }
+            Commands::Prune => prune::execute(),
             Commands::Hosts { command } => hosts::execute(command),
             Commands::Service { command } => service::execute(command),
         }

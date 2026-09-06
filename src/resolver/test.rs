@@ -36,7 +36,7 @@ impl DomainResolver for HostsResolver {
         let (content, added) = hosts::add_to_managed_block(&content, domain);
 
         if added {
-            hosts::write_hosts_atomic(&self.hosts_path, &content)?;
+            hosts::write_hosts_with_hint(&self.hosts_path, &content, domain)?;
             tracing::info!(%domain, "Added to hosts file");
         } else {
             tracing::debug!(%domain, "Already in hosts file");
@@ -50,7 +50,7 @@ impl DomainResolver for HostsResolver {
         let (content, removed) = hosts::remove_from_managed_block(&content, domain);
 
         if removed {
-            hosts::write_hosts_atomic(&self.hosts_path, &content)?;
+            hosts::write_hosts_with_hint(&self.hosts_path, &content, domain)?;
             tracing::info!(%domain, "Removed from hosts file");
         } else {
             tracing::debug!(%domain, "Not found in hosts file");

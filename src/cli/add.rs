@@ -152,7 +152,11 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
     println!();
     if let Ok(status) = crate::ipc::client::get_startup_status() {
         if status.https_port != 443 {
-            println!("  {} Note: HTTPS on port {}", "ℹ".cyan(), status.https_port);
+            println!(
+                "  {} Note: HTTPS on port {} (port 443 unavailable — needs sudo or is in use)",
+                "ℹ".cyan(),
+                status.https_port
+            );
             let host = if domain.ends_with(".localhost") {
                 domain.clone()
             } else {

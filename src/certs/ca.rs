@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use rcgen::{CertificateParams, IsCa, Issuer, KeyPair};
+use rcgen::{CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rustls::pki_types::CertificateDer;
 
 /// Generated CA keypair.
@@ -30,6 +30,9 @@ impl CaCert {
 pub fn generate_ca() -> Result<CaCert> {
     let mut params = CertificateParams::new(vec!["Antra Local CA".to_string()])?;
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "Antra Local CA");
     let key_pair = KeyPair::generate()?;
     let cert = params.self_signed(&key_pair)?;
 

@@ -8,8 +8,8 @@ use crate::ipc::client::is_daemon_running;
 use crate::resolver::util::select_resolver;
 use crate::util::output;
 use crate::util::port::{
-    detect_port_from_command, find_free_port_in_range, find_free_port_with_fallback,
-    inject_port_flag,
+    detect_port_from_command, find_free_port, find_free_port_in_range, inject_port_flag,
+    is_port_available,
 };
 use crate::util::port_watcher;
 
@@ -58,6 +58,26 @@ pub fn execute(args: RunArgs) -> Result<()> {
 async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
     // Skip if user explicitly opted out
     if no_trust_prompt {
+        return;
+    }
+
+    // Never block on OS auth dialogs without a terminal (background jobs,
+    // pipes, CI). The `security` prompt would hang forever with no TTY.
+    #[cfg(unix)]
+    let interactive = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
+    #[cfg(not(unix))]
+    let interactive = true;
+    if !interactive {
+        println!();
+        println!(
+            "  {} Non-interactive session — skipping automatic CA install.",
+            "ℹ".cyan()
+        );
+        println!(
+            "  Run {} to enable warning-free HTTPS",
+            "antra trust".bold()
+        );
+        println!();
         return;
     }
 
@@ -148,16 +168,27 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 1. Determine port
     let port = match args.port {
         Some(p) => {
-            // User specified a port — use fallback to auto-resolve conflicts
-            find_free_port_with_fallback(p)?
+            // User specified a port — honor it verbatim. Only remap on a real
+            // conflict, and say so loudly (silent remaps route traffic nowhere).
+            if is_port_available(p) {
+                output::print_success(&format!("Using port {p}"));
+                p
+            } else {
+                let alt = find_free_port()?;
+                output::print_warning(&format!(
+                    "Port {p} is already in use. Assigned port {alt} instead."
+                ));
+                output::print_warning(
+                    "Tip: make sure your server listens on $PORT, or pass a free --port.",
+                );
+                alt
+            }
         }
         None => {
             // Try to detect port from command arguments
             if let Some(detected) = detect_port_from_command(&args.command) {
                 tracing::debug!(port = detected, "Auto-detected port from command args");
-                output::print_success(&format!(
-                    "Detected port {detected} from command"
-                ));
+                output::print_success(&format!("Detected port {detected} from command"));
                 detected
             } else {
                 tracing::debug!(command = ?args.command, "Could not auto-detect port from command");
@@ -166,7 +197,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                     "Could not detect port from command. Auto-assigned port {detected}."
                 ));
                 output::print_warning(
-                    "Tip: Use --port to specify the port your server listens on."
+                    "Tip: Use --port to specify the port your server listens on.",
                 );
                 detected
             }
@@ -207,8 +238,14 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         }
     }
 
-    // 2. Resolve domain to 127.0.0.1 (hosts file or no-op)
-    let resolver = select_resolver(&domain)?;
+    // 2. Resolve domain to 127.0.0.1 (hosts file or no-op).
+    // --allow-custom-domain bypasses the known-public-domain blocklist.
+    let resolver: Box<dyn crate::resolver::traits::DomainResolver> =
+        if args.allow_custom_domain && crate::resolver::util::is_custom_domain(&domain) {
+            Box::new(crate::resolver::custom::CustomResolver::new().with_allow_public(true))
+        } else {
+            select_resolver(&domain)?
+        };
     resolver.register(&domain)?;
     output::print_success(&format!("Domain resolved: {}", domain));
 
@@ -249,7 +286,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     if let Ok(status) = crate::ipc::client::get_startup_status_async().await {
         if status.https_port != 443 {
             println!(
-                "  {} Note: HTTPS on port {} (port 443 is in use by another service)",
+                "  {} Note: HTTPS on port {} (port 443 unavailable — needs sudo or is in use)",
                 "ℹ".cyan(),
                 status.https_port
             );

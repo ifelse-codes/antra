@@ -76,28 +76,28 @@ test_port_conflict_help() {
 }
 
 test_port_conflict_code() {
-    log_section "Feature #29: Port Conflict - find_free_port_with_fallback"
+    log_section "Feature #29: Port Conflict - explicit port honored verbatim"
 
-    if grep -q "find_free_port_with_fallback" src/util/port.rs; then
-        log_pass "find_free_port_with_fallback function exists"
+    if grep -q "pub fn is_port_available" src/util/port.rs; then
+        log_pass "is_port_available function exists"
     else
-        log_fail "find_free_port_with_fallback function exists"
+        log_fail "is_port_available function exists"
     fi
 
-    if grep -q "fn find_free_port_with_fallback" src/util/port.rs; then
-        log_pass "find_free_port_with_fallback is a function"
+    if grep -q "Using port" src/cli/run.rs; then
+        log_pass "run reports verbatim port use"
     else
-        log_fail "find_free_port_with_fallback is a function"
+        log_fail "run reports verbatim port use"
     fi
 }
 
 test_port_conflict_used_in_run() {
     log_section "Feature #29: Port Conflict - Used in run.rs"
 
-    if grep -q "find_free_port_with_fallback" src/cli/run.rs; then
-        log_pass "find_free_port_with_fallback used in run.rs"
+    if grep -q "is_port_available" src/cli/run.rs; then
+        log_pass "is_port_available used in run.rs"
     else
-        log_fail "find_free_port_with_fallback used in run.rs"
+        log_fail "is_port_available used in run.rs"
     fi
 }
 
@@ -116,17 +116,12 @@ test_smart_daemon_code() {
 }
 
 test_smart_daemon_in_list() {
-    log_section "Feature #27: Smart Daemon - auto-start in list"
+    log_section "Feature #27: Read-only list never auto-starts daemon"
 
-    if grep -q "ensure_daemon" src/cli/mod.rs | grep -q "list"; then
-        log_pass "ensure_daemon called for list command"
+    if grep -B2 "list::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
+        log_fail "list must not auto-start daemon"
     else
-        # Check more broadly
-        if grep -B2 "list::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
-            log_pass "ensure_daemon called for list command"
-        else
-            log_fail "ensure_daemon called for list command"
-        fi
+        log_pass "list does not auto-start daemon"
     fi
 }
 
@@ -141,37 +136,37 @@ test_smart_daemon_in_alias() {
 }
 
 test_smart_daemon_in_open() {
-    log_section "Feature #27: Smart Daemon - auto-start in open"
+    log_section "Feature #27: open never auto-starts daemon"
 
     if grep -B2 "open::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
-        log_pass "ensure_daemon called for open command"
+        log_fail "open must not auto-start daemon"
     else
-        log_fail "ensure_daemon called for open command"
+        log_pass "open does not auto-start daemon"
     fi
 }
 
 test_smart_daemon_in_remove() {
-    log_section "Feature #27: Smart Daemon - auto-start in remove"
+    log_section "Feature #27: remove never auto-starts daemon"
 
     if grep -B2 "println.*Removing route" src/cli/mod.rs | grep -q "ensure_daemon"; then
-        log_pass "ensure_daemon called for remove command"
+        log_fail "remove must not auto-start daemon"
     else
-        log_fail "ensure_daemon called for remove command"
+        log_pass "remove does not auto-start daemon"
     fi
 }
 
 test_smart_daemon_in_prune() {
-    log_section "Feature #27: Smart Daemon - auto-start in prune"
+    log_section "Feature #27: prune never auto-starts daemon"
 
     if grep -B2 "prune::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
-        log_pass "ensure_daemon called for prune command"
+        log_fail "prune must not auto-start daemon"
     else
-        log_fail "ensure_daemon called for prune command"
+        log_pass "prune does not auto-start daemon"
     fi
 }
 
 test_smart_daemon_list_no_daemon() {
-    log_section "Feature #27: Smart Daemon - list auto-starts daemon"
+    log_section "Feature #27: list reports state without mutating it"
 
     # Stop any running daemon first
     $ANTRA_BIN proxy stop 2>/dev/null || true
@@ -179,10 +174,17 @@ test_smart_daemon_list_no_daemon() {
 
     output=$($ANTRA_BIN list 2>&1 || true)
 
-    if echo "$output" | grep -q "Daemon not running, starting"; then
-        log_pass "list command auto-starts daemon"
+    if echo "$output" | grep -q "Daemon not running"; then
+        log_pass "list reports daemon state"
     else
-        log_pass "list command runs (daemon may have been running)"
+        log_fail "list reports daemon state"
+    fi
+
+    status_out=$($ANTRA_BIN proxy status 2>&1 || true)
+    if echo "$status_out" | grep -qi "not running"; then
+        log_pass "list did not auto-start daemon"
+    else
+        log_fail "list did not auto-start daemon"
     fi
 }
 

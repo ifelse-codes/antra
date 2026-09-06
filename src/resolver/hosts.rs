@@ -42,6 +42,25 @@ pub fn write_hosts_atomic(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write content to the hosts file, translating permission errors into an
+/// actionable hint (writing /etc/hosts needs sudo).
+pub fn write_hosts_with_hint(path: &Path, content: &str, domain: &str) -> Result<()> {
+    write_hosts_atomic(path, content).map_err(|e| {
+        let denied = e
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied);
+        if denied {
+            anyhow::anyhow!(
+                "Permission denied writing {} (needs sudo).\n\
+                 Re-run with: sudo antra alias {domain} <port>",
+                path.display()
+            )
+        } else {
+            e
+        }
+    })
+}
+
 /// Ensure the managed block markers exist in the hosts file.
 /// Returns the content with markers present.
 pub fn ensure_managed_block(content: &str) -> String {

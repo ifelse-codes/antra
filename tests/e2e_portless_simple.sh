@@ -79,20 +79,21 @@ section "FEATURE 3: PORT CONFLICT AUTO-RESOLUTION"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 cd "$PROJECT_DIR"
-grep -q "fn find_free_port_with_fallback" src/util/port.rs && pass "Function defined" || fail "Function defined"
-grep -q "find_free_port_with_fallback" src/cli/run.rs && pass "Used in run.rs" || fail "Usage in run"
+grep -q "pub fn is_port_available" src/util/port.rs && pass "is_port_available defined" || fail "is_port_available defined"
+grep -q "is_port_available" src/cli/run.rs && pass "Explicit --port honored in run.rs" || fail "Explicit --port in run"
+grep -q "Using port" src/cli/run.rs && pass "Port verbatim message" || fail "Port message"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-section "FEATURE 4: SMART DAEMON AUTO-START"
+section "FEATURE 4: READ-ONLY COMMANDS NEVER AUTO-START"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 $ANTRA_BIN proxy stop 2>/dev/null || true
 sleep 1
 
 OUTPUT=$($ANTRA_BIN list 2>&1)
-echo "$OUTPUT" | grep -q "Daemon not running" && pass "Daemon auto-started" || pass "Daemon running"
+echo "$OUTPUT" | grep -q "Daemon not running" && pass "list reports daemon state" || fail "list reports state"
 
-$ANTRA_BIN proxy status 2>&1 | grep -q "Daemon PID" && pass "Daemon running" || fail "Daemon status"
+$ANTRA_BIN proxy status 2>&1 | grep -qi "not running" && pass "list did not auto-start daemon" || fail "list mutated state"
 
 cd "$PROJECT_DIR"
 grep -q "fn ensure_daemon" src/cli/mod.rs && pass "ensure_daemon exists" || fail "ensure_daemon"

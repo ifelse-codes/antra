@@ -131,49 +131,8 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         }
     });
 
-    // Probe HTTP port and start with auto-fallback
-    let http_port = config.http_port;
-    let actual_http_port;
-    let http_ok;
-    let http_error;
-
-    if crate::proxy::https::probe_port(http_port).await.is_ok() {
-        actual_http_port = http_port;
-        http_ok = true;
-        http_error = None;
-        let listener = crate::proxy::https::bind_http_redirect(http_port).await;
-        if let Ok(l) = listener {
-            crate::proxy::https::run_http_redirect(l);
-        }
-    } else {
-        let fallback = match http_port {
-            80 => 8080,
-            p => p + 1000,
-        };
-        tracing::warn!(
-            port = http_port,
-            "HTTP port in use, trying fallback {}",
-            fallback
-        );
-        if crate::proxy::https::probe_port(fallback).await.is_ok() {
-            actual_http_port = fallback;
-            http_ok = true;
-            http_error = None;
-            if let Ok(l) = crate::proxy::https::bind_http_redirect(fallback).await {
-                crate::proxy::https::run_http_redirect(l);
-            }
-        } else {
-            actual_http_port = fallback;
-            http_ok = false;
-            http_error = Some(format!("Both {http_port} and {fallback} are in use"));
-        }
-        // Show helpful message about what's using the port
-        if let Some(hint) = crate::util::port::describe_port_conflict(http_port) {
-            tracing::info!(port = http_port, "{}", hint);
-        }
-    }
-
-    // Probe HTTPS port and start with auto-fallback
+    // Probe HTTPS port first: the HTTP→HTTPS redirect needs the actual HTTPS
+    // port for its Location header (it differs on fallback, e.g. 8443).
     let https_port = config.https_port;
     let actual_https_port;
     let https_ok;
@@ -222,6 +181,48 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         // Show helpful message about what's using the port
         if let Some(hint) = crate::util::port::describe_port_conflict(https_port) {
             tracing::info!(port = https_port, "{}", hint);
+        }
+    }
+
+    // Probe HTTP port and start with auto-fallback
+    let http_port = config.http_port;
+    let actual_http_port;
+    let http_ok;
+    let http_error;
+
+    if crate::proxy::https::probe_port(http_port).await.is_ok() {
+        actual_http_port = http_port;
+        http_ok = true;
+        http_error = None;
+        let listener = crate::proxy::https::bind_http_redirect(http_port).await;
+        if let Ok(l) = listener {
+            crate::proxy::https::run_http_redirect(l, actual_https_port);
+        }
+    } else {
+        let fallback = match http_port {
+            80 => 8080,
+            p => p + 1000,
+        };
+        tracing::warn!(
+            port = http_port,
+            "HTTP port in use, trying fallback {}",
+            fallback
+        );
+        if crate::proxy::https::probe_port(fallback).await.is_ok() {
+            actual_http_port = fallback;
+            http_ok = true;
+            http_error = None;
+            if let Ok(l) = crate::proxy::https::bind_http_redirect(fallback).await {
+                crate::proxy::https::run_http_redirect(l, actual_https_port);
+            }
+        } else {
+            actual_http_port = fallback;
+            http_ok = false;
+            http_error = Some(format!("Both {http_port} and {fallback} are in use"));
+        }
+        // Show helpful message about what's using the port
+        if let Some(hint) = crate::util::port::describe_port_conflict(http_port) {
+            tracing::info!(port = http_port, "{}", hint);
         }
     }
 
