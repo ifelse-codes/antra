@@ -208,7 +208,11 @@ ask_trust() {
     elif [ -e /dev/tty ] 2>/dev/null; then
         # Can read from /dev/tty even when piped
         printf "  Install CA into system trust store? [Y/n] "
-        read -r response < /dev/tty
+        if ! read -r response < /dev/tty; then
+            # Headless with no usable TTY (e.g. CI) — fall through to auto-install
+            echo "  Non-interactive mode — auto-installing CA..."
+            response="y"
+        fi
     else
         # Non-interactive: default to YES (auto-install)
         echo "  Non-interactive mode — auto-installing CA..."
@@ -253,7 +257,7 @@ main() {
     info "Latest version: ${version}"
 
     tmp_dir="$(mktemp -d)"
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap 'rm -rf "${tmp_dir:-}"' EXIT
 
     tmp_binary="${tmp_dir}/${BINARY_NAME}"
     download_binary "$artifact" "$version" "$tmp_binary"
