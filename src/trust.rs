@@ -4,6 +4,8 @@ use colored::Colorize;
 use crate::certs::store::CertStore;
 
 /// Common Name of the Antra local root CA. Must match `certs::ca`.
+/// macOS-only: used for the login-keychain trust lookup.
+#[cfg(target_os = "macos")]
 pub const CA_COMMON_NAME: &str = "Antra Local CA";
 
 /// Check if the Antra CA is trusted by the OS.
