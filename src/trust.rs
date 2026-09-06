@@ -70,12 +70,36 @@ pub fn install_ca() -> Result<()> {
             Ok(())
         }
         Err(os_truststore::TrustError::NeedsElevation { detail }) => {
-            eprintln!("{}", "  ✗ Elevated privileges required.".red());
+            eprintln!("{}", "  ✗ Elevated privileges required for system trust store.".red());
             eprintln!("    {detail}");
             eprintln!();
+            // Try user-level keychain on macOS
+            #[cfg(target_os = "macos")]
+            {
+                eprintln!("  Trying user login keychain instead (no sudo)...");
+                match install_ca_user_level_silent(&ca) {
+                    Ok(()) => {
+                        println!(
+                            "{}",
+                            "  ✓ CA installed into user login keychain.".green()
+                        );
+                        println!(
+                            "    {}",
+                            "No sudo required. HTTPS for custom domains is ready.".dimmed()
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("    User keychain install failed: {e}");
+                    }
+                }
+            }
+            eprintln!();
             eprintln!("    Try: {}", "sudo antra trust".bold());
-            eprintln!("    Or install manually to your login keychain:");
-            eprintln!("      security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db <ca.pem>");
+            #[cfg(target_os = "macos")]
+            {
+                eprintln!("    Or: {}", "antra trust --user-level".bold());
+            }
             anyhow::bail!("Elevation required to install CA")
         }
         Err(os_truststore::TrustError::InteractiveAuthRequired) => {
@@ -85,6 +109,10 @@ pub fn install_ca() -> Result<()> {
             );
             eprintln!("    This command needs a terminal with GUI access.");
             eprintln!("    Try: {}", "sudo antra trust".bold());
+            #[cfg(target_os = "macos")]
+            {
+                eprintln!("    Or: {}", "antra trust --user-level".bold());
+            }
             anyhow::bail!("Interactive auth required")
         }
         Err(os_truststore::TrustError::StoreToolMissing { hint }) => {
@@ -108,6 +136,7 @@ pub fn install_ca() -> Result<()> {
 
 /// Install the Antra CA into the OS trust store without prompting.
 /// Used by `antra run` for first-time auto-trust.
+/// Tries system-level first, then falls back to user-level keychain on macOS.
 pub fn install_ca_noninteractive() -> Result<()> {
     let store = CertStore::new()?;
     let ca = store.get_or_create_ca()?;
@@ -127,8 +156,17 @@ pub fn install_ca_noninteractive() -> Result<()> {
         return Ok(());
     }
 
+    // Fallback: try user-level keychain on macOS (no sudo needed)
+    #[cfg(target_os = "macos")]
+    {
+        if install_ca_user_level_silent(&ca).is_ok() {
+            return Ok(());
+        }
+    }
+
     anyhow::bail!(
-        "Could not install CA automatically. Run: {}",
+        "Could not install CA automatically. Try: {} or {}",
+        "antra trust --user-level".bold(),
         "sudo antra trust".bold()
     )
 }
@@ -156,13 +194,17 @@ pub fn install_ca_user_level() -> Result<()> {
         let temp_cert = tempfile::NamedTempFile::new()?;
         std::fs::write(temp_cert.path(), &ca.cert_pem)?;
 
+        let keychain_path = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+            .join("Library/Keychains/login.keychain-db");
+
         let status = std::process::Command::new("security")
             .args([
                 "add-trusted-cert",
                 "-r",
                 "trustRoot",
                 "-k",
-                "~/Library/Keychains/login.keychain-db",
+                keychain_path.to_str().unwrap(),
                 temp_cert.path().to_str().unwrap(),
             ])
             .status();
@@ -202,6 +244,34 @@ pub fn install_ca_user_level() -> Result<()> {
         );
         println!("  On this platform, try: {}", "sudo antra trust".bold());
         anyhow::bail!("User-level trust install not supported on this platform")
+    }
+}
+
+/// Install CA into user login keychain without output (for noninteractive fallback).
+#[cfg(target_os = "macos")]
+fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
+    let temp_cert = tempfile::NamedTempFile::new()?;
+    std::fs::write(temp_cert.path(), &ca.cert_pem)?;
+
+    let keychain_path = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+        .join("Library/Keychains/login.keychain-db");
+
+    let status = std::process::Command::new("security")
+        .args([
+            "add-trusted-cert",
+            "-r",
+            "trustRoot",
+            "-k",
+            keychain_path.to_str().unwrap(),
+            temp_cert.path().to_str().unwrap(),
+        ])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => anyhow::bail!("security command failed with exit code: {s}"),
+        Err(e) => anyhow::bail!("Failed to run security command: {e}"),
     }
 }
 

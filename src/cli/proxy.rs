@@ -153,6 +153,11 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                                     "    {}",
                                     "Tip: Run 'sudo antra proxy start' to use port 443".dimmed()
                                 );
+                                if let Some(hint) = crate::util::port::describe_port_conflict(443) {
+                                    for line in hint.lines() {
+                                        println!("    {}", line.dimmed());
+                                    }
+                                }
                             }
                         }
                         if status.http_ok {
@@ -173,6 +178,11 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                                     "    {}",
                                     "Tip: Run 'sudo antra proxy start' to use port 80".dimmed()
                                 );
+                                if let Some(hint) = crate::util::port::describe_port_conflict(80) {
+                                    for line in hint.lines() {
+                                        println!("    {}", line.dimmed());
+                                    }
+                                }
                             }
                         }
                     }

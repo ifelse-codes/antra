@@ -220,7 +220,7 @@ footer{border-top:1px solid var(--line);padding:48px 0}
   <div class="install-block" id="install">
     <div class="install-label">Install</div>
     <div class="install-cmd" onclick="copyInstall(this)">
-      <code>curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash</code>
+      <code>curl -fsSL https://antra.iifelse.com/install.sh | bash</code>
       <button class="copy-btn" onclick="event.stopPropagation();copyInstall(this.parentElement)">copy</button>
     </div>
   </div>
@@ -458,7 +458,7 @@ footer{border-top:1px solid var(--line);padding:48px 0}
 <script>
 // Copy install command
 function copyInstall(el){
-  const cmd='curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash';
+  const cmd='curl -fsSL https://antra.iifelse.com/install.sh | bash';
   navigator.clipboard.writeText(cmd).then(()=>{
     const btn=el.querySelector('.copy-btn')||el;
     const orig=btn.textContent;

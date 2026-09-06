@@ -60,7 +60,7 @@ impl CertCache {
         let leaf = match self.store.get_or_create_leaf(hostname, &self.ca) {
             Ok(leaf) => leaf,
             Err(e) => {
-                tracing::error!(%hostname, error = %e, "Failed to generate leaf certificate");
+                tracing::warn!(%hostname, error = %e, "Failed to generate leaf certificate — TLS handshake will fail");
                 return None;
             }
         };
@@ -68,7 +68,7 @@ impl CertCache {
         let certified_key = match leaf.to_certified_key() {
             Ok(key) => key,
             Err(e) => {
-                tracing::error!(%hostname, error = %e, "Failed to create CertifiedKey");
+                tracing::warn!(%hostname, error = %e, "Failed to create CertifiedKey");
                 return None;
             }
         };

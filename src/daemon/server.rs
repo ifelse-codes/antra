@@ -167,6 +167,10 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
             http_ok = false;
             http_error = Some(format!("Both {http_port} and {fallback} are in use"));
         }
+        // Show helpful message about what's using the port
+        if let Some(hint) = crate::util::port::describe_port_conflict(http_port) {
+            tracing::info!(port = http_port, "{}", hint);
+        }
     }
 
     // Probe HTTPS port and start with auto-fallback
@@ -214,6 +218,10 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
             actual_https_port = fallback;
             https_ok = false;
             https_error = Some(format!("Both {https_port} and {fallback} are in use"));
+        }
+        // Show helpful message about what's using the port
+        if let Some(hint) = crate::util::port::describe_port_conflict(https_port) {
+            tracing::info!(port = https_port, "{}", hint);
         }
     }
 

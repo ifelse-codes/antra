@@ -107,24 +107,17 @@ pub fn detect_port_from_command(command: &[String]) -> Option<u16> {
 
     // 2. python3 -m http.server PORT (port is the first numeric arg after http.server)
     if joined.contains("http.server") || joined.contains("SimpleHTTPServer") {
-        // Find the position of "http.server" and look for the first numeric arg after it
         if let Some(pos) = command.iter().position(|a| a == "http.server") {
             for arg in command.iter().skip(pos + 1) {
                 if let Ok(port) = arg.parse::<u16>() {
                     return Some(port);
                 }
-                // Stop if we hit a flag (skip non-numeric args like --directory)
             }
         }
     }
 
-    // 3. node/tsx/ts-node with --port already handled above, but also check
-    //    for `node server.js` or `tsx server.ts` where PORT is in env or config
-    //    — we can't detect these without running the command, so skip.
-
-    // 4. Ruby: rackup, rails server, etc.
+    // 3. Ruby: rackup, rails server, etc.
     if joined.contains("rackup") || joined.contains("rails server") {
-        // Look for -p PORT flag in command args
         for i in 0..command.len() {
             if command[i] == "-p" && i + 1 < command.len() {
                 if let Ok(port) = command[i + 1].parse::<u16>() {
@@ -139,15 +132,13 @@ pub fn detect_port_from_command(command: &[String]) -> Option<u16> {
         }
     }
 
-    // 5. Django: python manage.py runserver [PORT]
+    // 4. Django: python manage.py runserver [PORT]
     if joined.contains("manage.py") && joined.contains("runserver") {
-        // Django port is the last numeric arg after runserver
         if let Some(pos) = command.iter().position(|a| a == "runserver") {
             for arg in command.iter().skip(pos + 1) {
                 if let Ok(port) = arg.parse::<u16>() {
                     return Some(port);
                 }
-                // Stop if we hit a flag (skip non-numeric args like --noreload)
                 if arg.starts_with('-') {
                     break;
                 }
@@ -155,26 +146,24 @@ pub fn detect_port_from_command(command: &[String]) -> Option<u16> {
         }
     }
 
-    // 6. npm scripts forwarding: npm run dev -- --port PORT
-    if joined.contains("npm") && joined.contains("--") {
-        // Look for --port after the -- separator
-        if let Some(dash_pos) = command.iter().position(|a| a == "--") {
-            for i in (dash_pos + 1)..command.len() {
-                if (command[i] == "--port" || command[i] == "-p") && i + 1 < command.len() {
-                    if let Ok(port) = command[i + 1].parse::<u16>() {
-                        return Some(port);
-                    }
+    // 5. npm/pnpm/yarn/bun scripts forwarding: npm run dev -- --port PORT
+    //    Also handles: pnpm dev --port PORT, bun run dev --port PORT
+    if let Some(dash_pos) = command.iter().position(|a| a == "--") {
+        for i in (dash_pos + 1)..command.len() {
+            if (command[i] == "--port" || command[i] == "-p") && i + 1 < command.len() {
+                if let Ok(port) = command[i + 1].parse::<u16>() {
+                    return Some(port);
                 }
-                if let Some(rest) = command[i].strip_prefix("--port=") {
-                    if let Ok(port) = rest.parse::<u16>() {
-                        return Some(port);
-                    }
+            }
+            if let Some(rest) = command[i].strip_prefix("--port=") {
+                if let Ok(port) = rest.parse::<u16>() {
+                    return Some(port);
                 }
             }
         }
     }
 
-    // 7. Go: air, gin, etc. — typically use --port already handled above
+    // 6. Go: air, gin, etc. — typically use --port already handled above
 
     None
 }
@@ -254,4 +243,57 @@ pub fn prompt_for_port() -> Option<u16> {
         }
     }
     None
+}
+
+/// Describe what typically occupies well-known ports and how to free them.
+pub fn describe_port_conflict(port: u16) -> Option<String> {
+    match port {
+        80 => {
+            #[cfg(target_os = "macos")]
+            {
+                Some(
+                    "Port 80 is likely used by AirPlay Receiver (macOS Monterey+).\n\
+                     \n  To free it:\n\
+                     \x20  1. Open System Settings → General → AirDrop & Handoff\n\
+                     \x20  2. Turn off 'AirPlay Receiver'\n\
+                     \n  Or run: sudo antra proxy start"
+                        .to_string(),
+                )
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Some(
+                    "Port 80 is used by another service (Apache, nginx, etc.).\n\
+                     \n  To free it:\n\
+                     \x20  • Stop the service using: sudo lsof -i :80\n\
+                     \x20  • Or run: sudo antra proxy start"
+                        .to_string(),
+                )
+            }
+        }
+        443 => {
+            #[cfg(target_os = "macos")]
+            {
+                Some(
+                    "Port 443 is likely used by AirPlay Receiver (macOS Monterey+).\n\
+                     \n  To free it:\n\
+                     \x20  1. Open System Settings → General → AirDrop & Handoff\n\
+                     \x20  2. Turn off 'AirPlay Receiver'\n\
+                     \n  Or run: sudo antra proxy start"
+                        .to_string(),
+                )
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Some(
+                    "Port 443 is used by another service.\n\
+                     \n  To free it:\n\
+                     \x20  • Stop the service using: sudo lsof -i :443\n\
+                     \x20  • Or run: sudo antra proxy start"
+                        .to_string(),
+                )
+            }
+        }
+        _ => None,
+    }
 }

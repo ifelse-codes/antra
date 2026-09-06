@@ -155,15 +155,20 @@ async fn run_inner(args: RunArgs) -> Result<()> {
             // Try to detect port from command arguments
             if let Some(detected) = detect_port_from_command(&args.command) {
                 tracing::debug!(port = detected, "Auto-detected port from command args");
-                output::print_warning(&format!(
-                    "No --port specified, detected port {detected} from command"
+                output::print_success(&format!(
+                    "Detected port {detected} from command"
                 ));
                 detected
             } else {
                 tracing::debug!(command = ?args.command, "Could not auto-detect port from command");
-                // Use a free port in the 4000-4999 range
-                output::print_warning("No --port specified, auto-assigning port.");
-                find_free_port_in_range()?
+                let detected = find_free_port_in_range()?;
+                output::print_warning(&format!(
+                    "Could not detect port from command. Auto-assigned port {detected}."
+                ));
+                output::print_warning(
+                    "Tip: Use --port to specify the port your server listens on."
+                );
+                detected
             }
         }
     };
