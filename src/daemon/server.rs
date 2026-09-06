@@ -268,9 +268,12 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     });
 
     // Start IPC server (this blocks)
+    // Log the ports actually bound (fallbacks included), not the requested ones.
     tracing::info!(
-        https_port = config.https_port,
-        http_port = config.http_port,
+        https_port = actual_https_port,
+        https_ok,
+        http_port = actual_http_port,
+        http_ok,
         idle_timeout_secs = config.idle_timeout.as_secs(),
         "Daemon ready"
     );

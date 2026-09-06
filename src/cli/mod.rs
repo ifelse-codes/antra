@@ -76,6 +76,19 @@ pub enum Commands {
     Run(run::RunArgs),
 
     /// Auto-detect project and run dev server (zero-config)
+    ///
+    /// Without an antra.toml, detects Node.js, Rust, Go, Python, Ruby,
+    /// Elixir and PHP projects automatically.
+    ///
+    /// With an antra.toml in the current directory, uses it instead:
+    /// domain = "myapp.localhost"
+    /// [server]
+    /// command = "pnpm"
+    /// args = ["dev"]
+    /// port = 5173
+    ///
+    /// `command` is one binary; put flags in `args`. --domain/--port
+    /// override the file.
     Dev(dev::DevArgs),
 
     /// Add a route to an existing running server (no process spawned)

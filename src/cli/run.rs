@@ -336,9 +336,24 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         }
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {e}", final_program))?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            // The backend never started — don't leave a dangling route
+            // behind pointing at a port nothing listens on.
+            let _ = crate::ipc::client::send_command(
+                crate::ipc::protocol::IpcPayload::UnregisterRoute(
+                    crate::ipc::protocol::UnregisterRouteRequest {
+                        domain: domain.clone(),
+                    },
+                ),
+            )
+            .await;
+            let _ = resolver.unregister(&domain);
+            output::print_warning(&format!("Route removed: {domain}"));
+            return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
+        }
+    };
 
     // Capture stdout for port watching
     let child_stdout = child.stdout.take();

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 
-use crate::config::project::{config_path, load_project_config};
+use crate::config::project::{config_path, load_project_config, split_command_string};
 use crate::util::detect;
 use crate::util::output;
 
@@ -21,7 +21,6 @@ pub struct DevArgs {
     #[arg(long)]
     pub no_trust_prompt: bool,
 }
-
 pub fn execute(args: DevArgs) -> Result<()> {
     // First try to load antra.toml
     let config = load_project_config()
@@ -31,8 +30,33 @@ pub fn execute(args: DevArgs) -> Result<()> {
         // Existing behavior: use antra.toml config
         output::print_success(&format!("Loaded {}", config_path().display()));
 
-        let mut command_parts = vec![config.server.command.clone()];
-        command_parts.extend(config.server.args.clone());
+        // `server.command` must be one binary, but `command = "python3 -m ..."`
+        // is the natural thing to write. When no explicit `args` are given,
+        // split a spaced command (shell-like quoting) instead of trying to
+        // execute the whole string as one binary. A literal existing path
+        // (e.g. "/Applications/My App/server") is kept whole.
+        let command_parts = if config.server.args.is_empty()
+            && config.server.command.contains(char::is_whitespace)
+            && !std::path::Path::new(&config.server.command).exists()
+        {
+            let split = split_command_string(&config.server.command);
+            if split.is_empty() {
+                vec![config.server.command.clone()]
+            } else {
+                output::print_warning(&format!(
+                    "Split server.command into program + args: {}",
+                    split.join(" ")
+                ));
+                output::print_warning(
+                    "Tip: prefer `command = \"python3\"` with `args = [\"-m\", \"http.server\"]`.",
+                );
+                split
+            }
+        } else {
+            let mut parts = vec![config.server.command.clone()];
+            parts.extend(config.server.args.clone());
+            parts
+        };
 
         let run_args = run::RunArgs {
             domain: args.domain.unwrap_or_else(|| config.domain.clone()),

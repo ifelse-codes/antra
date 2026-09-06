@@ -39,6 +39,17 @@ fn show_status() -> Result<()> {
             "✓".green(),
             "CA is trusted by the system".green()
         );
+    } else if trust::check_user_level_trust() {
+        println!(
+            "  {} {}",
+            "✓".green(),
+            "CA is trusted via your login keychain (user-level, no sudo)".green()
+        );
+        println!();
+        println!(
+            "  {}",
+            "HTTPS works with no warnings. For system-wide trust, run: sudo antra trust".dimmed()
+        );
     } else {
         println!(
             "  {} {}",
@@ -46,6 +57,13 @@ fn show_status() -> Result<()> {
             "CA is NOT trusted by the system".red()
         );
         println!();
+        #[cfg(target_os = "macos")]
+        println!(
+            "  Run {} (no sudo) or {} (system-wide).",
+            "antra trust --user-level".cyan(),
+            "sudo antra trust".cyan()
+        );
+        #[cfg(not(target_os = "macos"))]
         println!("  Run {} to install the CA.", "antra trust".cyan());
     }
 

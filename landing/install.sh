@@ -67,10 +67,10 @@ detect_arch() {
 artifact_name() {
     local os="$1" arch="$2"
     case "${os}-${arch}" in
-        darwin-arm64)   echo "antra-aarch64-apple-darwin";;
+        darwin-aarch64)   echo "antra-aarch64-apple-darwin";;
         darwin-x86_64)  echo "antra-x86_64-apple-darwin";;
         linux-x86_64)   echo "antra-x86_64-linux";;
-        linux-arm64)    echo "antra-aarch64-linux";;
+        linux-aarch64)    echo "antra-aarch64-linux";;
         windows-x86_64) echo "antra-x86_64-windows.exe";;
         *)
             err "No release binary for ${os}-${arch}"
@@ -195,6 +195,7 @@ ask_trust() {
     echo "  HTTPS works with zero browser warnings — forever."
     echo ""
     echo "  ${DIM}This requires admin privileges (sudo) on macOS/Linux.${RESET}"
+    echo "  ${DIM}On macOS you can use 'antra trust --user-level' instead (no sudo).${RESET}"
     echo "  ${DIM}The CA is local-only. Nothing is sent anywhere.${RESET}"
     echo ""
 

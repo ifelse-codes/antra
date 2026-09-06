@@ -89,6 +89,7 @@ section{position:relative;z-index:1}
 .feature-index{font-family:var(--font-mono);font-size:11px;color:var(--violet);margin-bottom:12px}
 .feature-card h3{font-size:16px;font-weight:600;color:var(--text-heading);letter-spacing:-0.025em;margin-bottom:8px}
 .feature-card p{font-size:13.5px;color:var(--text-muted);line-height:1.5}
+.feature-card pre{margin-top:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--text-body);overflow-x:auto;white-space:pre}
 
 /* ── Architecture ─────────────────────────────────── */
 .architecture{padding:104px 0}
@@ -276,7 +277,7 @@ footer{border-top:1px solid var(--line);padding:48px 0}
     <div class="feature-card">
       <div class="feature-index">02</div>
       <h3>Real HTTPS</h3>
-      <p>Local CA, SNI certs, zero browser warnings. One-time trust, then forget.</p>
+      <p>Local CA, SNI certs, zero browser warnings. One-time trust, then forget. On macOS, <code>antra trust --user-level</code> needs no sudo.</p>
     </div>
     <div class="feature-card">
       <div class="feature-index">03</div>
@@ -297,6 +298,12 @@ footer{border-top:1px solid var(--line);padding:48px 0}
       <div class="feature-index">06</div>
       <h3>Project config</h3>
       <p>Drop an antra.toml. Run antra dev. The whole team gets the same setup.</p>
+      <pre><code>domain = "myapp.localhost"
+
+[server]
+command = "pnpm"
+args = ["dev"]
+port = 5173</code></pre>
     </div>
   </div>
 </div>

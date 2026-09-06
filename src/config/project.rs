@@ -80,3 +80,118 @@ fn validate(config: &ProjectConfig, path: &Path) -> Result<()> {
 
     Ok(())
 }
+
+/// Split a command string into program + args using shell-like quoting.
+///
+/// `server.command` must be a single binary, but users naturally write
+/// `command = "python3 -m http.server 8000"`. Splitting (with support for
+/// single/double quotes and backslash escapes) turns that into
+/// `["python3", "-m", "http.server", "8000"]` instead of failing with
+/// "No such file or directory".
+pub fn split_command_string(command: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut has_content = false;
+
+    while let Some(c) = chars.next() {
+        if in_single {
+            if c == '\'' {
+                in_single = false;
+            } else {
+                current.push(c);
+                has_content = true;
+            }
+        } else if in_double {
+            match c {
+                '"' => in_double = false,
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    }
+                    has_content = true;
+                }
+                _ => {
+                    current.push(c);
+                    has_content = true;
+                }
+            }
+        } else {
+            match c {
+                '\'' => {
+                    in_single = true;
+                    has_content = true;
+                }
+                '"' => {
+                    in_double = true;
+                    has_content = true;
+                }
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                    }
+                    has_content = true;
+                }
+                _ if c.is_whitespace() => {
+                    if has_content {
+                        parts.push(std::mem::take(&mut current));
+                        has_content = false;
+                    }
+                }
+                _ => {
+                    current.push(c);
+                    has_content = true;
+                }
+            }
+        }
+    }
+    if has_content {
+        parts.push(current);
+    }
+    parts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_basic() {
+        assert_eq!(
+            split_command_string("python3 -m http.server 8000"),
+            vec!["python3", "-m", "http.server", "8000"]
+        );
+    }
+
+    #[test]
+    fn test_split_single_word() {
+        assert_eq!(split_command_string("pnpm"), vec!["pnpm"]);
+    }
+
+    #[test]
+    fn test_split_quotes() {
+        assert_eq!(
+            split_command_string("npm run \"my script\""),
+            vec!["npm", "run", "my script"]
+        );
+        assert_eq!(
+            split_command_string("echo 'hello world'"),
+            vec!["echo", "hello world"]
+        );
+    }
+
+    #[test]
+    fn test_split_escaped_space() {
+        assert_eq!(
+            split_command_string("echo hello\\ world"),
+            vec!["echo", "hello world"]
+        );
+    }
+
+    #[test]
+    fn test_split_blank() {
+        assert!(split_command_string("   ").is_empty());
+    }
+}

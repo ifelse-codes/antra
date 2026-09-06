@@ -41,7 +41,7 @@ pub fn execute() -> Result<()> {
         }
     }
 
-    // 2. Check CA trust
+    // 2. Check CA trust (system store, then macOS user login keychain)
     match trust::check_trust_status() {
         Ok(true) => {
             println!(
@@ -50,12 +50,25 @@ pub fn execute() -> Result<()> {
                 "CA trusted by system".green()
             );
         }
+        Ok(false) if trust::check_user_level_trust() => {
+            println!(
+                "  {} {}",
+                "✓".green().bold(),
+                "CA trusted via login keychain (user-level, no sudo)".green()
+            );
+        }
         Ok(false) => {
             println!(
                 "  {} {}",
                 "✗".red().bold(),
                 "CA not trusted by system".red()
             );
+            #[cfg(target_os = "macos")]
+            issues.push((
+                "CA not trusted by system".to_string(),
+                "antra trust --user-level  (no sudo)  OR  sudo antra trust".to_string(),
+            ));
+            #[cfg(not(target_os = "macos"))]
             issues.push((
                 "CA not trusted by system".to_string(),
                 "antra trust".to_string(),
@@ -103,6 +116,29 @@ pub fn execute() -> Result<()> {
                 println!(
                     "    {}",
                     format!("Uptime: {}s", status.uptime_secs).dimmed()
+                );
+            }
+        }
+
+        // Show the ports the daemon actually bound (fallbacks included),
+        // so users know which URLs to visit.
+        if let Ok(startup) = crate::ipc::client::get_startup_status() {
+            println!(
+                "    {}",
+                format!(
+                    "HTTPS :{} · HTTP :{}",
+                    startup.https_port, startup.http_port
+                )
+                .dimmed()
+            );
+            if startup.https_port != 443 {
+                println!(
+                    "    {}",
+                    format!(
+                        "Visit https://<domain>:{} (port 443 unavailable)",
+                        startup.https_port
+                    )
+                    .dimmed()
                 );
             }
         }
@@ -328,12 +364,28 @@ fn check_port_holder_with_timeout(pid: u32, port: u16) -> bool {
 
     // lsof exits 0 even with no matches on some platforms, so require an
     // actual LISTEN line for the port instead of trusting the exit code.
+    // Match the port exactly: a naive `contains(":80")` also matches
+    // `:8080`, which once made doctor credit the daemon with port 80
+    // while it was really on the 8080 fallback.
     match output {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
-            let port_marker = format!(":{port}");
-            out.lines()
-                .any(|l| l.contains("LISTEN") && l.contains(&port_marker))
+            out.lines().any(|l| {
+                l.contains("LISTEN")
+                    && l.split_whitespace().any(|token| {
+                        token
+                            .rsplit(':')
+                            .next()
+                            .map(|port_str| {
+                                port_str
+                                    .trim_end_matches(|c: char| !c.is_ascii_digit())
+                                    .parse::<u16>()
+                                    .map(|p| p == port)
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false)
+                    })
+            })
         }
         Err(_) => false,
     }

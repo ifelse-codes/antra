@@ -149,27 +149,8 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
         }
     }
 
-    println!();
-    if let Ok(status) = crate::ipc::client::get_startup_status() {
-        if status.https_port != 443 {
-            println!(
-                "  {} Note: HTTPS on port {} (port 443 unavailable — needs sudo or is in use)",
-                "ℹ".cyan(),
-                status.https_port
-            );
-            let host = if domain.ends_with(".localhost") {
-                domain.clone()
-            } else {
-                format!("{}.localhost", domain)
-            };
-            println!("  → https://{}:{}", host, status.https_port);
-        } else {
-            println!("  → https://{}", domain);
-        }
-    } else {
-        println!("  → https://{}", domain);
-    }
-    println!();
+    // Print the actual URL the user should visit (reflects fallback ports).
+    output::print_route_url(&domain);
 
     output::print_success(&format!(
         "Added route: {} → port {} (no process spawned)",

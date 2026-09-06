@@ -3,6 +3,9 @@ use colored::Colorize;
 
 use crate::certs::store::CertStore;
 
+/// Common Name of the Antra local root CA. Must match `certs::ca`.
+pub const CA_COMMON_NAME: &str = "Antra Local CA";
+
 /// Check if the Antra CA is trusted by the OS.
 pub fn check_trust_status() -> Result<bool> {
     let store = CertStore::new()?;
@@ -12,6 +15,32 @@ pub fn check_trust_status() -> Result<bool> {
     let installed = os_truststore::is_installed(&os_cert)
         .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
     Ok(installed)
+}
+
+/// Check if the Antra CA is trusted at user level (no sudo).
+///
+/// On macOS, `antra trust --user-level` installs into the login keychain,
+/// which the system-store check above does not see. Returns false on
+/// other platforms (user-level install is macOS-only).
+pub fn check_user_level_trust() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(home) = std::env::var("HOME") else {
+            return false;
+        };
+        let keychain = format!("{home}/Library/Keychains/login.keychain-db");
+        std::process::Command::new("security")
+            .args(["find-certificate", "-c", CA_COMMON_NAME, &keychain])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
 }
 
 /// Install the Antra CA into the OS trust store.

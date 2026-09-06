@@ -6,6 +6,7 @@ use crate::ipc::protocol::{IpcPayload, RegisterRouteRequest};
 use crate::resolver::custom::CustomResolver;
 use crate::resolver::traits::DomainResolver;
 use crate::resolver::util::{is_custom_domain, select_resolver};
+use crate::util::output;
 
 pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()> {
     println!("{}", "ANTRA ALIAS".bold());
@@ -76,8 +77,7 @@ pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()>
         }
     }
 
-    println!();
-    println!("  → {}", format!("https://{domain}").underline());
-    println!();
+    // Print the actual URL the user should visit (reflects fallback ports).
+    output::print_route_url(domain);
     Ok(())
 }
