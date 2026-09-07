@@ -4,6 +4,10 @@ set -euo pipefail
 # Antra — One-line installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash
 #
+# Pin a version for reproducible installs (teams, CI):
+#   curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.5 bash
+#   (accepts "v0.2.5" or "0.2.5"; defaults to the latest release)
+#
 # This script:
 #   1. Detects your OS and architecture
 #   2. Downloads the latest Antra binary from GitHub Releases
@@ -96,6 +100,27 @@ get_latest_version() {
         exit 1
     fi
     echo "$version"
+}
+
+# ── Resolve version (pin or latest) ───────────────────────────────────────────
+
+resolve_version() {
+    # Teams/CI can pin: ANTRA_VERSION=v0.2.5 (or "0.2.5") — otherwise latest.
+    local pinned="${ANTRA_VERSION:-}"
+    if [ -n "$pinned" ]; then
+        # Normalize: allow "0.2.5" as well as "v0.2.5"
+        case "$pinned" in
+            v*) ;;
+            *) pinned="v${pinned}";;
+        esac
+        if [[ ! "$pinned" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            err "Invalid ANTRA_VERSION='${ANTRA_VERSION}'. Expected like v0.2.5 (or 0.2.5)."
+            exit 1
+        fi
+        echo "$pinned"
+        return 0
+    fi
+    get_latest_version
 }
 
 # ── Download ──────────────────────────────────────────────────────────────────
@@ -193,33 +218,39 @@ ask_trust() {
     echo "  Antra generates a local CA certificate to serve HTTPS for"
     echo "  domains like https://myapp.localhost and https://myapp.test."
     echo ""
-    echo "  ${BOLD}Installing the CA into your system trust store${RESET} means"
-    echo "  HTTPS works with zero browser warnings — forever."
+    echo "  ${BOLD}Trusting the CA${RESET} means HTTPS works with zero browser warnings — forever."
     echo ""
-    echo "  ${DIM}This requires admin privileges (sudo) on macOS/Linux.${RESET}"
-    echo "  ${DIM}On macOS you can use 'antra trust --user-level' instead (no sudo).${RESET}"
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "  ${DIM}On macOS this uses your login keychain — no sudo needed.${RESET}"
+        trust_prompt="  Install CA into your login keychain (no sudo)? [Y/n] "
+        trust_hint="antra trust --user-level"
+    else
+        echo "  ${DIM}This requires admin privileges (sudo).${RESET}"
+        trust_prompt="  Install CA into system trust store? [Y/n] "
+        trust_hint="antra trust"
+    fi
     echo "  ${DIM}The CA is local-only. Nothing is sent anywhere.${RESET}"
     echo ""
 
     # Detect TTY availability
     if [ -t 0 ] 2>/dev/null; then
         # Stdin is a terminal
-        printf "  Install CA into system trust store? [Y/n] "
+        printf "%s" "$trust_prompt"
         read -r response
     elif [ -e /dev/tty ] 2>/dev/null; then
         # Can read from /dev/tty even when piped
-        printf "  Install CA into system trust store? [Y/n] "
+        printf "%s" "$trust_prompt"
         if ! read -r response < /dev/tty; then
             # Headless with no usable TTY (e.g. CI) — do NOT auto-install
             # a trust change without explicit consent. Skip with a hint.
             echo "  Non-interactive mode — skipping CA install."
-            echo "  Run 'antra trust' (or 'antra trust --user-level' on macOS) later."
+            echo "  Run '$trust_hint' later."
             response="n"
         fi
     else
         # Non-interactive: skip trust install, point at the manual command.
         echo "  Non-interactive mode — skipping CA install."
-        echo "  Run 'antra trust' (or 'antra trust --user-level' on macOS) later."
+        echo "  Run '$trust_hint' later."
         response="n"
     fi
 
@@ -231,8 +262,16 @@ ask_trust() {
             ;;
         *)
             echo ""
-            info "Installing CA into system trust store..."
-            if "$binary_path" trust --yes; then
+            # macOS: login keychain needs no sudo and gives warning-free
+            # HTTPS — never ask a fresh user for admin privileges.
+            local args=(--yes)
+            if [ "$(uname -s)" = "Darwin" ]; then
+                info "Installing CA into your login keychain (no sudo needed on macOS)..."
+                args=(--user-level)
+            else
+                info "Installing CA into system trust store..."
+            fi
+            if "$binary_path" trust "${args[@]}"; then
                 ok "CA installed. HTTPS will work with no warnings."
             else
                 echo ""
@@ -257,8 +296,12 @@ main() {
 
     info "Detected: ${os}/${arch}"
 
-    version="$(get_latest_version)"
-    info "Latest version: ${version}"
+    version="$(resolve_version)"
+    if [ -n "${ANTRA_VERSION:-}" ]; then
+        info "Pinned version: ${version}"
+    else
+        info "Latest version: ${version}"
+    fi
 
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "${tmp_dir:-}"' EXIT
@@ -271,7 +314,7 @@ main() {
     installed_path="$(install_binary "$tmp_binary")"
 
     echo ""
-    ok "Antra $( "$installed_path" --version 2>/dev/null || echo "${version}" ) is ready!"
+    ok "$( "$installed_path" --version 2>/dev/null || echo "antra ${version}" ) is ready!"
     echo ""
     echo "  ${BOLD}Quick start:${RESET}"
     echo ""

@@ -45,6 +45,14 @@ pub fn check_user_level_trust() -> bool {
     }
 }
 
+/// True when HTTPS will work with no warnings: system trust store OR
+/// macOS user-level login-keychain trust. Prefer this over
+/// `check_trust_status()` for "do we need to do anything?" decisions —
+/// otherwise macOS users get re-prompted despite already-trusted HTTPS.
+pub fn is_trusted_for_https() -> bool {
+    check_trust_status().unwrap_or(false) || check_user_level_trust()
+}
+
 /// Path to the macOS login keychain.
 #[cfg(target_os = "macos")]
 fn login_keychain_path() -> Option<std::path::PathBuf> {
@@ -247,6 +255,17 @@ pub fn install_ca() -> Result<()> {
         return Ok(());
     }
 
+    // macOS non-root: the system store would demand sudo — offer the login
+    // keychain directly (no sudo, same warning-free HTTPS) instead of
+    // failing through an elevation error mid-flow.
+    #[cfg(target_os = "macos")]
+    {
+        let non_root = unsafe { libc::geteuid() != 0 };
+        if non_root {
+            return install_ca_user_level_prompted();
+        }
+    }
+
     // Prompt user before modifying trust store
     println!("  Antra needs to install a local CA certificate into your system trust store.");
     println!(
@@ -351,9 +370,39 @@ pub fn install_ca() -> Result<()> {
 }
 
 /// Install the Antra CA into the OS trust store without prompting.
-/// Used by `antra run` for first-time auto-trust.
-/// Tries system-level first, then falls back to user-level keychain on macOS.
+/// Used by `antra run` for first-time auto-trust and by the installer.
+///
+/// macOS: user-level login keychain FIRST — silent, no sudo, no GUI auth
+/// prompt, and sufficient for warning-free HTTPS. Automatic paths must
+/// never pop a system auth dialog, so the system store is not attempted
+/// here (use `sudo antra trust` for system-wide trust explicitly).
 pub fn install_ca_noninteractive() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let store = CertStore::new()?;
+        let ca = store.get_or_create_ca()?;
+        if check_user_level_trust() {
+            return Ok(());
+        }
+        if install_ca_user_level_silent(&ca).is_ok() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "Could not install CA automatically. Try: {}",
+            "antra trust --user-level".bold(),
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        install_ca_noninteractive_system()
+    }
+}
+
+/// System-store auto-install for non-macOS platforms.
+/// Tries a silent system install; bails with a manual hint otherwise.
+#[cfg(not(target_os = "macos"))]
+fn install_ca_noninteractive_system() -> Result<()> {
     let store = CertStore::new()?;
     let ca = store.get_or_create_ca()?;
     let os_cert =
@@ -372,19 +421,45 @@ pub fn install_ca_noninteractive() -> Result<()> {
         return Ok(());
     }
 
-    // Fallback: try user-level keychain on macOS (no sudo needed)
-    #[cfg(target_os = "macos")]
-    {
-        if install_ca_user_level_silent(&ca).is_ok() {
-            return Ok(());
-        }
-    }
-
     anyhow::bail!(
-        "Could not install CA automatically. Try: {} or {}",
-        "antra trust --user-level".bold(),
+        "Could not install CA automatically. Try: {}",
         "sudo antra trust".bold()
     )
+}
+
+/// Prompt, then install the Antra CA into the user's login keychain.
+/// macOS non-root entry point for interactive `antra trust`: no sudo, no
+/// elevation errors — just one question defaulting to yes. The CA is
+/// local-only and reversible (`antra trust --remove` does not yet cover
+/// the keychain; re-running is idempotent).
+#[cfg(target_os = "macos")]
+fn install_ca_user_level_prompted() -> Result<()> {
+    println!("  Antra needs a local CA certificate so HTTPS works with no warnings.");
+    println!(
+        "  This installs into your {} (no sudo, local-only).",
+        "login keychain".cyan()
+    );
+    println!();
+    print!(
+        "  {} ",
+        "Install CA into your login keychain? [Y/n]".yellow()
+    );
+    use std::io::Write;
+    std::io::stdout().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let input = input.trim().to_lowercase();
+
+    if input == "n" || input == "no" {
+        println!(
+            "  {}",
+            "Skipped. HTTPS will show cert warnings until you run `antra trust`.".dimmed()
+        );
+        return Ok(());
+    }
+
+    install_ca_user_level()
 }
 
 /// Install the Antra CA into the user's login keychain (no sudo needed).
