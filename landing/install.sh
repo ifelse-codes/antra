@@ -165,17 +165,19 @@ install_binary() {
 
     local dest="${install_dir}/${BINARY_NAME}"
     cp "$src" "$dest"
-    ok "Installed to ${dest}"
+    # NOTE: install_binary is captured via $(...) — only the final
+    # `echo "$dest"` may go to stdout. All status goes to stderr.
+    ok "Installed to ${dest}" >&2
 
     # Check if install_dir is in PATH
     case ":$PATH:" in
         *":${install_dir}:"*) ;;
         *)
-            warn "${install_dir} is not in your PATH."
-            warn "Add this to your shell profile:"
-            warn ""
-            warn "  export PATH=\"${install_dir}:\$PATH\""
-            warn ""
+            warn "${install_dir} is not in your PATH." >&2
+            warn "Add this to your shell profile:" >&2
+            warn "" >&2
+            warn "  export PATH=\"${install_dir}:\$PATH\"" >&2
+            warn "" >&2
             ;;
     esac
 
@@ -208,14 +210,17 @@ ask_trust() {
         # Can read from /dev/tty even when piped
         printf "  Install CA into system trust store? [Y/n] "
         if ! read -r response < /dev/tty; then
-            # Headless with no usable TTY (e.g. CI) — fall through to auto-install
-            echo "  Non-interactive mode — auto-installing CA..."
-            response="y"
+            # Headless with no usable TTY (e.g. CI) — do NOT auto-install
+            # a trust change without explicit consent. Skip with a hint.
+            echo "  Non-interactive mode — skipping CA install."
+            echo "  Run 'antra trust' (or 'antra trust --user-level' on macOS) later."
+            response="n"
         fi
     else
-        # Non-interactive: default to YES (auto-install)
-        echo "  Non-interactive mode — auto-installing CA..."
-        response="y"
+        # Non-interactive: skip trust install, point at the manual command.
+        echo "  Non-interactive mode — skipping CA install."
+        echo "  Run 'antra trust' (or 'antra trust --user-level' on macOS) later."
+        response="n"
     fi
 
     case "$response" in

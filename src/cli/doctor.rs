@@ -147,10 +147,13 @@ pub fn execute() -> Result<()> {
             }
         }
     } else {
+        // Counted as an error below (exit 2), so display it as one: ✗ red,
+        // not ⚠ yellow. Glyphs always match their bucket (✗ = error,
+        // ⚠ = warning) so the "N error(s), N warning(s)" summary is exact.
         println!(
             "  {} {}",
-            "⚠".yellow().bold(),
-            "Proxy daemon not running".yellow()
+            "✗".red().bold(),
+            "Proxy daemon not running".red()
         );
         issues.push((
             "Proxy daemon not running".to_string(),
@@ -181,14 +184,24 @@ pub fn execute() -> Result<()> {
                         );
                     } else if e.kind() == std::io::ErrorKind::PermissionDenied {
                         // Privileged port + non-root: NOT "in use", just not permitted.
-                        println!(
-                            "  {} {}",
-                            "⚠".yellow().bold(),
-                            format!("Port {port} ({name}) needs elevated privileges").yellow()
-                        );
                         // Blocking when the daemon isn't up (fresh `proxy start`
-                        // can't bind); informational once the daemon already
-                        // runs on fallback ports.
+                        // can't bind) → error (✗); informational once the daemon
+                        // already runs on fallback ports → warning (⚠).
+                        // Glyph always matches the bucket below.
+                        let is_error = !daemon_running;
+                        if is_error {
+                            println!(
+                                "  {} {}",
+                                "✗".red().bold(),
+                                format!("Port {port} ({name}) needs elevated privileges").red()
+                            );
+                        } else {
+                            println!(
+                                "  {} {}",
+                                "⚠".yellow().bold(),
+                                format!("Port {port} ({name}) needs elevated privileges").yellow()
+                            );
+                        }
                         if !daemon_running {
                             issues.push((
                                 format!("Port {port} ({name}) needs elevated privileges"),
@@ -200,13 +213,22 @@ pub fn execute() -> Result<()> {
                             ));
                         }
                     } else {
-                        println!(
-                            "  {} {}",
-                            "⚠".yellow().bold(),
-                            format!("Port {port} ({name}) in use by another process").yellow()
-                        );
-                        // Same rule: a down daemon can't start at all (blocking);
-                        // a running daemon already worked around it (note it).
+                        // Same rule: a down daemon can't start at all (blocking
+                        // → error ✗); a running daemon already worked around it
+                        // (note it → warning ⚠). Glyph matches the bucket.
+                        if !daemon_running {
+                            println!(
+                                "  {} {}",
+                                "✗".red().bold(),
+                                format!("Port {port} ({name}) in use by another process").red()
+                            );
+                        } else {
+                            println!(
+                                "  {} {}",
+                                "⚠".yellow().bold(),
+                                format!("Port {port} ({name}) in use by another process").yellow()
+                            );
+                        }
                         if !daemon_running {
                             issues.push((
                                 format!("Port {port} ({name}) in use"),

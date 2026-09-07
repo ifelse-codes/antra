@@ -60,6 +60,9 @@ impl CustomResolver {
     /// Returns Ok(()) if safe, or an error with a reason.
     /// Pass `allow_public = true` only via explicit `--allow-custom-domain`.
     pub fn validate_domain_with(domain: &str, allow_public: bool) -> anyhow::Result<()> {
+        // Shape first: reject garbage before any policy checks or writes.
+        super::util::validate_domain_shape(domain)?;
+
         // Reject bare localhost
         if domain == "localhost" {
             anyhow::bail!("'localhost' already resolves natively — no hosts entry needed");

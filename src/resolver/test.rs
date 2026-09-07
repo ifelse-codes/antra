@@ -31,6 +31,10 @@ impl Default for HostsResolver {
 
 impl DomainResolver for HostsResolver {
     fn register(&self, domain: &str) -> anyhow::Result<()> {
+        // Shape first: reject garbage before touching /etc/hosts so the
+        // user sees "invalid domain", never a bogus "needs sudo" hint.
+        super::util::validate_domain_shape(domain)?;
+
         let content = hosts::read_hosts(&self.hosts_path)?;
         let content = hosts::ensure_managed_block(&content);
         let (content, added) = hosts::add_to_managed_block(&content, domain);

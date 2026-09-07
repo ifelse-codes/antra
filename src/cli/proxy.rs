@@ -3,6 +3,8 @@ use colored::Colorize;
 
 use super::ProxyCommands;
 use crate::daemon::server::{daemon_status, start_daemon, stop_daemon, DaemonConfig};
+use crate::ipc::client::send_command_sync;
+use crate::ipc::protocol::IpcPayload;
 
 /// Returns the path to the daemon log file.
 fn daemon_log_path() -> std::path::PathBuf {
@@ -212,7 +214,30 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                         }
                     }
                 } else {
-                    println!("  (No routes registered. Use --route domain:port)");
+                    // No --route flags: report routes restored from disk
+                    // (aliases persist across restarts) so this message never
+                    // contradicts `proxy status` / `list`.
+                    match send_command_sync(IpcPayload::ListRoutes) {
+                        Ok(resp) => match resp.payload {
+                            IpcPayload::RoutesList(list) if !list.routes.is_empty() => {
+                                println!(
+                                    "  {} Restored {} route(s):",
+                                    "✓".green().bold(),
+                                    list.routes.len()
+                                );
+                                for r in &list.routes {
+                                    println!(
+                                        "    {} {} → 127.0.0.1:{}",
+                                        "•".cyan(),
+                                        r.domain,
+                                        r.port
+                                    );
+                                }
+                            }
+                            _ => println!("  (No routes registered. Use --route domain:port)"),
+                        },
+                        Err(_) => println!("  (No routes registered. Use --route domain:port)"),
+                    }
                 }
 
                 println!();
@@ -262,6 +287,7 @@ fn parse_route(s: &str) -> Result<(String, u16)> {
         anyhow::bail!("Invalid route format '{s}'. Expected domain:port");
     }
     let domain = parts[0].to_string();
+    crate::resolver::util::validate_domain_shape(&domain)?;
     let port: u16 = parts[1]
         .parse()
         .map_err(|_| anyhow::anyhow!("Invalid port in route '{s}'"))?;

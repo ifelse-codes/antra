@@ -204,7 +204,28 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         }
     };
 
-    // 1b. Handle --force: kill existing route if present
+    // 1b. Check for an existing route on this domain. Never silently
+    // clobber it (parity with `alias`, which warns): record the previous
+    // mapping so it can be warned about now and restored if the new
+    // backend fails. `--force` has its own louder message below.
+    let mut replaced_port: Option<u16> = None;
+    if let Ok(resp) =
+        crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await
+    {
+        if let crate::ipc::protocol::IpcPayload::RoutesList(list) = resp.payload {
+            if let Some(existing) = list.routes.iter().find(|r| r.domain == domain) {
+                replaced_port = Some(existing.port);
+                if !args.force && existing.port != port {
+                    output::print_warning(&format!(
+                        "Domain {domain} is already routed to port {} — replacing with port {port}",
+                        existing.port
+                    ));
+                }
+            }
+        }
+    }
+
+    // 1c. Handle --force: kill existing route if present
     if args.force {
         if let Ok(resp) =
             crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await
@@ -340,7 +361,15 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         Ok(child) => child,
         Err(e) => {
             // The backend never started — don't leave a dangling route
-            // behind pointing at a port nothing listens on.
+            // behind pointing at a port nothing listens on. If this run
+            // replaced an existing mapping (and --force didn't kill its
+            // owner), put the previous route back instead of deleting it.
+            if !args.force {
+                if let Some(prev) = replaced_port {
+                    restore_previous_route(&domain, prev).await;
+                    return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
+                }
+            }
             let _ = crate::ipc::client::send_command(
                 crate::ipc::protocol::IpcPayload::UnregisterRoute(
                     crate::ipc::protocol::UnregisterRouteRequest {
@@ -439,7 +468,26 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         }
     };
 
-    // 7. Cleanup - unregister route via IPC
+    // 7. Report backend failures helpfully. The child's own stderr is
+    // inherited above (raw tracebacks like `OSError: Address already in
+    // use` are cryptic on their own), so add the actionable hint here.
+    if exit_code != 0 {
+        output::print_warning(&format!("Command exited with code {exit_code}"));
+        output::print_warning(
+            "Tip: if the error above is 'Address already in use', the port is occupied — see `antra list` or pass a free --port.",
+        );
+    }
+
+    // 8. Cleanup - unregister route via IPC. If this run replaced an
+    // existing mapping (and --force didn't kill its owner), restore the
+    // previous route instead of leaving the domain routeless.
+    if !args.force {
+        if let Some(prev) = replaced_port {
+            restore_previous_route(&domain, prev).await;
+            println!();
+            std::process::exit(exit_code);
+        }
+    }
     let _ = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::UnregisterRoute(
         crate::ipc::protocol::UnregisterRouteRequest {
             domain: domain.clone(),
@@ -451,6 +499,25 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 
     println!();
     std::process::exit(exit_code);
+}
+
+/// Re-register a previously replaced route (best-effort).
+///
+/// When `run` overwrites an existing domain mapping and the new backend
+/// fails, the domain must not be left with no route: put the previous
+/// mapping back instead of deleting the user's working route.
+async fn restore_previous_route(domain: &str, port: u16) {
+    let _ = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
+        crate::ipc::protocol::RegisterRouteRequest {
+            domain: domain.to_string(),
+            port,
+            pid: None,
+        },
+    ))
+    .await;
+    output::print_warning(&format!(
+        "Restored previous route: {domain} → 127.0.0.1:{port}"
+    ));
 }
 
 /// Kill a process by PID.

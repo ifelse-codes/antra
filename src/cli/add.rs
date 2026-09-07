@@ -122,6 +122,21 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
     // Ensure daemon is running
     let _ = super::ensure_daemon();
 
+    // Warn when replacing an existing route instead of silently overwriting
+    // (parity with `alias`).
+    if let Ok(resp) = send_command_sync(IpcPayload::ListRoutes) {
+        if let IpcPayload::RoutesList(list) = resp.payload {
+            if let Some(existing) = list.routes.iter().find(|r| r.domain == domain) {
+                if existing.port != args.port {
+                    output::print_warning(&format!(
+                        "Domain {domain} is already routed to port {} — replacing with port {}",
+                        existing.port, args.port
+                    ));
+                }
+            }
+        }
+    }
+
     // Register route via IPC
     match send_command_sync(IpcPayload::RegisterRoute(
         crate::ipc::protocol::RegisterRouteRequest {
