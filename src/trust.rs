@@ -24,25 +24,210 @@ pub fn check_trust_status() -> Result<bool> {
 /// On macOS, `antra trust --user-level` installs into the login keychain,
 /// which the system-store check above does not see. Returns false on
 /// other platforms (user-level install is macOS-only).
+///
+/// Compares certificate bytes, not just the Common Name: if the CA was
+/// regenerated since it was trusted, the keychain holds a *stale* cert and
+/// this correctly reports untrusted (re-run `trust --user-level` to fix).
 pub fn check_user_level_trust() -> bool {
     #[cfg(target_os = "macos")]
     {
-        let Ok(home) = std::env::var("HOME") else {
+        let ca_pem = CertStore::new()
+            .ok()
+            .and_then(|s| std::fs::read_to_string(s.config_dir.join("ca.pem")).ok());
+        let Some(ca_pem) = ca_pem else {
             return false;
         };
-        let keychain = format!("{home}/Library/Keychains/login.keychain-db");
-        std::process::Command::new("security")
-            .args(["find-certificate", "-c", CA_COMMON_NAME, &keychain])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        keychain_contains_cert(&ca_pem)
     }
     #[cfg(not(target_os = "macos"))]
     {
         false
     }
+}
+
+/// Path to the macOS login keychain.
+#[cfg(target_os = "macos")]
+fn login_keychain_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join("Library/Keychains/login.keychain-db"))
+}
+
+/// Normalize a PEM document to its base64 payload (no headers/whitespace),
+/// so certificates can be compared by bytes regardless of line wrapping.
+#[cfg(target_os = "macos")]
+fn pem_payload(pem: &str) -> String {
+    pem.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("-----"))
+        .collect()
+}
+
+/// True when the login keychain contains a certificate byte-identical to
+/// `ca_pem`. Same Common Name is not enough — a regenerated CA shares the
+/// name but fails TLS verification against the old keychain entry.
+///
+/// Uses `-a` to compare EVERY same-name entry: `find-certificate` without
+/// it returns only the first match, which may be a stale duplicate while
+/// the current cert sits further down the list.
+#[cfg(target_os = "macos")]
+fn keychain_contains_cert(ca_pem: &str) -> bool {
+    let Some(keychain) = login_keychain_path() else {
+        return false;
+    };
+    let output = std::process::Command::new("security")
+        .args([
+            "find-certificate",
+            "-c",
+            CA_COMMON_NAME,
+            "-a",
+            "-p",
+            keychain.to_str().unwrap_or_default(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let want = pem_payload(ca_pem);
+    // `-p` concatenates PEM blocks; split on the END marker and compare each.
+    stdout
+        .split("-----END CERTIFICATE-----")
+        .any(|block| !pem_payload(block).is_empty() && pem_payload(block) == want)
+}
+
+/// SHA-1 hashes of every login-keychain certificate carrying our CA's
+/// Common Name.
+#[cfg(target_os = "macos")]
+fn keychain_ca_hashes() -> Vec<String> {
+    let Some(keychain) = login_keychain_path() else {
+        return Vec::new();
+    };
+    let output = std::process::Command::new("security")
+        .args([
+            "find-certificate",
+            "-c",
+            CA_COMMON_NAME,
+            "-a",
+            "-Z",
+            keychain.to_str().unwrap_or_default(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|l| {
+            l.trim()
+                .strip_prefix("SHA-1 hash: ")
+                .map(|h| h.trim().to_string())
+        })
+        .collect()
+}
+
+/// Delete one login-keychain certificate by SHA-1 hash.
+#[cfg(target_os = "macos")]
+fn delete_keychain_cert_by_hash(keychain_str: &str, hash: &str) {
+    let _ = std::process::Command::new("security")
+        .args(["delete-certificate", "-Z", hash, keychain_str])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Remove keychain certificates carrying our CA's Common Name.
+///
+/// Used before (re-)installing so `trust` stays idempotent: without this,
+/// every re-run appends a duplicate entry, and a regenerated CA leaves a
+/// stale entry that shadows nothing but confuses.
+///
+/// Deletes by SHA-1 hash, one entry at a time: `delete-certificate -c`
+/// refuses with "ambiguous, matches more than one certificate" as soon as
+/// duplicates exist — exactly when cleanup is needed most. Failures are
+/// ignored — the subsequent `add-trusted-cert` succeeding is what matters.
+#[cfg(target_os = "macos")]
+fn remove_stale_keychain_certs() {
+    let Some(keychain) = login_keychain_path() else {
+        return;
+    };
+    let keychain_str = keychain.to_str().unwrap_or_default();
+    for hash in keychain_ca_hashes() {
+        delete_keychain_cert_by_hash(keychain_str, &hash);
+    }
+}
+
+/// Remove same-name keychain entries that do NOT match the current CA,
+/// keeping the current one. Returns the number removed.
+///
+/// Called on the already-trusted path so re-running `trust` converges the
+/// keychain to exactly one entry instead of letting stale duplicates from
+/// past CA regenerations accumulate.
+#[cfg(target_os = "macos")]
+fn remove_other_keychain_certs(keep_pem: &str) -> usize {
+    let Some(keychain) = login_keychain_path() else {
+        return 0;
+    };
+    let keychain_str = keychain.to_str().unwrap_or_default();
+    let output = std::process::Command::new("security")
+        .args([
+            "find-certificate",
+            "-c",
+            CA_COMMON_NAME,
+            "-a",
+            "-Z",
+            "-p",
+            keychain_str,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return 0;
+    };
+    // Pair each PEM block with the SHA-1 hash printed just above it.
+    // Only lines between the BEGIN/END markers belong to the block —
+    // the SHA-256/SHA-1 header lines must not pollute the payload.
+    let keep = pem_payload(keep_pem);
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut pending_hash = String::new();
+    let mut block = String::new();
+    let mut in_pem = false;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim();
+        if let Some(hash) = trimmed.strip_prefix("SHA-1 hash: ") {
+            pending_hash = hash.trim().to_string();
+        } else if trimmed == "-----BEGIN CERTIFICATE-----" {
+            block.clear();
+            block.push_str(line);
+            block.push('\n');
+            in_pem = true;
+        } else if trimmed == "-----END CERTIFICATE-----" {
+            block.push_str(line);
+            pairs.push((
+                std::mem::take(&mut pending_hash),
+                std::mem::take(&mut block),
+            ));
+            in_pem = false;
+        } else if in_pem {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    let mut removed = 0;
+    for (hash, pem_block) in &pairs {
+        if hash.is_empty() || pem_payload(pem_block) == keep {
+            continue;
+        }
+        delete_keychain_cert_by_hash(keychain_str, hash);
+        removed += 1;
+    }
+    removed
 }
 
 /// Install the Antra CA into the OS trust store.
@@ -222,6 +407,29 @@ pub fn install_ca_user_level() -> Result<()> {
     // macOS: install to user login keychain
     #[cfg(target_os = "macos")]
     {
+        // Idempotent: the exact cert is already there — don't append a duplicate.
+        // Prune stale same-name entries so the keychain converges to one.
+        if keychain_contains_cert(&ca.cert_pem) {
+            let pruned = remove_other_keychain_certs(&ca.cert_pem);
+            println!(
+                "{}",
+                "  Antra CA is already trusted via your login keychain (user-level, no sudo)."
+                    .green()
+            );
+            if pruned > 0 {
+                println!(
+                    "    {}",
+                    format!("Removed {pruned} stale duplicate(s) from the login keychain.")
+                        .dimmed()
+                );
+            }
+            return Ok(());
+        }
+        // Otherwise drop same-name entries first: a regenerated CA shares the
+        // Common Name, and leaving the stale cert behind both duplicates the
+        // entry and masks the trust state.
+        remove_stale_keychain_certs();
+
         let temp_cert = tempfile::NamedTempFile::new()?;
         std::fs::write(temp_cert.path(), &ca.cert_pem)?;
 
@@ -281,6 +489,15 @@ pub fn install_ca_user_level() -> Result<()> {
 /// Install CA into user login keychain without output (for noninteractive fallback).
 #[cfg(target_os = "macos")]
 fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
+    // Idempotent: skip when the exact cert is already trusted (pruning
+    // stale same-name entries); replace stale entries (e.g. after CA
+    // regeneration) otherwise.
+    if keychain_contains_cert(&ca.cert_pem) {
+        remove_other_keychain_certs(&ca.cert_pem);
+        return Ok(());
+    }
+    remove_stale_keychain_certs();
+
     let temp_cert = tempfile::NamedTempFile::new()?;
     std::fs::write(temp_cert.path(), &ca.cert_pem)?;
 

@@ -1,8 +1,12 @@
 use anyhow::Result;
 use colored::Colorize;
 
+use crate::util::output;
+
 pub fn execute(domain: &str) -> Result<()> {
-    let url = format!("https://{domain}");
+    // Open the URL the user can actually reach: includes the fallback
+    // port (e.g. :8443) when the daemon isn't on 443.
+    let url = output::route_url(domain);
 
     println!("  {} Opening {}", "→".cyan().bold(), url.underline());
 

@@ -85,7 +85,11 @@ pub fn execute() -> Result<()> {
     }
 
     // 3. Check daemon status
-    if is_daemon_running() {
+    // Each condition is reported exactly once: blocking problems go to
+    // `issues` (exit 2, with a fix command), informational notes go to
+    // `warnings` (exit 1). Nothing is counted as both.
+    let daemon_running = is_daemon_running();
+    if daemon_running {
         println!(
             "  {} {}",
             "✓".green().bold(),
@@ -148,7 +152,6 @@ pub fn execute() -> Result<()> {
             "⚠".yellow().bold(),
             "Proxy daemon not running".yellow()
         );
-        warnings.push("Proxy daemon not running".to_string());
         issues.push((
             "Proxy daemon not running".to_string(),
             "antra proxy start".to_string(),
@@ -183,25 +186,35 @@ pub fn execute() -> Result<()> {
                             "⚠".yellow().bold(),
                             format!("Port {port} ({name}) needs elevated privileges").yellow()
                         );
-                        warnings.push(format!(
-                            "Port {port} ({name}) needs elevated privileges (run with sudo or use fallback ports)"
-                        ));
-                        issues.push((
-                            format!("Port {port} ({name}) needs elevated privileges"),
-                            "sudo antra proxy start  OR  antra proxy start --port 8443 --http-port 8080".to_string(),
-                        ));
+                        // Blocking when the daemon isn't up (fresh `proxy start`
+                        // can't bind); informational once the daemon already
+                        // runs on fallback ports.
+                        if !daemon_running {
+                            issues.push((
+                                format!("Port {port} ({name}) needs elevated privileges"),
+                                "sudo antra proxy start  OR  antra proxy start --port 8443 --http-port 8080".to_string(),
+                            ));
+                        } else {
+                            warnings.push(format!(
+                                "Port {port} ({name}) needs elevated privileges (run with sudo or use fallback ports)"
+                            ));
+                        }
                     } else {
                         println!(
                             "  {} {}",
                             "⚠".yellow().bold(),
                             format!("Port {port} ({name}) in use by another process").yellow()
                         );
-                        warnings.push(format!("Port {port} ({name}) in use by another process"));
-                        if port == 443 {
+                        // Same rule: a down daemon can't start at all (blocking);
+                        // a running daemon already worked around it (note it).
+                        if !daemon_running {
                             issues.push((
                                 format!("Port {port} ({name}) in use"),
                                 "antra proxy start --port 8443 --http-port 8080".to_string(),
                             ));
+                        } else {
+                            warnings
+                                .push(format!("Port {port} ({name}) in use by another process"));
                         }
                     }
                 }

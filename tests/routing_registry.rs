@@ -17,7 +17,7 @@ fn make_route(domain: &str, port: u16) -> Route {
 
 #[test]
 fn test_register_and_lookup() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     let route = make_route("myapp.localhost", 5173);
 
     registry.register(route).unwrap();
@@ -29,13 +29,13 @@ fn test_register_and_lookup() {
 
 #[test]
 fn test_lookup_nonexistent_returns_none() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     assert!(registry.lookup("nonexistent.localhost").is_none());
 }
 
 #[test]
 fn test_unregister_existing() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry.register(make_route("a.localhost", 3000)).unwrap();
 
     registry.unregister("a.localhost").unwrap();
@@ -44,13 +44,13 @@ fn test_unregister_existing() {
 
 #[test]
 fn test_unregister_nonexistent_is_ok() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry.unregister("nonexistent.localhost").unwrap();
 }
 
 #[test]
 fn test_overwrite_domain() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry
         .register(make_route("app.localhost", 3000))
         .unwrap();
@@ -64,13 +64,13 @@ fn test_overwrite_domain() {
 
 #[test]
 fn test_list_empty() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     assert!(registry.list().is_empty());
 }
 
 #[test]
 fn test_list_multiple_routes() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry.register(make_route("a.localhost", 1000)).unwrap();
     registry.register(make_route("b.localhost", 2000)).unwrap();
     registry.register(make_route("c.localhost", 3000)).unwrap();
@@ -92,7 +92,7 @@ fn test_default_impl() {
 
 #[test]
 fn test_register_with_pid() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     let mut route = make_route("pid-test.localhost", 8080);
     route.pid = Some(12345);
 
@@ -106,7 +106,7 @@ fn test_concurrent_access() {
     use std::sync::Arc;
     use std::thread;
 
-    let registry = Arc::new(RouteRegistry::new());
+    let registry = Arc::new(RouteRegistry::new_ephemeral());
     let mut handles = vec![];
 
     for i in 0..10 {

@@ -17,12 +17,25 @@ pub fn print_header() {
     println!();
 }
 
-/// Print the URL the user should actually visit for a domain.
+/// The URL the user should actually visit for a domain.
 ///
 /// Reads the daemon's bound HTTPS port over IPC so the URL reflects
 /// reality: `https://{domain}` on the default 443, or
 /// `https://{domain}:{port}` when the daemon fell back (e.g. no sudo).
 /// Falls back to the bare `https://` URL when the daemon can't be queried.
+pub fn route_url(domain: &str) -> String {
+    if let Ok(status) = crate::ipc::client::get_startup_status() {
+        if status.https_port != 443 {
+            return format!("https://{domain}:{}", status.https_port);
+        }
+    }
+    format!("https://{domain}")
+}
+
+/// Print the URL the user should actually visit for a domain.
+///
+/// See [`route_url`]. Prints the fallback-port explainer alongside the URL
+/// when the daemon isn't on 443.
 pub fn print_route_url(domain: &str) {
     println!();
     if let Ok(status) = crate::ipc::client::get_startup_status() {
@@ -37,13 +50,7 @@ pub fn print_route_url(domain: &str) {
                 "ℹ".cyan(),
                 "sudo antra proxy start".bold()
             );
-            // Build clean URL — don't double-append .localhost
-            let host = if domain.ends_with(".localhost") {
-                domain.to_string()
-            } else {
-                format!("{domain}.localhost")
-            };
-            println!("  → https://{}:{}", host, status.https_port);
+            println!("  → {}", route_url(domain));
         } else {
             println!("  → https://{domain}");
         }

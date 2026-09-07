@@ -48,8 +48,12 @@ pub fn execute() -> Result<()> {
         let pid = match route.pid {
             Some(pid) => pid,
             None => {
-                // No PID recorded — can't check if alive, skip
-                println!("  {} {} (no PID recorded)", "→".cyan(), route.domain);
+                // Static alias/add route: no process to check, always kept.
+                println!(
+                    "  {} {} (static route, kept)",
+                    "✓".green(),
+                    route.domain.green()
+                );
                 alive_count += 1;
                 continue;
             }

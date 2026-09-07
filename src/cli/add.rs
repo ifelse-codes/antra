@@ -150,12 +150,9 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
     }
 
     // Print the actual URL the user should visit (reflects fallback ports).
+    // The "Route registered" confirmation above already states the mapping,
+    // so no trailing summary line — one confirmation, one URL.
     output::print_route_url(&domain);
-
-    output::print_success(&format!(
-        "Added route: {} → port {} (no process spawned)",
-        domain, args.port
-    ));
 
     Ok(())
 }

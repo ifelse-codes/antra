@@ -10,6 +10,7 @@ use crate::ipc::server::pid_path;
 #[cfg(unix)]
 use crate::ipc::server::socket_path;
 use crate::routing::registry::RouteRegistry;
+use crate::routing::types::{Protocol, Route};
 
 /// Default idle timeout (10 minutes)
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -83,6 +84,24 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
 
     let registry = Arc::new(RouteRegistry::new());
     let start_time = Instant::now();
+
+    // Restore static aliases persisted by `antra alias` / `antra add route`
+    // so they survive daemon restarts. Managed `run`/`dev` routes carry a
+    // PID and die with their process, so only PID-less entries are stored.
+    let restored = crate::routing::persist::load_aliases();
+    for entry in &restored {
+        let _ = registry.register(Route {
+            domain: entry.domain.clone(),
+            host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port: entry.port,
+            pid: None,
+            protocol: Protocol::Http,
+            created_at: Instant::now(),
+        });
+    }
+    if !restored.is_empty() {
+        tracing::info!(count = restored.len(), "Restored persisted static aliases");
+    }
 
     // Track last activity time for idle shutdown
     let last_activity = Arc::new(RwLock::new(Instant::now()));

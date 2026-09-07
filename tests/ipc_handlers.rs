@@ -18,7 +18,7 @@ fn make_route(domain: &str, port: u16) -> Route {
 
 #[test]
 fn test_handle_register_route_success() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     let req = RegisterRouteRequest {
         domain: "myapp.localhost".to_string(),
         port: 5173,
@@ -44,7 +44,7 @@ fn test_handle_register_route_success() {
 
 #[test]
 fn test_handle_unregister_route_success() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry
         .register(make_route("to-remove.localhost", 3000))
         .unwrap();
@@ -55,14 +55,14 @@ fn test_handle_unregister_route_success() {
 
 #[test]
 fn test_handle_list_routes_empty() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     let routes = registry.list();
     assert!(routes.is_empty());
 }
 
 #[test]
 fn test_handle_list_routes_with_routes() {
-    let registry = RouteRegistry::new();
+    let registry = RouteRegistry::new_ephemeral();
     registry.register(make_route("a.localhost", 1000)).unwrap();
     registry.register(make_route("b.localhost", 2000)).unwrap();
 

@@ -12,6 +12,7 @@ pub fn execute(yes: bool) -> Result<()> {
     println!("  This will remove:");
     println!("    • Root CA certificate and key");
     println!("    • All cached leaf certificates");
+    println!("    • Saved static aliases");
     println!("    • Daemon socket and PID file");
     println!();
 
