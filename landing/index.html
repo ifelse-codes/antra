@@ -20,14 +20,17 @@
   --max-w:1080px;--pad:28px;--pad-m:20px;
 }
 html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-body{color:var(--text-body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden;background-color:#07080c;background-image:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(139,124,246,0.16),transparent 70%),repeating-linear-gradient(0deg,rgba(255,255,255,0.035) 0 1px,transparent 1px 32px),repeating-linear-gradient(90deg,rgba(255,255,255,0.035) 0 1px,transparent 1px 32px);background-attachment:fixed,scroll,scroll}
+body{color:var(--text-body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden;background-color:#07080c;background-image:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(139,124,246,0.16),transparent 70%),repeating-linear-gradient(0deg,rgba(255,255,255,0.01) 0 1px,transparent 1px 32px),repeating-linear-gradient(90deg,rgba(255,255,255,0.01) 0 1px,transparent 1px 32px);background-attachment:fixed,scroll,scroll}
 a{color:inherit;text-decoration:none}
 
-/* ── Mandala ──────────────────────────────────────── */
-.mandala{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;opacity:0.028}
-.mandala svg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:140vmax;height:140vmax;animation:mandala-spin 240s linear infinite}
-@keyframes mandala-spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.mandala svg{animation:none}}
+/* ── Wandering mandalas ───────────────────────────── */
+#mandala-field{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.wisp{position:absolute;transform:translate(-50%,-50%);opacity:0;transition:opacity 2.4s ease;will-change:opacity}
+.wisp.on{opacity:var(--peak,0.26)}
+.wisp svg{display:block;width:100%;height:100%;animation:wisp-spin var(--spin-dur,110s) linear infinite}
+.wisp.rev svg{animation-direction:reverse}
+@keyframes wisp-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){#mandala-field{display:none}}
 
 /* ── Nav ──────────────────────────────────────────── */
 nav{position:sticky;top:0;z-index:100;background:rgba(10,10,12,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
@@ -166,39 +169,8 @@ footer{border-top:1px solid var(--line);padding:48px 0}
 </head>
 <body>
 
-<!-- Mandala -->
-<div class="mandala" aria-hidden="true">
-<svg viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
-<g fill="none" stroke="#8B7CF6" stroke-width="0.5">
-<circle cx="400" cy="400" r="380"/>
-<circle cx="400" cy="400" r="340"/>
-<circle cx="400" cy="400" r="300"/>
-<circle cx="400" cy="400" r="260"/>
-<circle cx="400" cy="400" r="220"/>
-<circle cx="400" cy="400" r="180"/>
-<circle cx="400" cy="400" r="140"/>
-<circle cx="400" cy="400" r="100"/>
-<circle cx="400" cy="400" r="60"/>
-<g stroke-width="0.3">
-<line x1="400" y1="20" x2="400" y2="780"/>
-<line x1="20" y1="400" x2="780" y2="400"/>
-<line x1="131" y1="131" x2="669" y2="669"/>
-<line x1="669" y1="131" x2="131" y2="669"/>
-<line x1="400" y1="20" x2="131" y2="669"/>
-<line x1="400" y1="20" x2="669" y2="669"/>
-<line x1="400" y1="780" x2="131" y2="131"/>
-<line x1="400" y1="780" x2="669" y2="131"/>
-<line x1="20" y1="400" x2="669" y2="131"/>
-<line x1="20" y1="400" x2="669" y2="669"/>
-<line x1="780" y1="400" x2="131" y2="131"/>
-<line x1="780" y1="400" x2="131" y2="669"/>
-</g>
-<polygon points="400,20 669,131 780,400 669,669 400,780 131,669 20,400 131,131" stroke-width="0.4"/>
-<polygon points="400,100 620,180 700,400 620,620 400,700 180,620 100,400 180,180" stroke-width="0.3"/>
-<polygon points="400,180 570,230 620,400 570,570 400,620 230,570 180,400 230,230" stroke-width="0.3"/>
-</g>
-</svg>
-</div>
+<!-- Wandering mandalas (populated by script) -->
+<div id="mandala-field" aria-hidden="true"></div>
 
 <!-- Nav -->
 <nav>
@@ -229,7 +201,7 @@ footer{border-top:1px solid var(--line);padding:48px 0}
   </div>
   <div class="hero-alt">or <code>brew install ifelse-codes/antra/antra</code></div>
   <div class="hero-alt" id="ports-note"><a href="#ports-note" class="fn">*</a>Clean URLs (<code>https://myapp.localhost</code>) use ports 443/80 and need sudo once: <code>sudo antra proxy start</code>. Without sudo, Antra serves <code>https://myapp.localhost:8443</code> automatically.</div>
-  <div class="hero-alt">Pin a version for teams/CI: <code>curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.8 bash</code></div>
+  <div class="hero-alt">Pin a version for teams/CI: <code>curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.9 bash</code></div>
 </div>
 </section>
 
@@ -483,6 +455,50 @@ const observer=new IntersectionObserver((entries)=>{
   entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}});
 },{threshold:0.1});
 document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+
+// Wandering mandalas — faint geometric wisps drift in at random spots,
+// linger 5–10s, fade out, then reappear elsewhere. Max 2 at a time.
+(function(){
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const field=document.getElementById('mandala-field');
+  if(!field) return;
+  const C=200, TAU=Math.PI*2;
+  const rand=(a,b)=>a+Math.random()*(b-a);
+  const pick=a=>a[Math.floor(Math.random()*a.length)];
+  const pt=(cx,cy,r,ang)=>{const x=(cx+r*Math.cos(ang)).toFixed(1),y=(cy+r*Math.sin(ang)).toFixed(1);return x+','+y;};
+  const poly=(n,r,rot)=>{const p=[];for(let i=0;i<n;i++)p.push(pt(C,C,r,rot+i*TAU/n));return '<polygon points="'+p.join(' ')+'"/>';};
+  const spokes=(n,r0,r1,w)=>{let s='';for(let i=0;i<n;i++){const a=i*TAU/n;s+='<line x1="'+(C+r0*Math.cos(a)).toFixed(1)+'" y1="'+(C+r0*Math.sin(a)).toFixed(1)+'" x2="'+(C+r1*Math.cos(a)).toFixed(1)+'" y2="'+(C+r1*Math.sin(a)).toFixed(1)+'" stroke-width="'+w+'"/>';}return s;};
+  const rings=rs=>rs.map(r=>'<circle cx="'+C+'" cy="'+C+'" r="'+r+'"/>').join('');
+  const open=inner=>'<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#8B7CF6">'+inner+'</svg>';
+  const designs=[
+    // concentric rings + spokes + octagon
+    ()=>open('<g stroke-width="0.6" opacity="0.8">'+rings([190,155,120,85,50])+'</g><g stroke-width="0.35" opacity="0.7">'+spokes(8,20,190,0.35)+'</g><g stroke-width="0.45" opacity="0.75">'+poly(8,155,Math.PI/8)+'</g>'),
+    // petal spokes + dashed ring + tilted square
+    ()=>open('<g stroke-width="0.55" opacity="0.8">'+rings([190,100])+'</g><circle cx="'+C+'" cy="'+C+'" r="140" stroke-width="0.4" opacity="0.7" stroke-dasharray="2 7"/><g stroke-width="0.35" opacity="0.65">'+spokes(12,100,190,0.35)+'</g><g stroke-width="0.45" opacity="0.75" transform="rotate('+Math.round(rand(0,90))+' '+C+' '+C+')">'+poly(4,72,0)+'</g>'),
+    // dot ring + hexagon + dashed orbit
+    ()=>{let dots='';for(let i=0;i<24;i++){const a=i*TAU/24;dots+='<circle cx="'+(C+150*Math.cos(a)).toFixed(1)+'" cy="'+(C+150*Math.sin(a)).toFixed(1)+'" r="2" fill="#8B7CF6" stroke="none"/>';}return open('<g stroke-width="0.55" opacity="0.8">'+rings([185,60])+'</g><circle cx="'+C+'" cy="'+C+'" r="118" stroke-width="0.4" opacity="0.7" stroke-dasharray="1 6"/><g opacity="0.8">'+dots+'</g><g stroke-width="0.45" opacity="0.75">'+poly(6,88,rand(0,TAU))+'</g>');},
+    // woven squares + diagonals + core
+    ()=>open('<g stroke-width="0.5" opacity="0.8">'+rings([185,58])+'</g><g stroke-width="0.45" opacity="0.75">'+poly(4,132,0)+poly(4,132,Math.PI/4)+'</g><g stroke-width="0.3" opacity="0.6"><line x1="40" y1="40" x2="360" y2="360"/><line x1="360" y1="40" x2="40" y2="360"/></g><circle cx="'+C+'" cy="'+C+'" r="4" fill="#8B7CF6" stroke="none" opacity="0.8"/>')
+  ];
+  function spawn(){
+    if(document.hidden) return;
+    if(field.childElementCount>=2) return;
+    const size=Math.round(rand(140,420));
+    const el=document.createElement('div');
+    el.className='wisp'+(Math.random()<0.5?' rev':'');
+    el.style.left=rand(6,94).toFixed(1)+'%';
+    el.style.top=rand(6,94).toFixed(1)+'%';
+    el.style.width=el.style.height=size+'px';
+    el.style.setProperty('--spin-dur',Math.round(rand(70,150))+'s');
+    el.style.setProperty('--peak',rand(0.16,0.3).toFixed(2));
+    el.innerHTML=pick(designs)();
+    field.appendChild(el);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('on')));
+    setTimeout(()=>{el.classList.remove('on');setTimeout(()=>el.remove(),2600);},rand(5000,10000));
+  }
+  spawn();
+  (function loop(){setTimeout(()=>{spawn();loop();},rand(1500,4500));})();
+})();
 </script>
 </body>
 </html>

@@ -6,8 +6,8 @@ set -euo pipefail
 #   or: curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh | bash
 #
 # Pin a version for reproducible installs (teams, CI):
-#   curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.8 bash
-#   (accepts "v0.2.8" or "0.2.8"; defaults to the latest release)
+#   curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.9 bash
+#   (accepts "v0.2.9" or "0.2.9"; defaults to the latest release)
 #
 # This script:
 #   1. Detects your OS and architecture
@@ -106,16 +106,16 @@ get_latest_version() {
 # ── Resolve version (pin or latest) ───────────────────────────────────────────
 
 resolve_version() {
-    # Teams/CI can pin: ANTRA_VERSION=v0.2.8 (or "0.2.8") — otherwise latest.
+    # Teams/CI can pin: ANTRA_VERSION=v0.2.9 (or "0.2.9") — otherwise latest.
     local pinned="${ANTRA_VERSION:-}"
     if [ -n "$pinned" ]; then
-        # Normalize: allow "0.2.8" as well as "v0.2.8"
+        # Normalize: allow "0.2.9" as well as "v0.2.9"
         case "$pinned" in
             v*) ;;
             *) pinned="v${pinned}";;
         esac
         if [[ ! "$pinned" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            err "Invalid ANTRA_VERSION='${ANTRA_VERSION}'. Expected like v0.2.8 (or 0.2.8)."
+            err "Invalid ANTRA_VERSION='${ANTRA_VERSION}'. Expected like v0.2.9 (or 0.2.9)."
             exit 1
         fi
         echo "$pinned"
