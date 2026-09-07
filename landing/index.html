@@ -20,7 +20,7 @@
   --max-w:1080px;--pad:28px;--pad-m:20px;
 }
 html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-body{background:var(--bg);color:var(--text-body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden}
+body{color:var(--text-body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden;background-color:#07080c;background-image:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(139,124,246,0.16),transparent 70%),repeating-linear-gradient(0deg,rgba(255,255,255,0.035) 0 1px,transparent 1px 32px),repeating-linear-gradient(90deg,rgba(255,255,255,0.035) 0 1px,transparent 1px 32px);background-attachment:fixed,scroll,scroll}
 a{color:inherit;text-decoration:none}
 
 /* ── Mandala ──────────────────────────────────────── */
@@ -63,6 +63,8 @@ section{position:relative;z-index:1}
 .copy-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;font-family:var(--font-mono);font-size:11px;padding:4px 8px;border-radius:4px;transition:color 0.3s;text-transform:uppercase;letter-spacing:0.1em}
 .copy-btn:hover{color:var(--violet)}
 .hero-alt{font-family:var(--font-mono);font-size:12px;color:var(--text-muted);margin-top:16px}
+.fn{color:var(--violet-bright);text-decoration:none;font-weight:700}
+.fn:hover{text-decoration:underline}
 .hero-alt code{color:var(--text-body)}
 
 /* ── Hairline Divider ─────────────────────────────── */
@@ -217,7 +219,7 @@ footer{border-top:1px solid var(--line);padding:48px 0}
 <div class="container">
   <div class="eyebrow">Local development, upgraded</div>
   <h1>Your app deserves a <em>real URL</em>, even on your laptop</h1>
-  <p class="hero-sub">Stable HTTPS domains for local development. No ports. No /etc/hosts. No certificate warnings. One command and you're there.</p>
+  <p class="hero-sub">Stable HTTPS domains for local development. No ports<a href="#ports-note" class="fn" title="Clean URLs need ports 443/80 — see note below">*</a>. No /etc/hosts. No certificate warnings. One command and you're there.</p>
   <div class="install-block" id="install">
     <div class="install-label">Install</div>
     <div class="install-cmd" onclick="copyInstall(this)">
@@ -226,8 +228,8 @@ footer{border-top:1px solid var(--line);padding:48px 0}
     </div>
   </div>
   <div class="hero-alt">or <code>brew install ifelse-codes/antra/antra</code></div>
-  <div class="hero-alt">Clean URLs (<code>https://myapp.localhost</code>) use ports 443/80 and need sudo once: <code>sudo antra proxy start</code>. Without sudo, Antra serves <code>https://myapp.localhost:8443</code> automatically.</div>
-  <div class="hero-alt">Pin a version for teams/CI: <code>curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.7 bash</code></div>
+  <div class="hero-alt" id="ports-note"><a href="#ports-note" class="fn">*</a>Clean URLs (<code>https://myapp.localhost</code>) use ports 443/80 and need sudo once: <code>sudo antra proxy start</code>. Without sudo, Antra serves <code>https://myapp.localhost:8443</code> automatically.</div>
+  <div class="hero-alt">Pin a version for teams/CI: <code>curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.8 bash</code></div>
 </div>
 </section>
 

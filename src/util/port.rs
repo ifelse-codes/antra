@@ -21,9 +21,28 @@ pub fn find_free_port_in_range() -> anyhow::Result<u16> {
     find_free_port()
 }
 
-/// Check if a port is available for binding on 127.0.0.1.
+/// Check if a port is available for binding on loopback.
+///
+/// Binds 127.0.0.1 (and ::1) and — because bind semantics can lie (e.g.
+/// BSD `SO_REUSEADDR`: a second specific-address bind succeeds even though
+/// a wildcard-bound server like `python3 -m http.server` owns the port) —
+/// also probe-connects: anything accepting on loopback means taken.
 pub fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(("127.0.0.1", port)).is_ok()
+    if TcpListener::bind(("127.0.0.1", port)).is_err() {
+        return false;
+    }
+    if TcpListener::bind(("::1", port)).is_err() {
+        return false;
+    }
+    if std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(200),
+    )
+    .is_ok()
+    {
+        return false;
+    }
+    true
 }
 
 /// Try to detect the port from a command's arguments.

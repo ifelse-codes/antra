@@ -170,6 +170,21 @@ async fn run_inner(args: RunArgs) -> Result<()> {
             if is_port_available(p) {
                 output::print_success(&format!("Using port {p}"));
                 p
+            } else if detect_port_from_command(&args.command) == Some(p) {
+                // The child's own args pin it to the busy port (e.g.
+                // `python3 -m http.server 18090`), so spawning it would only
+                // dump a raw `Address already in use` traceback. Fail fast
+                // with the actionable message instead — before registering
+                // anything, so there is nothing to clean up.
+                output::print_error(&format!("Port {p} is already in use."));
+                output::print_warning(&format!(
+                    "Your command looks pinned to port {p} (`{}`), so it cannot start there.",
+                    args.command.join(" ")
+                ));
+                output::print_warning(
+                    "Stop the process on that port (see `antra list`), or pass a free --port.",
+                );
+                return Err(anyhow::anyhow!("Port {p} is already in use"));
             } else {
                 let alt = find_free_port()?;
                 output::print_warning(&format!(
