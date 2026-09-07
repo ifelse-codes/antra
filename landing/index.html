@@ -226,6 +226,8 @@ footer{border-top:1px solid var(--line);padding:48px 0}
     </div>
   </div>
   <div class="hero-alt">or <code>brew install ifelse-codes/antra/antra</code></div>
+  <div class="hero-alt">Clean URLs (<code>https://myapp.localhost</code>) use ports 443/80 and need sudo once: <code>sudo antra proxy start</code>. Without sudo, Antra serves <code>https://myapp.localhost:8443</code> automatically.</div>
+  <div class="hero-alt">Pin a version for teams/CI: <code>curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.2.5 bash</code></div>
 </div>
 </section>
 
@@ -277,12 +279,12 @@ footer{border-top:1px solid var(--line);padding:48px 0}
     <div class="feature-card">
       <div class="feature-index">02</div>
       <h3>Real HTTPS</h3>
-      <p>Local CA, SNI certs, zero browser warnings. One-time trust, then forget. On macOS, <code>antra trust --user-level</code> needs no sudo.</p>
+      <p>Local CA, SNI certs, zero browser warnings. One-time trust, then forget — no sudo needed (macOS uses your login keychain).</p>
     </div>
     <div class="feature-card">
       <div class="feature-index">03</div>
       <h3>No ports</h3>
-      <p>Visit https://myapp.localhost. No :5173. No :3000. Done.</p>
+      <p>Visit https://myapp.localhost. No :5173. No :3000. Done. (Clean URLs need <code>sudo antra proxy start</code> once for ports 443/80 — otherwise Antra serves <code>:8443</code> automatically.)</p>
     </div>
     <div class="feature-card">
       <div class="feature-index">04</div>
@@ -398,7 +400,7 @@ port = 5173</code></pre>
         <td>n/a</td>
         <td>You edit it</td>
         <td class="check">No</td>
-        <td class="check">Only for .test</td>
+        <td class="check">No for .localhost — only .test & Safari (<code>hosts sync</code>)</td>
       </tr>
       <tr>
         <td>WebSocket / HMR</td>

@@ -67,16 +67,18 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
     let interactive = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
     #[cfg(not(unix))]
     let interactive = true;
+    // macOS-first hint: user-level trust needs no sudo.
+    #[cfg(target_os = "macos")]
+    let trust_hint = "antra trust --user-level";
+    #[cfg(not(target_os = "macos"))]
+    let trust_hint = "antra trust";
     if !interactive {
         println!();
         println!(
             "  {} Non-interactive session — skipping automatic CA install.",
             "ℹ".cyan()
         );
-        println!(
-            "  Run {} to enable warning-free HTTPS",
-            "antra trust".bold()
-        );
+        println!("  Run {} to enable warning-free HTTPS", trust_hint.bold());
         println!();
         return;
     }
@@ -86,16 +88,11 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
         return;
     }
 
-    // Check if CA is already trusted
-    match crate::trust::check_trust_status() {
-        Ok(true) => {
-            let _ = global::mark_trust_prompted();
-            return;
-        }
-        Ok(false) => {}
-        Err(_) => {
-            return;
-        }
+    // Check if CA is already trusted (system store OR macOS login keychain —
+    // user-level trust alone gives warning-free HTTPS, no reinstall needed)
+    if crate::trust::is_trusted_for_https() {
+        let _ = global::mark_trust_prompted();
+        return;
     }
 
     // CA not trusted — auto-install it
@@ -110,7 +107,7 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
             println!("  {} Auto-trust failed: {e}", "⚠".yellow());
             println!(
                 "  Run {} to install the CA, then re-run your command",
-                "sudo antra trust".bold()
+                trust_hint.bold()
             );
         }
     }

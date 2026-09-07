@@ -65,8 +65,10 @@ pub fn execute() -> Result<()> {
             );
             #[cfg(target_os = "macos")]
             issues.push((
-                "CA not trusted by system".to_string(),
-                "antra trust --user-level  (no sudo)  OR  sudo antra trust".to_string(),
+                "CA not trusted (no warning-free HTTPS)".to_string(),
+                // Single executable command so `Auto-fix all issues?` works
+                // with one keypress — no sudo needed on macOS.
+                "antra trust --user-level".to_string(),
             ));
             #[cfg(not(target_os = "macos"))]
             issues.push((
