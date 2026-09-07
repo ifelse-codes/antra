@@ -140,13 +140,55 @@ fn keychain_ca_hashes() -> Vec<String> {
 }
 
 /// Delete one login-keychain certificate by SHA-1 hash.
+///
+/// Best-effort with a short timeout: `security` can pop a GUI auth dialog
+/// (locked keychain) that never resolves headless — never let pruning hang
+/// a trust command. Failures are ignored; the subsequent `add-trusted-cert`
+/// succeeding is what matters.
 #[cfg(target_os = "macos")]
 fn delete_keychain_cert_by_hash(keychain_str: &str, hash: &str) {
-    let _ = std::process::Command::new("security")
-        .args(["delete-certificate", "-Z", hash, keychain_str])
+    let cmd = {
+        let mut c = std::process::Command::new("security");
+        c.args(["delete-certificate", "-Z", hash, keychain_str]);
+        c
+    };
+    let _ = run_security_mutation(cmd, std::time::Duration::from_secs(15));
+}
+
+/// Run a mutating `security` command with a bounded wait.
+///
+/// Reads (`find-certificate`) return fast; MUTATIONS (`add-trusted-cert`,
+/// `delete-certificate`) may pop a GUI approval dialog when the keychain
+/// wants auth. With no GUI session that dialog never resolves, so waiting
+/// forever would hang the CLI with zero output. Instead, kill the child
+/// after `timeout` and report that GUI approval may be needed.
+#[cfg(target_os = "macos")]
+fn run_security_mutation(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<std::process::ExitStatus> {
+    use anyhow::Context;
+    let mut child = cmd
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .spawn()
+        .context("Failed to run `security`")?;
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait().context("Failed to poll `security`")? {
+            Some(status) => return Ok(status),
+            None if start.elapsed() > timeout => {
+                let _ = child.kill();
+                anyhow::bail!(
+                    "`security` timed out after {}s — macOS may be waiting for \
+                     Keychain approval in a GUI dialog. Unlock your login \
+                     keychain (Keychain Access) and retry.",
+                    timeout.as_secs()
+                );
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
 }
 
 /// Remove keychain certificates carrying our CA's Common Name.
@@ -512,16 +554,19 @@ pub fn install_ca_user_level() -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
             .join("Library/Keychains/login.keychain-db");
 
-        let status = std::process::Command::new("security")
-            .args([
-                "add-trusted-cert",
-                "-r",
-                "trustRoot",
-                "-k",
-                keychain_path.to_str().unwrap(),
-                temp_cert.path().to_str().unwrap(),
-            ])
-            .status();
+        let mut cmd = std::process::Command::new("security");
+        cmd.args([
+            "add-trusted-cert",
+            "-r",
+            "trustRoot",
+            "-k",
+            keychain_path.to_str().unwrap(),
+            temp_cert.path().to_str().unwrap(),
+        ]);
+        // Bounded wait: a locked keychain pops a GUI approval dialog that
+        // never resolves headless — fail with a hint instead of hanging.
+        // Generous timeout: an interactive user may be approving at the GUI.
+        let status = run_security_mutation(cmd, std::time::Duration::from_secs(120));
 
         match status {
             Ok(s) if s.success() => {
@@ -543,7 +588,7 @@ pub fn install_ca_user_level() -> Result<()> {
                 );
             }
             Err(e) => {
-                anyhow::bail!("Failed to run security command: {e}");
+                anyhow::bail!("Failed to install to user keychain: {e}");
             }
         }
     }
@@ -580,21 +625,22 @@ fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
         .join("Library/Keychains/login.keychain-db");
 
-    let status = std::process::Command::new("security")
-        .args([
-            "add-trusted-cert",
-            "-r",
-            "trustRoot",
-            "-k",
-            keychain_path.to_str().unwrap(),
-            temp_cert.path().to_str().unwrap(),
-        ])
-        .status();
+    let mut cmd = std::process::Command::new("security");
+    cmd.args([
+        "add-trusted-cert",
+        "-r",
+        "trustRoot",
+        "-k",
+        keychain_path.to_str().unwrap(),
+        temp_cert.path().to_str().unwrap(),
+    ]);
 
-    match status {
+    // Short timeout: automatic paths must stay bounded — on failure the
+    // caller prints a manual `antra trust --user-level` hint.
+    match run_security_mutation(cmd, std::time::Duration::from_secs(30)) {
         Ok(s) if s.success() => Ok(()),
         Ok(s) => anyhow::bail!("security command failed with exit code: {s}"),
-        Err(e) => anyhow::bail!("Failed to run security command: {e}"),
+        Err(e) => anyhow::bail!("Automatic keychain install failed: {e}"),
     }
 }
 
