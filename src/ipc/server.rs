@@ -64,6 +64,7 @@ pub fn pid_path() -> PathBuf {
 
 /// Parse pid-file contents into a PID. Pure (no fs) so it is unit-testable;
 /// fs + liveness live in `read_daemon_pid` / `is_daemon_pid_alive` below.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn parse_pid_contents(contents: &str) -> Option<u32> {
     contents.trim().parse::<u32>().ok().filter(|&pid| pid > 0)
 }
@@ -71,6 +72,7 @@ pub(crate) fn parse_pid_contents(contents: &str) -> Option<u32> {
 /// Read the daemon PID file, if present and parseable. Returns None when the
 /// file is missing or corrupt — callers must treat that as "unknown", never
 /// as "dead" on its own.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn read_daemon_pid() -> Option<u32> {
     std::fs::read_to_string(pid_path())
         .ok()

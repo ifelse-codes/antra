@@ -279,23 +279,41 @@ mod tests {
 
     #[test]
     fn test_is_port_available_roundtrip() {
-        // Grab a free port, hold it, release it.
-        let held = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = held.local_addr().unwrap().port();
-        assert!(
-            !is_port_available(port),
-            "held port {port} must report unavailable"
-        );
-        drop(held);
-        assert!(
-            is_port_available(port),
-            "released port {port} must report available"
-        );
+        // Ephemeral ports are contended under parallel test load: another
+        // test/process may grab our released port in the check window
+        // (TOCTOU). Retry the whole hold/release cycle a few times before
+        // calling it a failure.
+        for attempt in 1..=10 {
+            // Grab a free port, hold it, release it.
+            let held = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = held.local_addr().unwrap().port();
+            assert!(
+                !is_port_available(port),
+                "held port {port} must report unavailable"
+            );
+            drop(held);
+            if is_port_available(port) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if attempt == 10 {
+                panic!("released port {port} still unavailable after 10 attempts (port snatched by parallel load?)");
+            }
+        }
     }
 
     #[test]
     fn test_find_free_port_is_available() {
-        let port = find_free_port().unwrap();
-        assert!(is_port_available(port));
+        // Same TOCTOU note as above: retry before failing.
+        for attempt in 1..=10 {
+            let port = find_free_port().unwrap();
+            if is_port_available(port) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if attempt == 10 {
+                panic!("find_free_port returned {port}, still unavailable after 10 attempts");
+            }
+        }
     }
 }
