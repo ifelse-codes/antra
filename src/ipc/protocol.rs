@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// IPC protocol version
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// A message sent between CLI and daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +46,10 @@ pub struct RegisterRouteRequest {
     pub domain: String,
     pub port: u16,
     pub pid: Option<u32>,
+    /// True for `run`/`dev`-managed routes. Defaults to false for
+    /// backwards-compat with persisted v1 clients.
+    #[serde(default)]
+    pub managed: bool,
 }
 
 /// Request to unregister a route
@@ -78,6 +82,8 @@ pub struct RouteInfo {
     pub domain: String,
     pub port: u16,
     pub pid: Option<u32>,
+    #[serde(default)]
+    pub managed: bool,
     pub created_at_secs: u64,
 }
 

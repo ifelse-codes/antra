@@ -45,16 +45,40 @@ pub fn execute() -> Result<()> {
     let mut alive_count = 0;
 
     for route in &routes {
+        // Static aliases (unmanaged, pid-less) are long-lived by design.
+        // Managed run/dev routes must die with their process — prune when
+        // the owner PID is missing or dead.
+        if !route.managed && route.pid.is_none() {
+            // Static alias/add route: no process to check, always kept.
+            println!(
+                "  {} {} (static route, kept)",
+                "✓".green(),
+                route.domain.green()
+            );
+            alive_count += 1;
+            continue;
+        }
+        // Unmanaged with PID (legacy): fall through to PID check below.
         let pid = match route.pid {
             Some(pid) => pid,
             None => {
-                // Static alias/add route: no process to check, always kept.
+                // Managed route with no owner — orphaned, prune it.
                 println!(
-                    "  {} {} (static route, kept)",
-                    "✓".green(),
-                    route.domain.green()
+                    "  {} {} (managed route, no owner) — pruning",
+                    "✗".red(),
+                    route.domain.red(),
                 );
-                alive_count += 1;
+                match send_command_sync(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
+                    domain: route.domain.clone(),
+                })) {
+                    Ok(_) => {
+                        println!("    {} Removed", "✓".green());
+                        pruned_count += 1;
+                    }
+                    Err(e) => {
+                        println!("    {} Failed to remove: {}", "✗".red(), e);
+                    }
+                }
                 continue;
             }
         };

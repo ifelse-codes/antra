@@ -14,18 +14,25 @@ pub struct ProxyState {
 
 /// Handle an incoming HTTP request: look up route, forward to upstream.
 /// For WebSocket upgrades, delegates to the WebSocket handler.
+///
+/// Body type is nested Either: Left(Incoming) = live upstream stream,
+/// Right(Left(Full)) = static error pages, Right(Right(Empty)) = WS upgrade.
+/// Streaming (not buffering) is what makes SSE work through the proxy.
 pub async fn handle_request(
     req: Request<Incoming>,
     state: std::sync::Arc<ProxyState>,
-) -> Result<Response<Either<Full<Bytes>, Empty<Bytes>>>, anyhow::Error> {
+) -> Result<Response<Either<Incoming, Either<Full<Bytes>, Empty<Bytes>>>>, anyhow::Error> {
+    // Host for routing: HTTP/1.x sends `host`; HTTP/2 sends `:authority`
+    // (hyper exposes it via uri host, no `host` header). Check both.
     let host = req
         .headers()
         .get("host")
         .and_then(|h| h.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+        .map(|s| s.to_string())
+        .or_else(|| req.uri().host().map(|h| h.to_string()))
+        .unwrap_or_default();
 
-    let domain = host.split(':').next().unwrap_or(&host).to_string();
+    let domain = host.split(':').next().unwrap_or(&host).to_ascii_lowercase();
 
     let is_ws = websocket::is_websocket_upgrade(&req);
 
@@ -48,7 +55,7 @@ pub async fn handle_request(
             let response = Response::builder()
                 .status(502)
                 .header("content-type", "text/plain")
-                .body(Either::Left(Full::new(Bytes::from(body))))
+                .body(Either::Right(Either::Left(Full::new(Bytes::from(body)))))
                 .unwrap();
             return Ok(response);
         }
@@ -83,7 +90,7 @@ pub async fn handle_request(
         let response = Response::builder()
             .status(508)
             .header("content-type", "text/plain")
-            .body(Either::Left(Full::new(Bytes::from(body))))
+            .body(Either::Right(Either::Left(Full::new(Bytes::from(body)))))
             .unwrap();
         return Ok(response);
     }
@@ -91,7 +98,7 @@ pub async fn handle_request(
     // Handle WebSocket upgrade
     if is_ws {
         match websocket::handle_upgrade(req, &route, hops).await {
-            Ok(response) => Ok(response.map(Either::Right)),
+            Ok(response) => Ok(response.map(|b| Either::Right(Either::Right(b)))),
             Err(e) => {
                 tracing::error!(%domain, error = %e, "WebSocket upgrade failed");
                 let body = format!(
@@ -107,13 +114,13 @@ pub async fn handle_request(
                 let response = Response::builder()
                     .status(502)
                     .header("content-type", "text/plain")
-                    .body(Either::Left(Full::new(Bytes::from(body))))
+                    .body(Either::Right(Either::Left(Full::new(Bytes::from(body)))))
                     .unwrap();
                 Ok(response)
             }
         }
     } else {
-        // Regular HTTP forwarding
+        // Regular HTTP forwarding (streamed, not buffered)
         match forward::forward_request(req, &route, hops).await {
             Ok(response) => Ok(response.map(Either::Left)),
             Err(e) => {
@@ -132,7 +139,7 @@ pub async fn handle_request(
                 let response = Response::builder()
                     .status(503)
                     .header("content-type", "text/plain")
-                    .body(Either::Left(Full::new(Bytes::from(body))))
+                    .body(Either::Right(Either::Left(Full::new(Bytes::from(body)))))
                     .unwrap();
                 Ok(response)
             }

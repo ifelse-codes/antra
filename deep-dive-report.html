@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antra — Deep-Dive Report</title>
+<meta name="description" content="A founder's-eye read of antra: what it is, where it breaks on a real machine, and the one contribution with the highest leverage.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0A0A0C;--recessed:#0D0D11;--card:#121217;--elevated:#16161C;
+  --heading:#ECECEF;--body:#A4A4AE;--muted:#6A6A75;
+  --violet:#8B7CF6;--violet-bright:#B7AEFF;
+  --violet-fill:rgba(139,124,246,0.12);--violet-hairline:rgba(139,124,246,0.28);
+  --line:rgba(255,255,255,0.075);--line-strong:rgba(255,255,255,0.14);
+  --font-body:'Geist',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'Geist Mono','SF Mono',ui-monospace,monospace;
+  --max-w:1080px;--pad:28px;--pad-m:20px;
+}
+html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{background:var(--bg);color:var(--body);font-family:var(--font-body);font-size:14.5px;line-height:1.6;letter-spacing:-0.01em;overflow-x:hidden;
+  background-image:repeating-linear-gradient(0deg,rgba(255,255,255,0.01) 0 1px,transparent 1px 32px),repeating-linear-gradient(90deg,rgba(255,255,255,0.01) 0 1px,transparent 1px 32px)}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+section{scroll-margin-top:72px}
+
+/* ── Mandala — the single flourish ────────────────── */
+#mandala{position:fixed;top:50%;left:50%;width:150vmax;height:150vmax;transform:translate(-50%,-50%);z-index:0;pointer-events:none;opacity:0.03;animation:mandala-spin 240s linear infinite}
+@keyframes mandala-spin{from{transform:translate(-50%,-50%) rotate(0deg)}to{transform:translate(-50%,-50%) rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){#mandala{animation:none}}
+
+/* ── Nav — the one permitted blur ─────────────────── */
+nav{position:sticky;top:0;z-index:100;background:rgba(10,10,12,0.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad);height:56px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--heading);letter-spacing:-0.02em}
+.nav-logo span{color:var(--violet)}
+.nav-logo em{font-style:normal;color:var(--muted);font-weight:400}
+.nav-links{display:flex;gap:26px;align-items:center}
+.nav-links a{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--muted);transition:color 0.3s}
+.nav-links a:hover{color:var(--heading)}
+
+/* ── Layout ───────────────────────────────────────── */
+.container{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad)}
+section.band{position:relative;z-index:1;border-top:1px solid var(--line);padding:104px 0}
+.eyebrow{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.eyebrow::before{content:'◆';color:var(--violet);font-size:8px}
+h2{font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;color:var(--heading);letter-spacing:-0.03em;line-height:1.15;max-width:24ch}
+.lede{max-width:62ch;margin-top:20px}
+.lede p{margin-bottom:14px}
+.lede p:last-child{margin-bottom:0}
+.close-line{margin-top:40px;max-width:56ch;color:var(--heading);font-weight:500}
+code{font-family:var(--font-mono);font-size:0.92em;color:var(--violet-bright);background:var(--recessed);border:1px solid var(--line);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.pre-code code{white-space:pre-wrap}
+
+/* ── Hero ─────────────────────────────────────────── */
+.hero{position:relative;z-index:1;padding:120px 0 96px;text-align:left}
+.hero .eyebrow{justify-content:flex-start}
+.hero h1{font-size:clamp(2.2rem,5vw,3.6rem);font-weight:600;color:var(--heading);letter-spacing:-0.035em;line-height:1.08;max-width:20ch}
+.hero h1 em{font-style:normal;color:var(--violet-bright)}
+.hero-sub{font-size:16px;max-width:56ch;margin:24px 0 40px;line-height:1.6}
+.hero-meta{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.18em;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 28px}
+.hero-meta b{font-weight:500;color:var(--body)}
+
+/* ── Stat band ────────────────────────────────────── */
+.stats{position:relative;z-index:1;border-top:1px solid var(--line);padding:48px 0}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border-radius:6px;overflow:hidden}
+.stat{background:var(--card);padding:24px 28px}
+.stat .n{font-family:var(--font-mono);font-size:26px;font-weight:500;color:var(--heading);letter-spacing:-0.02em}
+.stat .n.v{color:var(--violet-bright)}
+.stat .l{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:0.18em;color:var(--muted);margin-top:8px}
+
+/* ── Cards ────────────────────────────────────────── */
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:40px}
+.card{background:var(--card);padding:28px;transition:transform 0.3s,border-color 0.3s}
+.card:hover{transform:translateY(-2px)}
+.card .idx{font-family:var(--font-mono);font-size:11px;color:var(--violet);margin-bottom:12px}
+.card h3{font-size:15.5px;font-weight:600;color:var(--heading);letter-spacing:-0.02em;margin-bottom:8px}
+.card p{font-size:13.5px;color:var(--muted);line-height:1.55}
+.card .evi{margin-top:16px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--body);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:12px 14px;white-space:pre-wrap;word-break:break-word}
+
+/* ── Split ────────────────────────────────────────── */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:40px}
+.split-cell{background:var(--card);padding:32px}
+.split-cell.muted{background:var(--recessed)}
+.split-cell h3{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--muted);margin-bottom:18px}
+.split-cell:not(.muted) h3{color:var(--body)}
+.split-cell ul{list-style:none;display:flex;flex-direction:column;gap:11px}
+.split-cell li{font-size:13.5px;color:var(--body);display:flex;gap:10px;line-height:1.5}
+.split-cell:not(.muted) li::before{content:'✓';font-family:var(--font-mono);color:var(--violet);flex-shrink:0}
+.split-cell.muted li::before{content:'—';font-family:var(--font-mono);color:var(--muted);flex-shrink:0}
+.split-cell.muted li{color:var(--muted)}
+
+/* ── Callout — the one violet fill ────────────────── */
+.callout{background:var(--violet-fill);border-left:2px solid var(--violet);border-radius:0 6px 6px 0;padding:28px 32px;margin-top:40px;max-width:820px}
+.callout .tag{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--violet-bright);margin-bottom:12px}
+.callout h3{font-size:clamp(1.15rem,2.2vw,1.45rem);font-weight:600;color:var(--heading);letter-spacing:-0.02em;line-height:1.3;margin-bottom:10px}
+.callout p{font-size:13.5px;color:var(--body);max-width:62ch}
+.callout p + p{margin-top:10px}
+
+/* ── Badges ───────────────────────────────────────── */
+.badge{display:inline-block;font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.14em;color:var(--muted);border:1px solid var(--line-strong);border-radius:100px;padding:3px 10px;white-space:nowrap}
+.badge.live{color:var(--violet);border-color:var(--violet-hairline)}
+
+/* ── Receipt ──────────────────────────────────────── */
+.receipt{background:var(--recessed);border:1px solid var(--line);border-radius:6px;margin-top:40px;overflow:hidden}
+.rline{display:flex;gap:16px;justify-content:space-between;align-items:baseline;padding:13px 20px;border-bottom:1px solid var(--line)}
+.rline:last-child{border-bottom:none}
+.rline .k{font-family:var(--font-mono);font-size:12px;color:var(--muted);letter-spacing:0.02em}
+.rline .v{font-family:var(--font-mono);font-size:12px;color:var(--body);text-align:right;word-break:break-word}
+.rline .v.hl{color:var(--heading)}
+.rline .v .bad{color:var(--muted)}
+.rline .v .ok{color:var(--violet)}
+
+/* ── Prompt block ─────────────────────────────────── */
+.prompt-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 0}
+.prompt-bar .t{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.18em;color:var(--muted)}
+.copy-btn{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.14em;color:var(--muted);background:transparent;border:1px solid var(--line-strong);border-radius:4px;padding:5px 12px;cursor:pointer;transition:color 0.3s,border-color 0.3s}
+.copy-btn:hover,.copy-btn.done{color:var(--violet);border-color:var(--violet-hairline)}
+
+/* ── Evidence blocks ──────────────────────────────── */
+.evi-block{background:var(--card);border:1px solid var(--line);border-radius:6px;margin-top:16px;padding:24px 28px}
+.evi-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.evi-head .glyph{font-family:var(--font-mono);font-size:13px;color:var(--violet)}
+.evi-head .glyph.fail{color:var(--muted)}
+.evi-head h3{font-size:15px;font-weight:600;color:var(--heading);letter-spacing:-0.02em}
+.evi-head .badge{margin-left:auto}
+.evi-block .what{font-size:13.5px;color:var(--body);max-width:68ch}
+.evi-log{margin-top:14px;font-family:var(--font-mono);font-size:11.5px;line-height:1.7;color:var(--body);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:14px 16px;white-space:pre-wrap;word-break:break-word}
+.evi-log .m{color:var(--muted)}
+.evi-log .v{color:var(--violet-bright)}
+.evi-cols{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-top:14px}
+.evi-col{background:var(--bg);padding:14px 16px}
+.evi-col .t{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.18em;color:var(--muted);margin-bottom:8px}
+.evi-col .d{font-family:var(--font-mono);font-size:11.5px;line-height:1.7;color:var(--body);white-space:pre-wrap;word-break:break-word}
+
+/* ── Opportunities ────────────────────────────────── */
+.opp{display:grid;grid-template-columns:56px 1fr 220px;gap:24px;padding:28px 0;border-top:1px solid var(--line)}
+.opp:first-of-type{margin-top:40px}
+.opp .num{font-family:var(--font-mono);font-size:13px;color:var(--muted);padding-top:3px}
+.opp .num.top{color:var(--violet)}
+.opp h3{font-size:15.5px;font-weight:600;color:var(--heading);letter-spacing:-0.02em;margin-bottom:8px}
+.opp .prob,.opp .dir{font-size:13.5px;line-height:1.55;max-width:64ch}
+.opp .prob{color:var(--body)}
+.opp .dir{color:var(--muted);margin-top:6px}
+.opp .dir b{font-weight:500;color:var(--body)}
+.opp .meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;justify-content:flex-start;padding-top:3px}
+.opp .meta .m{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.14em;color:var(--muted)}
+
+/* ── Timeline ─────────────────────────────────────── */
+.timeline{margin-top:40px;position:relative;padding-left:40px;max-width:720px}
+.timeline::before{content:'';position:absolute;left:11px;top:8px;bottom:8px;width:1px;background:linear-gradient(180deg,var(--violet-hairline),transparent)}
+.tnode{position:relative;padding-bottom:28px}
+.tnode:last-child{padding-bottom:0}
+.tnode::before{content:'';position:absolute;left:-34px;top:5px;width:9px;height:9px;border-radius:100px;background:var(--bg);border:1px solid var(--violet)}
+.tnode .s{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:0.18em;color:var(--violet);margin-bottom:6px}
+.tnode p{font-size:13.5px;color:var(--body);max-width:60ch}
+.tnode p b{font-weight:500;color:var(--heading)}
+
+/* ── Footer ───────────────────────────────────────── */
+footer{position:relative;z-index:1;border-top:1px solid var(--line);padding:48px 0}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
+.footer-left{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.22em}
+.footer-links{display:flex;gap:24px}
+.footer-links a{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.14em;transition:color 0.3s}
+.footer-links a:hover{color:var(--violet)}
+
+/* ── Reveal ───────────────────────────────────────── */
+.reveal{opacity:0;transform:translateY(18px);transition:opacity 0.7s cubic-bezier(.22,.61,.36,1),transform 0.7s cubic-bezier(.22,.61,.36,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+
+/* ── Mobile ───────────────────────────────────────── */
+@media(max-width:820px){
+  .nav-links a:not(.keep){display:none}
+  section.band{padding:72px 0}
+  .hero{padding:80px 0 64px}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .grid3,.split{grid-template-columns:1fr}
+  .evi-cols{grid-template-columns:1fr}
+  .opp{grid-template-columns:1fr;gap:10px}
+  .opp .num{padding-top:0}
+  .opp .meta{flex-direction:row;align-items:center;flex-wrap:wrap}
+  .callout{padding:24px}
+}
+</style>
+</head>
+<body>
+
+<!-- Mandala (the one flourish) -->
+<svg id="mandala" viewBox="0 0 1000 1000" aria-hidden="true" fill="none" stroke="#8B7CF6">
+  <g stroke-width="1" opacity="0.9">
+    <circle cx="500" cy="500" r="480"/><circle cx="500" cy="500" r="400"/>
+    <circle cx="500" cy="500" r="320"/><circle cx="500" cy="500" r="240"/>
+    <circle cx="500" cy="500" r="160"/><circle cx="500" cy="500" r="90"/>
+  </g>
+  <g stroke-width="0.8" opacity="0.8">
+    <line x1="500" y1="20" x2="500" y2="980"/><line x1="20" y1="500" x2="980" y2="500"/>
+    <line x1="153" y1="153" x2="847" y2="847"/><line x1="847" y1="153" x2="153" y2="847"/>
+    <line x1="276" y1="76" x2="724" y2="924"/><line x1="724" y1="76" x2="276" y2="924"/>
+    <line x1="76" y1="276" x2="924" y2="724"/><line x1="924" y1="276" x2="76" y2="724"/>
+  </g>
+  <polygon points="500,100 849,300 849,700 500,900 151,700 151,300" stroke-width="1" opacity="0.85"/>
+  <polygon points="780,500 640,743 360,743 220,500 360,257 640,257" stroke-width="0.8" opacity="0.7"/>
+  <rect x="330" y="330" width="340" height="340" stroke-width="0.8" opacity="0.7" transform="rotate(45 500 500)"/>
+  <circle cx="500" cy="500" r="130" stroke-width="0.7" stroke-dasharray="3 9" opacity="0.7"/>
+  <circle cx="500" cy="500" r="260" stroke-width="0.7" stroke-dasharray="2 11" opacity="0.6"/>
+</svg>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo"><span>a</span>ntra <em>/ deep-dive</em></div>
+    <div class="nav-links">
+      <a href="#understanding">Understanding</a>
+      <a href="#state">State</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#opportunities">Opportunities</a>
+      <a href="#plan" class="keep">Plan</a>
+      <a href="#fixbrief" class="keep">Fix brief</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="container">
+    <div class="eyebrow">Deep-dive report — repository read</div>
+    <h1>Understand first. Challenge second. <em>Propose</em> third.</h1>
+    <p class="hero-sub">A founder's-eye read of Antra — the local proxy that gives every dev server a real HTTPS URL. What it is, where it breaks on a real machine, and the one contribution with the highest leverage. Claims marked <b>live</b> were reproduced on macOS 26; claims marked <b>code</b> cite the source.</p>
+    <div class="hero-meta">
+      <span>REPO <b>ifelse-codes/antra</b></span>
+      <span>VERSION <b>0.2.9</b></span>
+      <span>METHOD <b>READ · BUILD · ADVERSARIAL</b></span>
+    </div>
+  </div>
+</header>
+
+<!-- Stat band -->
+<div class="stats">
+  <div class="container">
+    <div class="stats-grid reveal">
+      <div class="stat"><div class="n">10.2K</div><div class="l">Lines of Rust read</div></div>
+      <div class="stat"><div class="n">168</div><div class="l">Tests passing · clippy clean</div></div>
+      <div class="stat"><div class="n v">07</div><div class="l">Live reproductions</div></div>
+      <div class="stat"><div class="n">10</div><div class="l">Ranked opportunities</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 01 Understanding -->
+<section class="band" id="understanding">
+  <div class="container">
+    <div class="eyebrow">01 Understanding</div>
+    <h2>One command. A real URL. Your process unchanged.</h2>
+    <div class="lede reveal">
+      <p>Antra is a Rust CLI and a local daemon. <code>antra run --domain myapp.localhost -- pnpm dev</code> spawns your process, registers a route, terminates TLS on <code>:443</code> with a per-domain leaf certificate minted from a local CA, and forwards — HTTP and WebSockets verbatim. The browser sees <code>https://myapp.localhost</code>. No ports, no <code>/etc/hosts</code> for <code>.localhost</code>, no warnings after one prompted trust step.</p>
+      <p>The unit of configuration is your existing command. Caddy and mkcert ask you to describe your servers to a third tool. Antra wraps the server you already run and infers the rest: port detection from args, <code>PORT</code> and <code>HOST</code> injection, <code>NODE_EXTRA_CA_CERTS</code> for Node TLS, even a stdout watcher that follows frameworks which reassign their own port. That inversion — process-wrapping instead of config-writing — is the design's center of gravity.</p>
+    </div>
+    <div class="callout reveal">
+      <div class="tag">The project's own rule</div>
+      <h3>A local networking layer, not a platform.</h3>
+      <p>No cloud. No accounts. No telemetry. No tunnels. If a feature needs a signup, it does not belong here. Root-CA installs are prompted, explained, reversible — the threat model is written down, including the MITRE technique it maps to.</p>
+    </div>
+    <div class="grid3 reveal">
+      <div class="card">
+        <div class="idx">01</div>
+        <h3>The promise</h3>
+        <p>Secure contexts, real cookies, working HMR. What <code>localhost:5173</code> cannot give, wrapped around the process you already run. Phases 0–10 shipped: proxy, TLS, daemon, IPC, config, cross-platform releases.</p>
+      </div>
+      <div class="card">
+        <div class="idx">02</div>
+        <h3>The trajectory</h3>
+        <p>The roadmap is explicit: zero-config <code>antra dev</code> across seven ecosystems, an OS service so URLs survive reboots, multi-segment TLDs for OAuth redirects. It wants to be the default way a local server is reached.</p>
+      </div>
+      <div class="card">
+        <div class="idx">03</div>
+        <h3>The stack</h3>
+        <p>Tokio, hyper 1, rustls, rcgen. No OpenSSL, no Node runtime, no account. Routes live in an in-memory <code>RwLock&lt;HashMap&gt;</code>; the hot path never touches disk. MIT licensed, single binary.</p>
+      </div>
+    </div>
+    <p class="close-line reveal">Two questions I could not answer from the repository: how much of the real user base is macOS-only — the login-keychain trust code is the most cared-for code in the tree — and whether the roadmap reflects many users or one very good UX test.</p>
+  </div>
+</section>
+
+<!-- 02 Current state -->
+<section class="band" id="state">
+  <div class="container">
+    <div class="eyebrow">02 Current state</div>
+    <h2>Strong bones. Three holes in the floor.</h2>
+    <div class="split reveal">
+      <div class="split-cell">
+        <h3>What holds</h3>
+        <ul>
+          <li>The proxy's error pages name the domain, the upstream, and the exact fix commands</li>
+          <li><code>antra doctor</code> buckets errors and warnings correctly, detects real port holders, offers one-keypress fixes</li>
+          <li>macOS trust flow: byte-exact keychain comparison, stale-entry pruning, bounded waits that never hang headless</li>
+          <li>168 tests green, clippy clean, an adversarial e2e suite already exists</li>
+          <li>The install URL serves the script, not HTML — an old roadmap bug, fixed</li>
+        </ul>
+      </div>
+      <div class="split-cell muted">
+        <h3>What breaks</h3>
+        <ul>
+          <li>Streaming responses buffer until completion — SSE hangs</li>
+          <li>The stdout port-watcher panics; the flagship command needs <code>--port</code> to work</li>
+          <li>Run routes persist as static aliases — zombies survive daemon restarts</li>
+          <li>IPv4-only bind: <code>::1</code> refused, unrelated apps can intercept</li>
+          <li>Stale sockets lie: "already running", raw connection errors</li>
+          <li><code>trust --remove</code> does not remove the login-keychain trust it installs</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grid3 reveal">
+      <div class="card">
+        <div class="idx">→ BUG 01</div>
+        <h3>The body is buffered</h3>
+        <p><code>forward.rs</code> collects the entire upstream body before replying. An infinite stream never finishes; the browser waits forever. SSE — table stakes for AI-era dev — is unusable through the proxy.</p>
+        <div class="evi">curl, through the proxy:  0 bytes in 4s, timeout
+curl, direct to upstream:  a tick every 1.0s, on time</div>
+      </div>
+      <div class="card">
+        <div class="idx">→ BUG 02</div>
+        <h3>The watcher panics</h3>
+        <p>The stdout watcher calls <code>send_command_sync</code>, which builds a new tokio runtime inside the running runtime. The task dies on the first port change; the route never follows Vite's real port.</p>
+        <div class="evi">thread 'tokio-rt-worker' panicked:
+Cannot start a runtime from within a runtime</div>
+      </div>
+      <div class="card">
+        <div class="idx">→ BUG 03</div>
+        <h3>Routes born ownerless</h3>
+        <p><code>run</code> registers <code>pid: None</code>, so the daemon files every run route as a static alias — persisted to disk, restored on restart, un-pruneable, un-killable by <code>--force</code>.</p>
+        <div class="evi">kill -9 the daemon → restart:
+  "Restored 1 route(s): test.localhost → :3000"
+  (nothing has ever listened on 3000)</div>
+      </div>
+    </div>
+
+    <div class="receipt reveal">
+      <div class="rline"><span class="k">No timeouts on the proxy path</span><span class="v">a wedged upstream hangs the browser indefinitely <span class="bad">· code</span></span></div>
+      <div class="rline"><span class="k">WS upgrades drop cookies, Authorization, Origin</span><span class="v">authenticated WebSockets break <span class="bad">· code</span></span></div>
+      <div class="rline"><span class="k"><code>trust --remove</code> misses the login keychain</span><span class="v">macOS default install path is not reversible <span class="bad">· code</span></span></div>
+      <div class="rline"><span class="k">README says "This is 0.1.0"</span><span class="v">Cargo.toml says 0.2.9; CLI table omits four commands <span class="bad">· code</span></span></div>
+    </div>
+    <p class="close-line reveal">None of these are architecture problems. All three core bugs are small diffs. That is the good news.</p>
+  </div>
+</section>
+
+<!-- 03 Evidence -->
+<section class="band" id="evidence">
+  <div class="container">
+    <div class="eyebrow">03 Evidence — adversarial log</div>
+    <h2>What a real machine says.</h2>
+    <p class="lede reveal" style="max-width:62ch">Built from source; daemon started without sudo — it fell back to <code>:8443</code>, so the landing page's footnote is accurate. Then it was used the way a developer would: run, alias, curl, kill. Seven reproductions, in order.</p>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>Happy path works</h3><span class="badge live">live</span></div>
+      <p class="what">Run a server through Antra, hit it over HTTPS, check the redirect. The demo is real when the port is right — and the 502/503 pages are genuinely best-in-class DX.</p>
+      <div class="evi-log"><span class="m">$</span> antra run --domain hello.localhost --port 18801 -- python3 -m http.server 18801
+<span class="m">→</span> GET https://hello.localhost:8443/        <span class="v">200 OK</span>
+<span class="m">→</span> GET http://hello.localhost:8080/foo      <span class="v">301 → https://…/foo</span></div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>Streaming is buffered</h3><span class="badge live">live</span></div>
+      <p class="what">A Python SSE endpoint, one tick per second, infinite. <b>Expected:</b> ticks arrive on time. <b>Actual through the proxy:</b> zero bytes until the stream ends — an infinite stream never arrives.</p>
+      <div class="evi-cols">
+        <div class="evi-col"><div class="t">Direct to upstream</div><div class="d">t+0.0s  data: tick 0
+t+1.0s  data: tick 1
+t+2.0s  data: tick 2 …</div></div>
+        <div class="evi-col"><div class="t">Through Antra</div><div class="d"><span class="m">(4.0s — nothing)</span>
+curl: operation timed out
+0 bytes received</div></div>
+      </div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>The watcher panics on its purpose</h3><span class="badge live">live</span></div>
+      <p class="what">A server printed one innocuous line mentioning another port. The watcher fired, warned — and died at the first IPC call. The feature built to follow Vite cannot fire once. The route survived only because the panic struck before the unregister.</p>
+      <div class="evi-log"><span class="m">stdout:</span> Compiler ready. Config port 19999 reserved for metrics.
+<span class="m">antra:</span>  ⚠ Port changed: 18805 → 19999 (detected from output)
+thread 'tokio-rt-worker' panicked: <span class="v">Cannot start a runtime from within a runtime</span></div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>Zombie routes survive restarts</h3><span class="badge live">live</span></div>
+      <p class="what">Daemon killed with <code>kill -9</code> mid-session. On restart it restores run-managed routes from <code>aliases.json</code> — pointing at ports where nothing listens. <code>prune</code> refuses to touch them: "static route, kept". <code>remove</code> needs a live daemon.</p>
+      <div class="evi-log"><span class="m">$</span> antra proxy start
+  ✓ Restored 1 route(s):
+    • <span class="v">test.localhost → 127.0.0.1:3000</span>   <span class="m">(503 for everyone, forever)</span></div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>IPv6 loopback is not served</h3><span class="badge live">live</span></div>
+      <p class="what">The daemon binds <code>127.0.0.1</code> only. <code>localhost</code> prefers <code>::1</code> on modern macOS — and on this machine an unrelated Python process bound to <code>*:8080</code> silently answered the HTTP→HTTPS redirect probe. A proxy must never lose requests to a stranger.</p>
+      <div class="evi-log"><span class="m">$</span> nc -z ::1 8443        <span class="v">→ refused</span>
+<span class="m">$</span> nc -z 127.0.0.1 8443  <span class="m">→ open</span>
+<span class="m">$</span> lsof -iTCP:8080 -sTCP:LISTEN
+  antra   127.0.0.1:8080     <span class="m">(IPv4)</span>
+  Python  <span class="v">*:8080</span>             <span class="m">(IPv6 — it wins on ::1)</span></div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>Stale sockets lie</h3><span class="badge live">live</span></div>
+      <p class="what">After a hard daemon kill, the socket file remains. <code>proxy start</code> claims the daemon is "already running"; <code>run</code> and <code>list</code> print a raw OS error with no recovery path.</p>
+      <div class="evi-log"><span class="m">$</span> antra proxy start    <span class="v">✗ Daemon is already running</span>
+<span class="m">$</span> antra list          <span class="v">Error: Connection refused (os error 61)</span></div>
+    </div>
+
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph fail">×</span><h3>Zero-config dies on scoped names</h3><span class="badge live">live</span></div>
+      <p class="what">A <code>package.json</code> named <code>@myorg/my-cool_app</code> produces the domain <code>@myorg/my-cool_app.localhost</code>. The validation error is clean — but the flow is dead for half the npm ecosystem. Uppercase names pass validation, then hit a case-sensitive route table that browsers lowercase around. <span class="badge live" style="margin-left:4px">code</span></p>
+      <div class="evi-log"><span class="m">$</span> antra dev
+  ✓ Detected Node.js project: @myorg/my-cool_app
+  <span class="v">Error: Invalid domain '@myorg/my-cool_app.localhost'</span></div>
+    </div>
+
+    <p class="close-line reveal">The proxy's 502 and 503 pages are already best-in-class. The paths users hit first deserve the same care.</p>
+  </div>
+</section>
+
+<!-- 04 Opportunities -->
+<section class="band" id="opportunities">
+  <div class="container">
+    <div class="eyebrow">04 Opportunities — ranked</div>
+    <h2>Ten moves, ordered by leverage.</h2>
+
+    <div class="opp reveal">
+      <div class="num top">01</div>
+      <div>
+        <h3>Route lifecycle + live port sync — FIXED ✓</h3>
+        <p class="prob">The flagship command fails by default: the watcher panics and routes are born ownerless.</p>
+        <p class="dir"><b>Direction:</b> register routes with the real child PID, mark them managed, make the watcher async, and connect-verify a detected port before switching.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>managed:bool</code> on Route + RegisterRouteRequest (PROTOCOL_VERSION 1→2), <code>run.rs</code> registers after spawn with real PID, watcher uses async IPC + host:port-only + TCP-verify, prune handles managed+dead-PID. Verified: <code>list</code> shows real PID, no aliases.json entry, kill-9 → 0 restored, all tests green, clippy clean.</p>
+      </div>
+      <div class="meta"><span class="badge live">live + code · fixed</span><span class="m">Complexity low–med</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num top">02</div>
+      <div>
+        <h3>Stream, don't buffer — FIXED ✓</h3>
+        <p class="prob">Every response is collected in full before the first byte is sent.</p>
+        <p class="dir"><b>Direction:</b> forward the upstream body as a live stream; audit Content-Length passthrough.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>forward.rs</code> returns <code>Response&lt;Incoming&gt;</code> verbatim (no <code>collect()</code>); <code>http.rs</code> uses nested <code>Either&lt;Incoming, Either&lt;Full, Empty&gt;&gt;</code> so error pages + WS still work. Verified: SSE 5 ticks via proxy in ~1s (was 0 bytes/timeout), all tests green.</p>
+      </div>
+      <div class="meta"><span class="badge live">live · fixed</span><span class="m">Complexity low–med</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num top">03</div>
+      <div>
+        <h3>Dual-stack loopback — FIXED ✓</h3>
+        <p class="prob"><code>::1</code> is refused; unrelated IPv6 listeners intercept.</p>
+        <p class="dir"><b>Direction:</b> bind <code>::1</code> alongside <code>127.0.0.1</code>; probe both stacks for fallbacks.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>https.rs</code> binds + probes both stacks (HTTPS + redirect); daemon runs one accept loop per listener. Verified: <code>nc -z ::1 18443</code> open (was refused).</p>
+      </div>
+      <div class="meta"><span class="badge live">live · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">04</div>
+      <div>
+        <h3>Stop persisting run routes — FIXED ✓</h3>
+        <p class="prob">Every crash writes managed routes into permanent alias state.</p>
+        <p class="dir"><b>Direction:</b> a <code>managed</code> flag on Route and RegisterRouteRequest; <code>aliases.json</code> holds aliases only.</p>
+        <p class="dir"><b>Fixed 2026-09-09 with 01:</b> registry persists <code>managed==false</code> only; <code>alias/add/proxy</code> register <code>managed:false</code>, <code>run</code> registers <code>managed:true</code>. Unit tests: managed excluded from snapshot (incl. pid-less managed).</p>
+      </div>
+      <div class="meta"><span class="badge live">live · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">05</div>
+      <div>
+        <h3>Recover from stale sockets — FIXED ✓</h3>
+        <p class="prob">A dead daemon's socket makes start refuse and run/list print raw errors.</p>
+        <p class="dir"><b>Direction:</b> <code>is_daemon_running</code> must connect, not stat; <code>ensure_daemon</code> restarts through a dead socket. Roadmap C6, worth pulling into NOW.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>is_daemon_running</code> connects to the socket (was <code>exists()</code>); stale branch in <code>start_daemon</code> is live again; <code>send_command</code> maps refused sockets to an actionable <code>proxy stop/start</code> message. Verified: kill-9 → <code>proxy start</code> succeeds (was "already running"), <code>list</code> clean.</p>
+      </div>
+      <div class="meta"><span class="badge live">live · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">06</div>
+      <div>
+        <h3>Name hygiene + case folding — FIXED ✓</h3>
+        <p class="prob">Scoped and uppercase project names break zero-config and route lookup.</p>
+        <p class="dir"><b>Direction:</b> strip <code>@scopes</code>, lowercase, fold the registry to case-insensitive lookups.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>sanitize_project_name()</code> in <code>detect.rs</code> (scope-strip, lowercase, invalid→<code>-</code>, fallback <code>app</code>) applied to all detectors; domains folded to lowercase in <code>run/dev/alias/add/proxy</code>, lookups in <code>http.rs</code>, SNI in <code>certs/cache.rs</code>. Unit tests: scoped/uppercase/garbage/plain.</p>
+      </div>
+      <div class="meta"><span class="badge live">live + code · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">07</div>
+      <div>
+        <h3><code>trust --remove</code> covers the keychain — FIXED ✓</h3>
+        <p class="prob">The default macOS install path cannot be undone by the documented command.</p>
+        <p class="dir"><b>Direction:</b> delete by SHA-1 hash using the helpers that already exist in <code>trust.rs</code>.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>remove_ca()</code> checks system store + login keychain, prompts once, removes both (existing hash helpers, prompt preserved per safety rules). Code-verified; live keychain mutation deliberately not run against the real keychain.</p>
+      </div>
+      <div class="meta"><span class="badge">code · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">08</div>
+      <div>
+        <h3>WebSocket header preservation — FIXED ✓</h3>
+        <p class="prob">Upgrades forward six headers; cookies and Authorization are dropped.</p>
+        <p class="dir"><b>Direction:</b> forward all client headers except hop-by-hop; lose the hand-written request.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> forwards <code>cookie/authorization/origin/sec-websocket-extensions/user-agent</code> (sanitized, CRLF-stripped) and echoes upstream <code>sec-websocket-accept/protocol/extensions</code> in the 101. Upstream connect + 101-read bounded at 10s (was unbounded).</p>
+      </div>
+      <div class="meta"><span class="badge">code · fixed</span><span class="m">Complexity small</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">09</div>
+      <div>
+        <h3>HTTP/2 to the browser — FIXED ✓</h3>
+        <p class="prob">ALPN is explicitly emptied; the six-connection HTTP/1.1 cap throttles unbundled dev.</p>
+        <p class="dir"><b>Direction:</b> one ALPN entry — rustls support is nearly free; the upstream stays HTTP/1.1.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> <code>alpn=[h2, http/1.1]</code>; required two companion fixes found by verification — H2 host comes from <code>uri().host()</code> (no <code>host</code> header) and upstream request version is pinned to HTTP/1.1. Verified: H2 200 + H1 200 on the same route. Bonus: 30s time-to-first-byte timeout so wedged upstreams fail fast instead of hanging the browser (body streams stay unbounded for SSE).</p>
+      </div>
+      <div class="meta"><span class="badge">code · fixed</span><span class="m">Complexity medium</span><span class="m">Risk low</span></div>
+    </div>
+
+    <div class="opp reveal">
+      <div class="num">10</div>
+      <div>
+        <h3>Docs truth pass — FIXED ✓</h3>
+        <p class="prob">Version, command table, and the mvp output sample no longer match the binary.</p>
+        <p class="dir"><b>Direction:</b> one sweep of README, mvp.md, and the CLI table.</p>
+        <p class="dir"><b>Fixed 2026-09-09:</b> README <code>0.1.0→0.2.9</code>, CLI table + arch tree list all 14 commands (<code>add/prune/hosts/service</code>), <code>mvp.md</code> in-scope/out-of-scope corrected for Windows Phase 10.</p>
+      </div>
+      <div class="meta"><span class="badge">code · fixed</span><span class="m">Complexity trivial</span><span class="m">Risk none</span></div>
+    </div>
+
+    <p class="close-line reveal">Items 01–04 compound: each makes the next cheaper.</p>
+  </div>
+</section>
+
+<!-- 05 The pick -->
+<section class="band" id="pick">
+  <div class="container">
+    <div class="eyebrow">05 The one contribution</div>
+    <h2>The pick, and why it beats the others.</h2>
+    <div class="callout reveal">
+      <div class="tag">→ Highest leverage</div>
+      <h3>Make the flagship flow work — real route ownership and a port-watcher that cannot panic.</h3>
+      <p>This and streaming break the same promise. But the watcher breaks it on the first command a new user copies from the landing page: a 503 and a raw panic, then a zombie route left behind. It is one root cause wearing three symptoms — the system does not model who owns a route.</p>
+      <p>Fixing ownership repairs prune, --force, persistence, and port-sync at once — the highest leverage per line changed, and it deepens the process-wrapping inversion instead of adding surface area. Streaming is the immediate follow-up PR, not a distant one.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 06 Plan -->
+<section class="band" id="plan">
+  <div class="container">
+    <div class="eyebrow">06 Implementation plan</div>
+    <h2>The diff, before the code.</h2>
+
+    <div class="receipt reveal">
+      <div class="rline"><span class="k">src/cli/run.rs</span><span class="v hl">register after spawn, with the real child PID</span></div>
+      <div class="rline"><span class="k">src/ipc/protocol.rs</span><span class="v hl">managed: bool on RegisterRouteRequest · PROTOCOL_VERSION → 2</span></div>
+      <div class="rline"><span class="k">src/routing/types.rs · registry.rs</span><span class="v hl">Route gains managed · persist aliases only</span></div>
+      <div class="rline"><span class="k">src/util/port_watcher.rs</span><span class="v hl">async task · stricter patterns · connect-verify before switching</span></div>
+      <div class="rline"><span class="k">src/routing/persist.rs · cli/{prune,alias,add}.rs</span><span class="v hl">carry the flag · prune managed-with-dead-pid</span></div>
+    </div>
+
+    <div class="timeline reveal">
+      <div class="tnode"><div class="s">Step 1</div><p>Thread <b>managed</b> through IPC → registry → persistence. Smallest coherent diff first; the 168 existing tests stay green.</p></div>
+      <div class="tnode"><div class="s">Step 2</div><p><b>Move registration after spawn</b> in <code>run_inner</code>; keep the existing spawn-failure restore path. The watcher re-registers with the same PID.</p></div>
+      <div class="tnode"><div class="s">Step 3</div><p><b>Rewrite the watcher as async.</b> Require a host:port match — bare prose like "port 19999" no longer switches — and verify the new port accepts before swapping the route.</p></div>
+      <div class="tnode"><div class="s">Step 4</div><p><b>Prune managed routes with dead PIDs</b>; warn on unreachable aliases at daemon restore instead of silently serving 503s.</p></div>
+      <div class="tnode"><div class="s">Step 5</div><p><b>Ship with the e2e cases in CI:</b> fake-Vite output moves the route; a kill -9 mid-run leaves nothing in aliases.json; prune removes the dead managed route; --force kills the owner.</p></div>
+    </div>
+
+    <p class="close-line reveal">Protocol bumped once, with CLI and daemon in the same release. That is already how Antra ships.</p>
+  </div>
+</section>
+
+<!-- 07 Fix brief -->
+<section class="band" id="fixbrief">
+  <div class="container">
+    <div class="eyebrow">07 The handoff — fix brief</div>
+    <h2>The fix, the prompt, the time, the gain.</h2>
+    <p class="lede reveal" style="max-width:62ch">The pick from 05, packaged for execution: the exact changes, a self-contained prompt to prime an AI agent, an honest time estimate, and what the day buys. Hand it to an agent — or to yourself next Saturday.</p>
+
+    <!-- A · The fix -->
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">◆</span><h3>A · The fix — every route gets an owner</h3><span class="badge">one root cause · six files</span></div>
+      <p class="what">One design gap wears three symptoms: a route has no notion of ownership, so <code>run</code> registers pid-less (born a persisted zombie), the watcher re-registers pid-less (and dies trying), and <code>prune</code> refuses to touch any of it. Give a route an owner and the symptoms disappear together — the route behaves exactly like the process it wraps.</p>
+      <div class="receipt" style="margin-top:14px">
+        <div class="rline"><span class="k">src/routing/types.rs</span><span class="v hl">Route gains <code>managed: bool</code> — who owns this route</span></div>
+        <div class="rline"><span class="k">src/ipc/protocol.rs</span><span class="v hl">RegisterRouteRequest gains <code>managed</code> · <code>#[serde(default)]</code> · PROTOCOL_VERSION → 2</span></div>
+        <div class="rline"><span class="k">src/cli/run.rs:289</span><span class="v hl">register after spawn · <code>pid: Some(child)</code> · managed: true</span></div>
+        <div class="rline"><span class="k">src/routing/registry.rs:18</span><span class="v hl">persist <code>managed == false</code> only — aliases.json holds aliases</span></div>
+        <div class="rline"><span class="k">src/util/port_watcher.rs:25</span><span class="v hl">await send_command · host:port only · connect-verify before switch</span></div>
+        <div class="rline"><span class="k">src/cli/prune.rs:48 · daemon/server.rs:91</span><span class="v hl">prune dead managed routes · warn on unreachable aliases</span></div>
+      </div>
+      <p class="what" style="margin-top:14px"><b>Follow-up PR, same week — stream, don't buffer:</b> <code>src/proxy/forward.rs:78</code> collects the whole upstream body before the first byte is sent. Return the response with its incoming body intact and SSE stops hanging. Roughly half the size of the main fix.</p>
+    </div>
+
+    <!-- B · The priming prompt -->
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">◆</span><h3>B · The priming prompt for the agent</h3><span class="badge">self-contained · paste as-is</span></div>
+      <p class="what">Written so the agent needs nothing but the repository: the rules it may not break, the three verified root causes with file and line, the ordered changes, the tests that define done, and verification by running — the same spirit as the original brief. Understand first. Build only on solid reasoning.</p>
+      <div class="prompt-bar"><span class="t">agent-prompt.md</span><button class="copy-btn" id="copy-prompt" type="button">Copy</button></div>
+      <pre class="evi-log" id="agent-prompt"><span class="m"># Fix brief — Antra route ownership + live port sync (verified on v0.2.9)</span>
+
+You are working in the Antra repository: a Rust CLI + local daemon that gives
+dev servers real HTTPS URLs — <span class="v">antra run --domain myapp.localhost -- pnpm dev</span>.
+
+<span class="v">READ AGENT.MD FIRST.</span> Its Critical Rules are binding: Rust + Tokio + hyper 1.x
+only; routes live in an in-memory RwLock&lt;HashMap&gt; and the request path never
+touches disk; never silently modify /etc/hosts or the trust store; zero build
+warnings. Antra is a local networking layer, not a platform — no cloud, no
+accounts, no telemetry, no new config surface. Refactor nothing for style.
+
+<span class="v">TASK — one contribution: make the flagship flow work.</span> Three verified root
+causes, one design gap (a route has no owner):
+
+1. src/cli/run.rs:289 registers the route with pid: None BEFORE the child is
+   spawned (spawn is at :372). routing/registry.rs:18 persists every pid-less
+   route to aliases.json, restored on daemon restart; cli/prune.rs:48 skips
+   pid-less routes ("static route, kept"). Net: every run route is born a
+   zombie — it survives kill -9, serves 503 forever, and --force cannot kill
+   it because there is no PID.
+
+2. util/port_watcher.rs:25 runs inside tokio::spawn but calls send_command_sync
+   (ipc/client.rs:85), which builds a SECOND tokio runtime — panic: "Cannot
+   start a runtime from within a runtime". The port-follow feature dies on its
+   first trigger. Its patterns are also too loose: prose like "port 19999
+   reserved for metrics" flips the route.
+
+3. routing/types.rs:5 — Route has no ownership concept, so the daemon cannot
+   tell a deliberate antra alias (long-lived) from an antra run route (must
+   die with its process).
+
+<span class="v">CHANGES, in this order.</span> Smallest coherent diff first; all 168 existing
+tests stay green at every step.
+
+Step 1 — Ownership. Add pub managed: bool to Route (routing/types.rs) and to
+   RegisterRouteRequest (ipc/protocol.rs) with #[serde(default)]; bump
+   PROTOCOL_VERSION to 2 (CLI and daemon are the same binary — no negotiation).
+   alias.rs, add.rs and proxy.rs register managed: false; the IPC handler
+   (ipc/server.rs) carries the field into the registry.
+
+Step 2 — run.rs: move registration to AFTER cmd.spawn() succeeds; pass
+   pid: Some(child_pid) and managed: true. Keep the existing spawn-failure
+   cleanup and replaced-route restore exactly as they behave today.
+   restore_previous_route (run.rs:521) re-registers managed: false — the new
+   child does not own the previous mapping.
+
+Step 3 — registry.rs: static_alias_snapshot persists managed == false routes
+   only; managed routes never reach disk.
+
+Step 4 — port_watcher.rs: await send_command(...) directly (the task is
+   already async — drop the sync wrapper). Switch the route only on a
+   host:port match (127.0.0.1 / localhost / 0.0.0.0 / ::1), never on bare
+   "port N" prose; TCP-connect-verify the new port accepts before switching;
+   re-register with the same child PID and managed: true.
+
+Step 5 — prune.rs: prune managed routes whose PID is dead; leave static
+   aliases alone. daemon/server.rs:91 — warn about restored aliases whose
+   port has no listener instead of silently serving 503.
+
+<span class="v">TESTS — add, do not just keep green:</span> (a) run registers the real child PID
+with managed true; (b) kill -9 the daemon mid-run, restart: nothing restored
+from aliases.json; (c) prune removes a managed route with a dead PID; (d)
+watcher: a host:port line switches the route, prose does not, an
+unconnectable port is not switched; (e) e2e in tests/ covering (b).
+
+<span class="v">VERIFY BY RUNNING, not by reasoning:</span> cargo build (zero warnings), cargo
+test, cargo clippy. Then manually: antra run --domain t.localhost -- python3
+-m http.server 18999; kill -9 the daemon; antra proxy start must restore zero
+routes. Then a server whose output mentions a foreign port in prose — the
+route must not move.
+
+<span class="v">DONE MEANS:</span> the landing-page command works with no --port, Vite's own
+port is followed, and a hard daemon kill leaves zero zombies.</pre>
+    </div>
+
+    <!-- C · Estimated time -->
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">◆</span><h3>C · Estimated time</h3><span class="badge">one focused day</span></div>
+      <div class="receipt" style="margin-top:0">
+        <div class="rline"><span class="k">Step 1 · managed flag — types → IPC → handler → registry</span><span class="v">1–2 h</span></div>
+        <div class="rline"><span class="k">Step 2 · register after spawn, real child PID</span><span class="v">1–2 h</span></div>
+        <div class="rline"><span class="k">Step 3 · persist aliases only</span><span class="v">30 min</span></div>
+        <div class="rline"><span class="k">Step 4 · watcher → async · strict match · connect-verify</span><span class="v">2–3 h</span></div>
+        <div class="rline"><span class="k">Step 5 · prune dead managed · restore warning</span><span class="v">1 h</span></div>
+        <div class="rline"><span class="k">Tests — unit + e2e, 168 stay green</span><span class="v">2–3 h</span></div>
+        <div class="rline"><span class="k">Total</span><span class="v hl">≈ 8–12 h focused · agent session ≈ 2–4 h + your review hour</span></div>
+      </div>
+      <p class="what" style="margin-top:14px">The estimates assume the e2e harness that already exists and no scope creep — the whole point of the ordered steps. The streaming follow-up adds 3–4 h. When the agent reports done: read the diff against AGENT.md's rules, then run the two manual checks yourself. Trust, but verify by running.</p>
+    </div>
+
+    <!-- D · The return -->
+    <div class="callout reveal">
+      <div class="tag">D · The return</div>
+      <h3>The tool keeps the promise its landing page makes.</h3>
+      <p>Today, the first command a new user copies ends in a raw panic, a 503, and a zombie route. After this diff it works the way the hero copy says — one command, a real URL, your process unchanged — and the guarantees around it become truthful: <code>prune</code> removes what died, <code>--force</code> kills the real owner, a restart restores only what should survive. Two of the seven live failures in 03 retire with this one diff; the streaming follow-up retires a third.</p>
+      <p>The deeper return is trajectory, not symptoms: zero-config <code>antra dev</code> and the OS service — the roadmap's next acts — both sit on top of a correct route lifecycle. Build this first and every later feature inherits it. Skip it and every later feature inherits the zombies.</p>
+    </div>
+
+    <div class="grid3 reveal">
+      <div class="card">
+        <div class="idx">01</div>
+        <h3>Flagship works by default</h3>
+        <p>The landing-page command runs with no <code>--port</code>. Vite's self-chosen port is followed — connect-verified before the switch — instead of met by a panic and a 503.</p>
+      </div>
+      <div class="card">
+        <div class="idx">02</div>
+        <h3>Lifecycle tells the truth</h3>
+        <p>Aliases persist; managed routes don't. Kill -9 mid-run and nothing comes back. The what-breaks list in 02 goes from six items to four.</p>
+      </div>
+      <div class="card">
+        <div class="idx">03</div>
+        <h3>SSE stops hanging</h3>
+        <p>The streaming follow-up retires the third failure and makes the proxy usable for AI-era dev — server-sent events, streaming chat, live tails.</p>
+      </div>
+    </div>
+
+    <p class="close-line reveal">A day of work, a single protocol bump, one boolean of new surface — and the demo that sells the project stops lying.</p>
+  </div>
+</section>
+
+<!-- 08 Fix log — living bug-report updates -->
+<section class="band" id="fixlog">
+  <div class="container">
+    <div class="eyebrow">08 Fix log — verified, in order</div>
+    <h2>Fixed here, not just proposed.</h2>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P0 Docs truth (opp 10)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">README version 0.1.0→0.2.9, CLI table + arch tree now list all 14 commands, mvp.md scope corrected. Docs-only, no code risk.</p>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P1 Ownership + watcher (opp 01+04)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">Route + RegisterRouteRequest gain <code>managed:bool</code> (PROTOCOL_VERSION 1→2, serde default for v1 compat). run.rs registers after spawn with real child PID + managed:true; alias/add/proxy register managed:false; registry persists unmanaged only; watcher is async (no runtime-in-runtime panic), host:port-only matching, TCP-verified switch with owner PID; prune removes managed+dead-PID.</p>
+      <div class="evi-log"><span class="m">verify:</span> cargo build (0 warn) · cargo test (all green incl. 3 new: snapshot exclusion ×2, v1-compat, prose-no-switch) · cargo clippy -D warnings clean · manual: list shows real PID 85289, no aliases.json entry for managed route, kill-9 → 0 routes restored</div>
+      <p class="what" style="margin-top:14px"><b>Remaining from live log:</b> stale-socket refuse after kill-9 (opp 05) reproduced during verification — queued as P3.</p>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P2 Streaming (opp 02)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what"><code>src/proxy/forward.rs</code> streams <code>Incoming</code> verbatim; <code>src/proxy/http.rs</code> nested Either body. Manual: Python SSE 5×200ms ticks — direct ~1.03s, via proxy ~1.07s with all ticks (was: 0 bytes until timeout). <code>cargo test</code> all green, clippy clean.</p>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P3 Hardening (opp 03+05+07+08)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">Dual-stack bind+probe on both stacks (<code>nc -z ::1</code> open); stale-socket connect-check (kill-9 → start succeeds, list clean — closes Roadmap C6); <code>trust --remove</code> removes system store + login keychain (prompt kept); WS forwards cookie/auth/origin/extensions/user-agent and echoes upstream 101 headers, connect + handshake bounded at 10s.</p>
+      <p class="what" style="margin-top:10px"><b>Re-verified 2026-09-09, second pass:</b> prune of a dead-PID managed route live (pruned 1, 0 alive); kill-9 mid-run → restart restores 0; static aliases still restore (correct); WS auth end-to-end (cookie+auth+origin required upstream → 101, accept/protocol echoed, frame echo OK); <code>trust --remove</code> fresh-HOME paths clean.</p>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P5 Daemon singleton + fail-fast (post-verification feedback)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">Independent review confirmed all 10 fixes, then found the next layer: <code>stop</code>/<code>clean</code> deleted the socket of a live-but-unresponsive daemon, <code>start</code> checked only the socket (a socketless live daemon was invisible), a port-blocked daemon half-started behind the singleton socket (all routes 502 — the observed split-brain), and two <code>ensure_daemon</code> copies could diverge. Fix: PID-file singleton gate in <code>start_daemon</code> (<code>ipc::server::{read_daemon_pid, pid_is_alive}</code>), deletions in <code>stop</code>/<code>clean</code> gated on PID-dead (clean SIGTERMs an unresponsive live daemon first), fail-fast before the IPC bind when HTTPS is unavailable, one shared <code>ensure_daemon</code> (<code>run</code> via <code>spawn_blocking</code>), and early-exit surfacing in <code>proxy start</code> so refusals print the reason instead of a generic timeout (also fixed a zombie-<code>try_wait</code> vs signal-0 misread there).</p>
+      <div class="evi-log"><span class="m">verify:</span> socketless live daemon → second start refused with exact PID, original still 200 · all 4 proxy ports squatted → loud refusal, no socket created · stop on dead daemon reaps cleanly · run auto-starts via shared path with real PID · full suite green, clippy -D warnings clean</div>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · Robustness: atomic cert writes (found in re-verification)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">Re-verification caught a truncated <code>ca.pem</code> (<code>-----END CERTIFICATE-----</code> cut to <code>---</code> → permanent <code>Invalid symbol 45</code> on every load). Cause: <code>save_ca_to_pem</code>/<code>save_leaf</code> used plain <code>write</code>, so parallel first-run generators (test targets, racing daemon+CLI) could interleave. Fix: temp-file + rename via new <code>ca::atomic_write</code> (same pattern the codebase already uses for <code>/etc/hosts</code>), keys keep 0600. Verified: CA deleted → full parallel suite → file intact with END marker, <code>trust --status</code> clean, suite green.</p>
+    </div>
+    <div class="evi-block reveal">
+      <div class="evi-head"><span class="glyph">✓</span><h3>2026-09-09 · P4 Hygiene + perf (opp 06+09)</h3><span class="badge">fixed · verified</span></div>
+      <p class="what">Name hygiene (<code>@myorg/my-cool_app→my-cool-app</code>, <code>MyApp→myapp</code>, garbage→<code>app</code>) + lowercase folding at run/dev/alias/add/proxy/register/lookup/SNI; H2 ALPN with H2-host + HTTP/1.1-upstream companion fixes (H2 200, H1 200); 30s time-to-first-byte upstream timeout. Full suite: all green (43 lib incl. 6 new), clippy <code>-D warnings</code> clean, fmt clean.</p>
+    </div>
+    <p class="close-line reveal">All 10 opportunities addressed. The what-breaks list in 02 is retired; the flagship command, SSE, dual-stack, lifecycle, trust reversibility, WS auth, H2, and naming all hold.</p>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-left">Antra — deep-dive report · Sep 2026</div>
+      <div class="footer-links">
+        <a href="https://github.com/ifelse-codes/antra">GitHub</a>
+        <a href="https://github.com/ifelse-codes/antra/blob/main/README.md">README</a>
+        <a href="https://github.com/ifelse-codes/antra/blob/main/ROADMAP.md">Roadmap</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Scroll reveal — the single approved pattern
+const observer=new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}});
+},{threshold:0.08});
+document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
+
+// Copy the agent prompt — one affordance, no motion
+const copyBtn=document.getElementById('copy-prompt');
+if(copyBtn){
+  copyBtn.addEventListener('click',()=>{
+    const text=document.getElementById('agent-prompt').innerText;
+    const done=()=>{copyBtn.textContent='Copied ✓';copyBtn.classList.add('done');
+      setTimeout(()=>{copyBtn.textContent='Copy';copyBtn.classList.remove('done')},2000)};
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done);
+    }else{
+      const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);
+      ta.select();document.execCommand('copy');ta.remove();done();
+    }
+  });
+}
+</script>
+</body>
+</html>

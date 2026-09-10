@@ -14,8 +14,9 @@
 ✅ HMR support (via transparent WebSocket)
 ✅ In-memory route registry (RwLock<HashMap>)
 ✅ Process lifecycle (spawn, monitor, cleanup)
-✅ macOS support (primary)
-✅ Linux support (best effort)
+✅ macOS support
+✅ Linux support
+✅ Windows support (Phase 10)
 ✅ Colored terminal output
 ✅ Structured logging (tracing)
 ✅ antra doctor diagnostics
@@ -24,6 +25,11 @@
 ✅ antra clean (state removal)
 ✅ antra proxy start|stop|status
 ✅ antra alias (static routes)
+✅ antra add (route to running server)
+✅ antra prune (orphan cleanup)
+✅ antra hosts (Safari /etc/hosts management)
+✅ antra service (OS service management)
+✅ antra dev (zero-config auto-detect: Node, Rust, Go, Python, Ruby, Elixir, PHP)
 ✅ antra.toml project config
 ✅ Cross-platform platform abstraction
 ```
@@ -43,7 +49,6 @@
 ❌ LAN mode / mDNS
 ❌ HTTP/2 to upstream (only to client)
 ❌ Certificate renewal (dev certs are long-lived)
-❌ Windows support (deferred to Phase 10)
 ❌ FreeBSD support
 ❌ Custom port ranges
 ❌ Config inheritance

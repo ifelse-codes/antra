@@ -99,7 +99,7 @@ impl ResolvesServerCert for CertCache {
                 return None;
             }
         };
-        let hostname = sni.to_string();
+        let hostname = sni.to_ascii_lowercase();
         tracing::debug!(%hostname, "SNI resolution request");
         self.resolve_cert(&hostname)
     }

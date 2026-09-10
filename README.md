@@ -13,7 +13,7 @@
   <a href="https://github.com/ifelse-codes/antra/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ifelse-codes/antra/ci.yml?branch=main&style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/rust-native-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/version-0.2.9-0ea5e9?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.0-0ea5e9?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-111827?style=flat-square" alt="Platforms">
 </p>
 
@@ -192,11 +192,15 @@ antra run --domain app.internal --allow-custom-domain -- pnpm dev
 
 ```text
 antra run      Run a command behind a proxied domain
-antra dev      Run from antra.toml
+antra dev      Run from antra.toml (or auto-detect project)
+antra add      Add a route to an already-running server
 antra list     Active routes (domain, port, pid, uptime)
 antra open     Open a domain in the default browser
 antra alias    Map a domain to an already-running port
 antra remove   Drop a route / alias
+antra prune    Kill orphaned dev servers from crashed sessions
+antra hosts    Manage /etc/hosts entries for Safari compatibility
+antra service  Manage Antra as a system service
 antra trust    Install / status / remove the local CA
 antra doctor   Diagnose CA, trust, daemon, ports 80 & 443
 antra proxy    start | stop | status
@@ -321,7 +325,7 @@ Use ngrok when someone on another network needs your app. Use Antra when *you* n
 
 ```
 src/
-├── cli/         run, dev, list, doctor, trust, proxy, alias, open, clean
+├── cli/         run, dev, add, list, doctor, trust, proxy, alias, open, remove, prune, hosts, service, clean
 ├── proxy/       HTTP, HTTPS/SNI, WebSocket tunnel, X-Forwarded-*
 ├── certs/       Root CA, leaf certs, memory + disk cache
 ├── routing/     In-memory route registry
@@ -432,7 +436,7 @@ If you are contributing, start with [`AGENT.md`](AGENT.md) — architecture, pha
 
 Phases 0–10 are complete. Antra is a working local proxy: HTTP, HTTPS, WebSockets, domain resolution, CA trust, daemon/IPC, DX commands, `antra.toml`, and cross-platform builds.
 
-This is `0.1.0`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
+This is `0.3.0`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
 
 MVP definition: [`docs/mvp.md`](docs/mvp.md)
 

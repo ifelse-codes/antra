@@ -62,6 +62,40 @@ pub fn pid_path() -> PathBuf {
     }
 }
 
+/// Parse pid-file contents into a PID. Pure (no fs) so it is unit-testable;
+/// fs + liveness live in `read_daemon_pid` / `is_daemon_pid_alive` below.
+#[cfg_attr(windows, allow(dead_code))]
+pub(crate) fn parse_pid_contents(contents: &str) -> Option<u32> {
+    contents.trim().parse::<u32>().ok().filter(|&pid| pid > 0)
+}
+
+/// Read the daemon PID file, if present and parseable. Returns None when the
+/// file is missing or corrupt — callers must treat that as "unknown", never
+/// as "dead" on its own.
+#[cfg_attr(windows, allow(dead_code))]
+pub fn read_daemon_pid() -> Option<u32> {
+    std::fs::read_to_string(pid_path())
+        .ok()
+        .and_then(|s| parse_pid_contents(&s))
+}
+
+/// The PID recorded in the pid file, if that process is currently alive.
+/// Unix only: elsewhere there is no reliable signal-0 equivalent here, so
+/// those platforms keep the previous socket-only behavior.
+#[cfg(unix)]
+pub fn is_daemon_pid_alive() -> Option<u32> {
+    let pid = read_daemon_pid()?;
+    pid_is_alive(pid).then_some(pid)
+}
+
+/// Signal-0 liveness probe for an arbitrary PID. Shared by the daemon
+/// singleton gate, stop/clean recovery, and (via their own copies, kept for
+/// minimal churn) prune/run/proxy/doctor.
+#[cfg(unix)]
+pub fn pid_is_alive(pid: u32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+}
+
 /// Windows named pipe path
 #[cfg(windows)]
 pub fn pipe_path() -> String {
@@ -280,6 +314,7 @@ fn handle_register_route(req: RegisterRouteRequest, registry: &RouteRegistry) ->
         host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         port: req.port,
         pid: req.pid,
+        managed: req.managed,
         protocol: Protocol::Http,
         created_at: Instant::now(),
     };
@@ -314,6 +349,7 @@ fn handle_list_routes(registry: &RouteRegistry) -> IpcMessage {
             domain: r.domain,
             port: r.port,
             pid: r.pid,
+            managed: r.managed,
             created_at_secs: r.created_at.elapsed().as_secs(),
         })
         .collect();
@@ -356,4 +392,50 @@ async fn send_response(
     writer.write_all(b"\n").await?;
     writer.flush().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pid_contents_parses_plain_pid() {
+        assert_eq!(parse_pid_contents("12345"), Some(12345));
+    }
+
+    #[test]
+    fn pid_contents_trims_whitespace_and_newline() {
+        assert_eq!(parse_pid_contents("  12345\n"), Some(12345));
+    }
+
+    #[test]
+    fn pid_contents_rejects_garbage() {
+        assert_eq!(parse_pid_contents(""), None);
+        assert_eq!(parse_pid_contents("not-a-pid\n"), None);
+        assert_eq!(parse_pid_contents("0"), None);
+        assert_eq!(parse_pid_contents("-7"), None);
+    }
+
+    #[test]
+    fn own_process_counts_as_alive() {
+        #[cfg(unix)]
+        assert!(pid_is_alive(std::process::id()));
+    }
+
+    #[test]
+    fn exited_child_counts_as_dead() {
+        // A spawned-and-reaped child is deterministically dead (its PID is
+        // free; nothing forks between wait() and the probe). Note: probing
+        // u32::MAX is NOT a valid negative test — it wraps to pid -1, which
+        // addresses every process and always reports alive.
+        #[cfg(unix)]
+        {
+            let mut child = std::process::Command::new("true")
+                .spawn()
+                .expect("test needs a `true` binary on PATH");
+            let pid = child.id();
+            child.wait().unwrap();
+            assert!(!pid_is_alive(pid));
+        }
+    }
 }

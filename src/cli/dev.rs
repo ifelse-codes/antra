@@ -102,9 +102,11 @@ pub fn execute(args: DevArgs) -> Result<()> {
         detected.framework, detected.name
     ));
 
-    // Build domain from project name
+    // Build domain from project name (sanitized + lowercased at detection;
+    // explicit --domain is folded here so MyApp and myapp share one route).
     let domain = args
         .domain
+        .map(|d| d.to_ascii_lowercase())
         .unwrap_or_else(|| format!("{}.localhost", detected.name));
 
     // Build command

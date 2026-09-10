@@ -12,6 +12,10 @@ pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()>
     println!("{}", "ANTRA ALIAS".bold());
     println!();
 
+    // DNS is case-insensitive — fold so MyApp and myapp share one route.
+    let domain = domain.to_ascii_lowercase();
+    let domain = domain.as_str();
+
     // Check daemon is running
     if !is_daemon_running() {
         println!(
@@ -61,6 +65,7 @@ pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()>
         domain: domain.to_string(),
         port,
         pid: None,
+        managed: false,
     }))?;
 
     match resp.payload {

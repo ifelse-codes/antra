@@ -7,6 +7,9 @@ pub struct Route {
     pub host: IpAddr,
     pub port: u16,
     pub pid: Option<u32>,
+    /// True for `run`/`dev`-managed routes (die with process, never persisted).
+    /// False for static `alias`/`add` routes (persisted to aliases.json).
+    pub managed: bool,
     #[allow(dead_code)]
     pub protocol: Protocol,
     pub created_at: Instant,

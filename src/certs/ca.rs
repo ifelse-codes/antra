@@ -62,21 +62,53 @@ pub fn load_ca_from_pem(cert_path: &Path, key_path: &Path) -> Result<CaCert> {
 }
 
 /// Save CA to PEM files on disk.
+///
+/// Atomic (temp-file + rename): `get_or_create_ca` runs on first-run paths
+/// where parallel test targets or a racing daemon+CLI can generate at once —
+/// a plain `write` truncated ca.pem mid-race (`-----END CERTIFICATE-----`
+/// cut to `---`), permanently breaking every later load with
+/// "Invalid symbol 45" until manual deletion.
 pub fn save_ca_to_pem(cert_path: &Path, key_path: &Path, ca: &CaCert) -> Result<()> {
-    std::fs::write(cert_path, &ca.cert_pem)?;
+    atomic_write(cert_path, ca.cert_pem.as_bytes(), None)?;
 
     // Write key with restrictive permissions
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::write(key_path, &ca.key_pem)?;
+        atomic_write(key_path, ca.key_pem.as_bytes(), Some(0o600))?;
+        // Rename preserves the temp file's mode; enforce 0600 regardless.
         std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))?;
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(key_path, &ca.key_pem)?;
+        atomic_write(key_path, ca.key_pem.as_bytes(), None)?;
     }
 
+    Ok(())
+}
+
+/// Write `bytes` to `path` atomically via a temp file in the same directory
+/// plus rename.
+///
+/// Same-directory rename is atomic on POSIX: readers never see a
+/// half-written file, even with concurrent generators.
+pub(crate) fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    #[allow(unused_variables)] mode: Option<u32>,
+) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    use std::io::Write;
+    tmp.write_all(bytes)?;
+    #[cfg(unix)]
+    if let Some(m) = mode {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(m))?;
+    }
+    tmp.persist(path)
+        .map_err(|e| anyhow::anyhow!("Failed to persist {}: {e}", path.display()))?;
     Ok(())
 }
 

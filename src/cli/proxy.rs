@@ -78,30 +78,46 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     cmd.arg("--route").arg(route);
                 }
 
-                let child = cmd.spawn()?;
+                let mut child = cmd.spawn()?;
                 let child_pid = child.id();
 
-                // Health check loop: wait for daemon to be ready, then verify PID is alive
+                // Health check loop: wait for daemon to be ready, then verify PID is alive.
+                // Also watch for an early child exit: a refused start (duplicate
+                // daemon, blocked ports) exits in milliseconds with the reason
+                // in the log. Without this, the un-reaped zombie still answers
+                // signal-0, `is_pid_alive` misfires, and the real reason
+                // degrades to a generic timeout.
                 let mut daemon_ready = false;
+                let mut early_exit: Option<std::process::ExitStatus> = None;
                 for _ in 0..20 {
                     std::thread::sleep(std::time::Duration::from_millis(100));
                     if crate::ipc::client::is_daemon_running() {
                         daemon_ready = true;
                         break;
                     }
+                    if let Ok(Some(status)) = child.try_wait() {
+                        early_exit = Some(status);
+                        break;
+                    }
                 }
 
                 if !daemon_ready {
+                    let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
+                    let tail = log_contents
+                        .lines()
+                        .rev()
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if let Some(status) = early_exit {
+                        anyhow::bail!(
+                            "Daemon refused to start (exit {status}).\n\
+                             Last output:\n{tail}"
+                        );
+                    }
                     // Daemon never reported ready — check if process died
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     if !is_pid_alive(child_pid) {
-                        let log_contents = std::fs::read_to_string(&log_path).unwrap_or_default();
-                        let tail = log_contents
-                            .lines()
-                            .rev()
-                            .take(10)
-                            .collect::<Vec<_>>()
-                            .join("\n");
                         anyhow::bail!(
                             "Daemon process (PID: {child_pid}) crashed on startup.\n\
                              Check logs: {}\n\
@@ -204,6 +220,7 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                                     domain: domain.clone(),
                                     port: route_port,
                                     pid: None,
+                                    managed: false,
                                 },
                             ),
                         ) {
@@ -286,7 +303,7 @@ fn parse_route(s: &str) -> Result<(String, u16)> {
     if parts.len() != 2 {
         anyhow::bail!("Invalid route format '{s}'. Expected domain:port");
     }
-    let domain = parts[0].to_string();
+    let domain = parts[0].to_ascii_lowercase();
     crate::resolver::util::validate_domain_shape(&domain)?;
     let port: u16 = parts[1]
         .parse()

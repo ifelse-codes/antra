@@ -44,14 +44,37 @@ pub fn execute(yes: bool) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
             Err(_) => {
-                println!("{}", "✓".green().bold());
-                // Force cleanup even if IPC fails
+                // IPC failed — only force-clean when the recorded daemon is
+                // actually dead. SIGTERM a live-but-unresponsive daemon and
+                // wait; never delete the socket of a process we couldn't stop
+                // (that orphans it: ports held, invisible, next start steals
+                // the socket).
                 #[cfg(unix)]
-                {
-                    let sock = crate::ipc::server::socket_path();
-                    let _ = std::fs::remove_file(&sock);
+                if let Some(pid) = crate::ipc::server::is_daemon_pid_alive() {
+                    println!("{}", "unresponsive, signalling...".yellow().bold());
+                    signal_pid(pid);
+                    let mut waited = 0;
+                    while crate::ipc::server::is_daemon_pid_alive().is_some() && waited < 20 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        waited += 1;
+                    }
+                    if crate::ipc::server::is_daemon_pid_alive().is_some() {
+                        anyhow::bail!(
+                            "Daemon (PID {pid}) is running but will not stop. Stop it with `kill {pid}`, then retry — refusing to wipe state under a live daemon."
+                        );
+                    }
                 }
+                println!("{}", "✓".green().bold());
             }
+        }
+    } else {
+        // No reachable socket — still refuse to wipe under a live daemon
+        // that merely lost its socket file.
+        #[cfg(unix)]
+        if let Some(pid) = crate::ipc::server::is_daemon_pid_alive() {
+            anyhow::bail!(
+                "Daemon (PID {pid}) seems to be running without a socket. Stop it with `kill {pid}`, then retry — refusing to wipe state under a live daemon."
+            );
         }
     }
 
@@ -80,5 +103,16 @@ pub fn execute(yes: bool) -> Result<()> {
     println!();
     println!("  {}", "All Antra state removed.".green().bold());
     println!();
+
     Ok(())
+}
+
+/// Best-effort graceful shutdown of a PID (unix). The daemon handles
+/// SIGTERM by unregistering nothing (managed routes die with it) and
+/// removing its own socket + pid file.
+#[cfg(unix)]
+fn signal_pid(pid: u32) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
 }

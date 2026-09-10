@@ -49,10 +49,44 @@ pub fn detect_project(dir: &Path) -> Result<Option<DetectedProject>> {
 
 /// Get the directory name as a fallback app name
 fn dir_name(dir: &Path) -> String {
-    dir.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("app")
-        .to_string()
+    sanitize_project_name(dir.file_name().and_then(|n| n.to_str()).unwrap_or("app"))
+}
+
+/// Sanitize a raw project name into a DNS-safe, lowercase app name:
+/// strips npm `@scope/`, lowercases, replaces runs of invalid chars with
+/// `-`, trims dashes, falls back to `app`.
+pub fn sanitize_project_name(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    // Strip npm scope: @myorg/pkg -> pkg
+    if let Some(slash) = s.find('/') {
+        if s.starts_with('@') {
+            s = s[slash + 1..].to_string();
+        }
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut last_dash = true; // trim leading dashes
+    for c in s.to_ascii_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_dash = false;
+        } else if c == '-' || c == '_' || c == '.' {
+            if !last_dash {
+                out.push('-');
+                last_dash = true;
+            }
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "app".to_string()
+    } else {
+        out
+    }
 }
 
 /// Try to detect Node.js project from package.json
@@ -65,7 +99,7 @@ fn try_package_json(dir: &Path) -> Result<Option<DetectedProject>> {
     let content = std::fs::read_to_string(&path)?;
     let pkg: PackageJson = serde_json::from_str(&content)?;
 
-    let name = pkg.name.clone().unwrap_or_else(|| dir_name(dir));
+    let name = sanitize_project_name(&pkg.name.clone().unwrap_or_else(|| dir_name(dir)));
 
     // Determine the dev command based on what's available
     let (command, args, default_port) = detect_node_command(dir, &pkg);
@@ -185,11 +219,13 @@ fn try_cargo_toml(dir: &Path) -> Result<Option<DetectedProject>> {
     let content = std::fs::read_to_string(&path)?;
     let cargo: CargoToml = toml::from_str(&content)?;
 
-    let name = cargo
-        .package
-        .as_ref()
-        .and_then(|p| p.name.clone())
-        .unwrap_or_else(|| dir_name(dir));
+    let name = sanitize_project_name(
+        &cargo
+            .package
+            .as_ref()
+            .and_then(|p| p.name.clone())
+            .unwrap_or_else(|| dir_name(dir)),
+    );
 
     // Check if it's a web framework
     let is_web = cargo.dependencies.as_ref().is_some_and(|deps| {
@@ -237,11 +273,7 @@ fn try_go_mod(dir: &Path) -> Result<Option<DetectedProject>> {
         .unwrap_or_else(|| dir_name(dir));
 
     // Extract just the last part of the module name for the app name
-    let name = module_name
-        .rsplit('/')
-        .next()
-        .unwrap_or(&module_name)
-        .to_string();
+    let name = sanitize_project_name(module_name.rsplit('/').next().unwrap_or(&module_name));
 
     // Check for common Go web frameworks
     let has_web_dep = content.contains("gin-gonic")
@@ -280,11 +312,13 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
     let content = std::fs::read_to_string(&path)?;
     let pyproject: PyProjectToml = toml::from_str(&content)?;
 
-    let name = pyproject
-        .project
-        .as_ref()
-        .and_then(|p| p.name.clone())
-        .unwrap_or_else(|| dir_name(dir));
+    let name = sanitize_project_name(
+        &pyproject
+            .project
+            .as_ref()
+            .and_then(|p| p.name.clone())
+            .unwrap_or_else(|| dir_name(dir)),
+    );
 
     // Check for common Python web frameworks in dependencies
     let is_web = pyproject
@@ -448,10 +482,12 @@ fn try_composer_json(dir: &Path) -> Result<Option<DetectedProject>> {
 
     let content = std::fs::read_to_string(&path)?;
     let composer: ComposerJson = serde_json::from_str(&content)?;
-    let name = composer
+    let raw_name = composer
         .name
-        .map(|n| n.rsplit('/').next().unwrap_or(&n).to_string())
+        .as_deref()
+        .map(|n| n.rsplit('/').next().unwrap_or(n).to_string())
         .unwrap_or_else(|| dir_name(dir));
+    let name = sanitize_project_name(&raw_name);
 
     // Check for Laravel
     if let Some(require) = &composer.require {
@@ -517,4 +553,31 @@ struct PyProject {
 struct ComposerJson {
     name: Option<String>,
     require: Option<std::collections::HashMap<String, String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scoped_npm_name_strips_scope() {
+        assert_eq!(sanitize_project_name("@myorg/my-cool_app"), "my-cool-app");
+    }
+
+    #[test]
+    fn uppercase_folds_lowercase() {
+        assert_eq!(sanitize_project_name("MyApp"), "myapp");
+    }
+
+    #[test]
+    fn garbage_falls_back_to_app() {
+        assert_eq!(sanitize_project_name("@///"), "app");
+        assert_eq!(sanitize_project_name(""), "app");
+    }
+
+    #[test]
+    fn plain_names_untouched() {
+        assert_eq!(sanitize_project_name("myapp"), "myapp");
+        assert_eq!(sanitize_project_name("my-app-2"), "my-app-2");
+    }
 }

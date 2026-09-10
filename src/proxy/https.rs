@@ -8,12 +8,18 @@ use crate::certs::cache::CertCache;
 use crate::proxy::http::ProxyState;
 use crate::routing::registry::RouteRegistry;
 
-/// Bind an HTTP→HTTPS redirect listener on the given port (does not serve).
-pub async fn bind_http_redirect(port: u16) -> Result<TcpListener> {
-    let addr = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&addr).await?;
-    tracing::info!(%addr, "HTTP→HTTPS redirect listening");
-    Ok(listener)
+/// Bind HTTP→HTTPS redirect listeners on the given port (does not serve).
+/// Binds both 127.0.0.1 and ::1 so `localhost` (which prefers ::1 on modern
+/// macOS) never falls through to an unrelated IPv6 listener.
+pub async fn bind_http_redirect(port: u16) -> Result<Vec<TcpListener>> {
+    let mut listeners = Vec::new();
+    for host in ["127.0.0.1", "::1"] {
+        let addr = format!("{host}:{port}");
+        let listener = TcpListener::bind(&addr).await?;
+        tracing::info!(%addr, "HTTP→HTTPS redirect listening");
+        listeners.push(listener);
+    }
+    Ok(listeners)
 }
 
 /// Run the HTTP→HTTPS redirect server on an already-bound listener.
@@ -80,14 +86,18 @@ pub fn run_http_redirect(listener: TcpListener, https_port: u16) {
     });
 }
 
-/// Probe whether a port is bindable (quick check, drops the listener immediately).
+/// Probe whether a port is bindable on both loopback stacks
+/// (quick check, drops the listeners immediately).
 pub async fn probe_port(port: u16) -> Result<()> {
-    let addr = format!("127.0.0.1:{port}");
-    let _listener = TcpListener::bind(&addr).await?;
+    for host in ["127.0.0.1", "::1"] {
+        let addr = format!("{host}:{port}");
+        let _listener = TcpListener::bind(&addr).await?;
+    }
     Ok(())
 }
 
 /// Start the HTTPS proxy server with TLS termination.
+/// Listens on both 127.0.0.1 and ::1 (dual-stack loopback).
 pub async fn start_server(
     port: u16,
     registry: Arc<RouteRegistry>,
@@ -102,52 +112,81 @@ pub async fn start_server(
         .with_no_client_auth()
         .with_cert_resolver(cert_cache);
 
-    tls_config.alpn_protocols = vec![];
+    // Advertise H2 to browsers (hyper auto-negotiates); upstream stays HTTP/1.1.
+    tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
-    let addr = format!("127.0.0.1:{port}");
-    let listener = TcpListener::bind(&addr).await?;
-    tracing::info!(%addr, "HTTPS proxy listening");
+    // Bind both loopback stacks; fail fast if either is taken so the
+    // daemon falls back cleanly instead of half-listening.
+    let mut listeners = Vec::new();
+    for host in ["127.0.0.1", "::1"] {
+        let addr = format!("{host}:{port}");
+        let listener = TcpListener::bind(&addr).await?;
+        tracing::info!(%addr, "HTTPS proxy listening");
+        listeners.push(listener);
+    }
 
-    loop {
-        let (stream, remote_addr) = listener.accept().await?;
-        tracing::debug!(%remote_addr, "New TLS connection");
-
+    // One accept loop per listener; all share acceptor + state.
+    let mut tasks = Vec::new();
+    for listener in listeners {
         let acceptor = acceptor.clone();
         let state = Arc::clone(&state);
+        tasks.push(tokio::spawn(async move {
+            loop {
+                let (stream, remote_addr) = match listener.accept().await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!(error = %e, "HTTPS accept error");
+                        continue;
+                    }
+                };
+                tracing::debug!(%remote_addr, "New TLS connection");
 
-        tokio::spawn(async move {
-            let tls_stream = match acceptor.accept(stream).await {
-                Ok(ts) => ts,
-                Err(e) => {
-                    tracing::warn!(%remote_addr, error = %e, "TLS handshake failed");
-                    return;
-                }
-            };
-
-            let io = hyper_util::rt::TokioIo::new(tls_stream);
-
-            let service = hyper::service::service_fn(move |req| {
+                let acceptor = acceptor.clone();
                 let state = Arc::clone(&state);
-                async move { crate::proxy::http::handle_request(req, state).await }
-            });
 
-            let builder =
-                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
-            let conn = builder.serve_connection_with_upgrades(io, service);
+                tokio::spawn(async move {
+                    let tls_stream = match acceptor.accept(stream).await {
+                        Ok(ts) => ts,
+                        Err(e) => {
+                            tracing::warn!(%remote_addr, error = %e, "TLS handshake failed");
+                            return;
+                        }
+                    };
 
-            if let Err(e) = conn.await {
-                tracing::error!(%remote_addr, error = %e, "TLS connection error");
+                    let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+                    let service = hyper::service::service_fn(move |req| {
+                        let state = Arc::clone(&state);
+                        async move { crate::proxy::http::handle_request(req, state).await }
+                    });
+
+                    let builder = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    );
+                    let conn = builder.serve_connection_with_upgrades(io, service);
+
+                    if let Err(e) = conn.await {
+                        tracing::error!(%remote_addr, error = %e, "TLS connection error");
+                    }
+                });
             }
-        });
+        }));
     }
+
+    // Run until all accept loops exit (they don't, unless the task is aborted).
+    for t in tasks {
+        let _ = t.await;
+    }
+    Ok(())
 }
 
 /// Start an HTTP server that redirects all requests to HTTPS.
 #[allow(dead_code)]
 pub async fn start_http_redirect(port: u16, https_port: u16) -> Result<()> {
-    let listener = bind_http_redirect(port).await?;
-    run_http_redirect(listener, https_port);
+    for listener in bind_http_redirect(port).await? {
+        run_http_redirect(listener, https_port);
+    }
     Ok(())
 }

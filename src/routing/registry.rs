@@ -6,19 +6,19 @@ use crate::routing::types::Route;
 
 pub struct RouteRegistry {
     routes: RwLock<HashMap<String, Route>>,
-    /// Persist PID-less (static alias) routes to disk so they survive
+    /// Persist unmanaged (static alias) routes to disk so they survive
     /// daemon restarts. Disabled for ephemeral (test) registries so unit
     /// tests never touch the user's real state directory.
     persist: bool,
 }
 
-/// Snapshot the PID-less (static alias) routes to disk so they survive
-/// daemon restarts. Managed `run`/`dev` routes carry a PID and are
+/// Snapshot the static (unmanaged) routes to disk so they survive
+/// daemon restarts. Managed `run`/`dev` routes carry `managed=true` and are
 /// intentionally excluded — they die with their process.
 fn static_alias_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
     routes
         .values()
-        .filter(|r| r.pid.is_none())
+        .filter(|r| !r.managed)
         .map(|r| AliasEntry {
             domain: r.domain.clone(),
             port: r.port,
@@ -93,5 +93,52 @@ impl RouteRegistry {
 impl Default for RouteRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routing::types::Protocol;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Instant;
+
+    fn route(domain: &str, port: u16, pid: Option<u32>, managed: bool) -> Route {
+        Route {
+            domain: domain.to_string(),
+            host: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port,
+            pid,
+            managed,
+            protocol: Protocol::Http,
+            created_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn managed_routes_excluded_from_persist_snapshot() {
+        let mut map = HashMap::new();
+        map.insert(
+            "static.localhost".to_string(),
+            route("static.localhost", 3000, None, false),
+        );
+        map.insert(
+            "run.localhost".to_string(),
+            route("run.localhost", 5173, Some(1234), true),
+        );
+        let snap = static_alias_snapshot(&map);
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].domain, "static.localhost");
+    }
+
+    #[test]
+    fn managed_route_without_pid_still_excluded() {
+        // Defensive: even a pid-less managed route must never reach disk.
+        let mut map = HashMap::new();
+        map.insert(
+            "orphan.localhost".to_string(),
+            route("orphan.localhost", 4000, None, true),
+        );
+        assert!(static_alias_snapshot(&map).is_empty());
     }
 }
