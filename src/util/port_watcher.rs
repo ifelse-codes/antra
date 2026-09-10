@@ -1,7 +1,7 @@
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::ChildStdout;
 
-use crate::ipc::client::send_command_sync;
+use crate::ipc::client::send_command;
 use crate::ipc::protocol::{IpcPayload, RegisterRouteRequest, UnregisterRouteRequest};
 use crate::util::output;
 
@@ -14,6 +14,7 @@ const PORT_PATTERNS: &[&str] = &[
     "Server listening on",
     "port",
     "Running on",
+    "Running at",
     "Starting server on",
     "Listening on",
 ];
@@ -22,7 +23,20 @@ const PORT_PATTERNS: &[&str] = &[
 ///
 /// Spawns a tokio task that monitors the child's stdout for lines containing
 /// port information. When a new port is detected, it updates the route in the daemon.
-pub fn watch_port_changes(stdout: ChildStdout, domain: String, initial_port: u16) {
+/// Must be called from within a Tokio runtime — uses async IPC (never
+/// `send_command_sync`, which would panic with "Cannot start a runtime
+/// from within a runtime").
+///
+/// Only switches on an explicit host:port URL (127.0.0.1/localhost/0.0.0.0/::1).
+/// Bare prose like "port 19999 reserved for metrics" never switches.
+/// The new port is TCP-verified before switching, and re-registered with the
+/// same owner PID as a managed route.
+pub fn watch_port_changes(
+    stdout: ChildStdout,
+    domain: String,
+    initial_port: u16,
+    child_pid: Option<u32>,
+) {
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -32,27 +46,36 @@ pub fn watch_port_changes(stdout: ChildStdout, domain: String, initial_port: u16
             // Print the line to user's terminal (passthrough)
             println!("{line}");
 
-            // Try to extract a port from this line
+            // Try to extract a port from this line (host:port URLs only)
             if let Some(new_port) = extract_port_from_line(&line) {
                 if new_port != current_port {
+                    // Verify the new port actually accepts connections before
+                    // abandoning a working route (Vite prints early).
+                    if !port_accepts_connections(new_port).await {
+                        output::print_warning(&format!(
+                            "Detected port {new_port} in output, but nothing listens there yet — keeping port {current_port}",
+                        ));
+                        continue;
+                    }
                     output::print_warning(&format!(
                         "Port changed: {} → {} (detected from output)",
                         current_port, new_port
                     ));
 
                     // Unregister old route
-                    let _ =
-                        send_command_sync(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
-                            domain: domain.clone(),
-                        }));
+                    let _ = send_command(IpcPayload::UnregisterRoute(UnregisterRouteRequest {
+                        domain: domain.clone(),
+                    }))
+                    .await;
 
-                    // Register new route
-                    if let Err(e) =
-                        send_command_sync(IpcPayload::RegisterRoute(RegisterRouteRequest {
-                            domain: domain.clone(),
-                            port: new_port,
-                            pid: None,
-                        }))
+                    // Register new route with the same owner PID (managed)
+                    if let Err(e) = send_command(IpcPayload::RegisterRoute(RegisterRouteRequest {
+                        domain: domain.clone(),
+                        port: new_port,
+                        pid: child_pid,
+                        managed: true,
+                    }))
+                    .await
                     {
                         output::print_error(&format!(
                             "Failed to update route for port change: {e}"
@@ -71,7 +94,21 @@ pub fn watch_port_changes(stdout: ChildStdout, domain: String, initial_port: u16
     });
 }
 
+/// Best-effort TCP check: does something accept on 127.0.0.1:port yet?
+async fn port_accepts_connections(port: u16) -> bool {
+    tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")),
+    )
+    .await
+    .is_ok_and(|r| r.is_ok())
+}
+
 /// Extract a port number from a log line.
+///
+/// Strict: only explicit host:port URLs (127.0.0.1/localhost/0.0.0.0/::1).
+/// Bare prose like "port 19999 reserved for metrics" returns None — it must
+/// never flip a live route.
 fn extract_port_from_line(line: &str) -> Option<u16> {
     let lower = line.to_lowercase();
 
@@ -83,17 +120,8 @@ fn extract_port_from_line(line: &str) -> Option<u16> {
         return None;
     }
 
-    // Extract port from common URL patterns
-    if let Some(port) = extract_port_from_url(line) {
-        return Some(port);
-    }
-
-    // Extract port from "port XXXX" pattern
-    if let Some(port) = extract_port_from_text(line) {
-        return Some(port);
-    }
-
-    None
+    // Host:port URLs only — no bare "port N" fallback.
+    extract_port_from_url(line)
 }
 
 /// Extract port from URL patterns like http://127.0.0.1:5173/ or http://localhost:3000
@@ -119,7 +147,10 @@ fn extract_port_from_url(line: &str) -> Option<u16> {
     None
 }
 
-/// Extract port from text patterns like "port 3000" or "on port 8080"
+/// Extract port from text patterns like "port 3000" or "on port 8080".
+/// Kept for unit-test coverage only — NOT used for route switching (too loose:
+/// prose like "port 19999 reserved for metrics" must never flip a route).
+#[allow(dead_code)]
 fn extract_port_from_text(line: &str) -> Option<u16> {
     let lower = line.to_lowercase();
     let keywords = ["port ", "on port ", "port="];
@@ -150,8 +181,27 @@ mod tests {
 
     #[test]
     fn test_extract_port_from_express_output() {
+        // Strict mode: bare "port 3000" prose without a host must NOT switch.
+        // The loose text extractor still parses it (kept for coverage), but
+        // the line-level extractor requires host:port.
         let line = "Example app listening on port 3000!";
-        assert_eq!(extract_port_from_line(line), Some(3000));
+        assert_eq!(extract_port_from_text(line), Some(3000));
+        assert_eq!(extract_port_from_line(line), None);
+    }
+
+    #[test]
+    fn test_prose_port_does_not_switch() {
+        // Deep-dive repro: "Config port 19999 reserved for metrics" flipped route.
+        let line = "Compiler ready. Config port 19999 reserved for metrics.";
+        assert_eq!(extract_port_from_line(line), None);
+    }
+
+    #[test]
+    fn test_host_port_url_switches() {
+        let line = "Vite listening on http://127.0.0.1:5174/";
+        assert_eq!(extract_port_from_line(line), Some(5174));
+        let line = "Server running at http://localhost:3001 ready";
+        assert_eq!(extract_port_from_line(line), Some(3001));
     }
 
     #[test]

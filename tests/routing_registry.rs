@@ -10,6 +10,7 @@ fn make_route(domain: &str, port: u16) -> Route {
         host: IpAddr::V4(Ipv4Addr::LOCALHOST),
         port,
         pid: None,
+        managed: false,
         protocol: Protocol::Http,
         created_at: Instant::now(),
     }

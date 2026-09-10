@@ -6,17 +6,40 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::protocol::*;
 
-/// Check if the daemon is running
+/// Check if the daemon is running.
+///
+/// Connects to the socket instead of just stat-ing the path: a dead
+/// daemon's socket file lingers after `kill -9`, and `exists()` alone
+/// reported "already running" forever (stale-socket lie).
 pub fn is_daemon_running() -> bool {
     #[cfg(unix)]
     {
         let sock_path = super::server::socket_path();
-        sock_path.exists()
+        if !sock_path.exists() {
+            return false;
+        }
+        // Blocking connect is fast for a local socket; success = alive.
+        // A bare connect is harmless: the server reads an empty line and
+        // returns without touching state.
+        std::os::unix::net::UnixStream::connect(&sock_path).is_ok()
     }
     #[cfg(windows)]
     {
         let pipe_name = super::server::pipe_path();
         std::path::Path::new(&pipe_name).exists()
+    }
+}
+
+/// Remove a stale socket file left by a dead daemon (best-effort).
+/// Returns true if a stale file was removed. Used by recovery paths.
+#[cfg(unix)]
+#[allow(dead_code)]
+pub fn remove_stale_socket() -> bool {
+    let sock_path = super::server::socket_path();
+    if sock_path.exists() && !is_daemon_running() {
+        std::fs::remove_file(&sock_path).is_ok()
+    } else {
+        false
     }
 }
 
@@ -32,7 +55,12 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
             anyhow::bail!("Daemon not running. Start it with: antra proxy start");
         }
 
-        let stream = UnixStream::connect(&sock_path).await?;
+        let stream = UnixStream::connect(&sock_path).await.map_err(|e| {
+            anyhow::anyhow!(
+                "Cannot reach daemon at {} ({e}). It may have crashed leaving a stale socket — run `antra proxy stop` then `antra proxy start`.",
+                sock_path.display()
+            )
+        })?;
         let (read_half, mut write_half) = stream.into_split();
 
         let msg = IpcMessage::new(payload);

@@ -644,7 +644,7 @@ fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
     }
 }
 
-/// Remove the Antra CA from the OS trust store.
+/// Remove the Antra CA from the OS trust store (and macOS login keychain).
 /// Prompts the user before making system changes.
 pub fn remove_ca() -> Result<()> {
     let store = CertStore::new()?;
@@ -652,11 +652,18 @@ pub fn remove_ca() -> Result<()> {
     let os_cert =
         os_truststore::Cert::from_pem(&ca.cert_pem).context("Failed to parse CA certificate")?;
 
-    // Check if installed
-    let installed = os_truststore::is_installed(&os_cert)
+    // Check if installed (system store and/or macOS login keychain — the
+    // default non-root install path).
+    let system_installed = os_truststore::is_installed(&os_cert)
         .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
+    #[cfg(target_os = "macos")]
+    let keychain_hashes = keychain_ca_hashes();
+    #[cfg(target_os = "macos")]
+    let keychain_installed = !keychain_hashes.is_empty();
+    #[cfg(not(target_os = "macos"))]
+    let keychain_installed = false;
 
-    if !installed {
+    if !system_installed && !keychain_installed {
         println!(
             "{}",
             "  Antra CA is not currently trusted by the system.".yellow()
@@ -666,6 +673,18 @@ pub fn remove_ca() -> Result<()> {
 
     // Prompt user before modifying trust store
     println!("  Antra will remove its local CA certificate from your system trust store.");
+    #[cfg(target_os = "macos")]
+    if keychain_installed {
+        println!(
+            "  This includes {} login-keychain entr{} (user-level trust).",
+            keychain_hashes.len(),
+            if keychain_hashes.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
+        );
+    }
     println!("  HTTPS for custom domains will show cert warnings after removal.");
     println!();
     print!("  {} ", "Remove CA from system trust store? [y/N]".yellow());
@@ -681,36 +700,57 @@ pub fn remove_ca() -> Result<()> {
         return Ok(());
     }
 
-    // Attempt removal
-    match os_truststore::uninstall(&os_cert) {
-        Ok(()) => {
-            println!(
-                "{}",
-                "  ✓ CA certificate removed from system trust store.".green()
-            );
-            Ok(())
-        }
-        Err(os_truststore::TrustError::NeedsElevation { detail }) => {
-            eprintln!("{}", "  ✗ Elevated privileges required.".red());
-            eprintln!("    {detail}");
-            eprintln!();
-            eprintln!("    Try: {}", "sudo antra trust --remove".bold());
-            anyhow::bail!("Elevation required to remove CA")
-        }
-        Err(os_truststore::TrustError::InteractiveAuthRequired) => {
-            eprintln!(
-                "{}",
-                "  ✗ Interactive authentication required (macOS GUI prompt).".red()
-            );
-            eprintln!("    This command needs a terminal with GUI access.");
-            eprintln!("    Try: {}", "sudo antra trust --remove".bold());
-            anyhow::bail!("Interactive auth required")
-        }
-        Err(e) => {
-            eprintln!("{}", format!("  ✗ Failed to remove CA: {e}").red());
-            anyhow::bail!("Trust removal failed: {e}")
+    // Attempt removal (system store first, then login keychain)
+    if system_installed {
+        match os_truststore::uninstall(&os_cert) {
+            Ok(()) => {
+                println!(
+                    "{}",
+                    "  ✓ CA certificate removed from system trust store.".green()
+                );
+            }
+            Err(os_truststore::TrustError::NeedsElevation { detail }) => {
+                eprintln!("{}", "  ✗ Elevated privileges required.".red());
+                eprintln!("    {detail}");
+                eprintln!();
+                eprintln!("    Try: {}", "sudo antra trust --remove".bold());
+                anyhow::bail!("Elevation required to remove CA")
+            }
+            Err(os_truststore::TrustError::InteractiveAuthRequired) => {
+                eprintln!(
+                    "{}",
+                    "  ✗ Interactive authentication required (macOS GUI prompt).".red()
+                );
+                eprintln!("    This command needs a terminal with GUI access.");
+                eprintln!("    Try: {}", "sudo antra trust --remove".bold());
+                anyhow::bail!("Interactive auth required")
+            }
+            Err(e) => {
+                eprintln!("{}", format!("  ✗ Failed to remove CA: {e}").red());
+                anyhow::bail!("Trust removal failed: {e}")
+            }
         }
     }
+
+    #[cfg(target_os = "macos")]
+    if keychain_installed {
+        remove_stale_keychain_certs();
+        if keychain_ca_hashes().is_empty() {
+            println!(
+                "{}",
+                "  ✓ CA certificate removed from login keychain.".green()
+            );
+        } else {
+            eprintln!(
+                "{}",
+                "  ✗ Some login-keychain entries could not be removed (Keychain may need GUI approval — unlock it and retry)."
+                    .red()
+            );
+            anyhow::bail!("Keychain removal incomplete")
+        }
+    }
+
+    Ok(())
 }
 
 /// Format an install report into a human-readable detail string.

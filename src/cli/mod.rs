@@ -23,6 +23,11 @@ use crate::util::output;
 
 /// Ensure the daemon is running, starting it if necessary.
 /// Returns Ok(true) if daemon was already running, Ok(false) if we started it.
+///
+/// Canonical implementation shared by all callers: `run` reaches it via a
+/// `spawn_blocking` wrapper (same file: `run::ensure_daemon`), `alias`/`add`
+/// call it directly. Keep it that way — a duplicated copy once caused the
+/// two paths to disagree about what "running" means.
 pub(crate) fn ensure_daemon() -> Result<bool> {
     if is_daemon_running() {
         return Ok(true);
@@ -221,8 +226,9 @@ impl Cli {
                 let _ = ensure_daemon();
                 alias::execute(&domain, port, allow_custom_domain)
             }
-            Commands::Open { domain } => open::execute(&domain),
+            Commands::Open { domain } => open::execute(&domain.to_ascii_lowercase()),
             Commands::Remove { domain } => {
+                let domain = domain.to_ascii_lowercase();
                 // Read-only when the daemon is down: there are no routes to remove.
                 if !is_daemon_running() {
                     println!("  {} Removing route for {}", "→".cyan().bold(), domain);

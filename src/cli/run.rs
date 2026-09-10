@@ -4,7 +4,6 @@ use colored::Colorize;
 use tokio::process::Command;
 
 use crate::config::global;
-use crate::ipc::client::is_daemon_running;
 use crate::resolver::util::select_resolver;
 use crate::util::output;
 use crate::util::port::{
@@ -114,37 +113,18 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
     println!();
 }
 
-/// Ensure the daemon is running, starting it if necessary
+/// Ensure the daemon is running, starting it if necessary.
+///
+/// Single canonical implementation lives in `super::ensure_daemon` (sync);
+/// this async wrapper runs it on a blocking thread so the executor is never
+/// stalled by the startup poll. Previously a near-identical copy lived here
+/// and the two could diverge (e.g. one learning stale-socket recovery while
+/// the other still trusted a bare file-exists check).
 async fn ensure_daemon() -> Result<()> {
-    if is_daemon_running() {
-        return Ok(());
-    }
-
-    output::print_warning("Daemon not running, starting it...");
-
-    // Start the daemon as a separate process
-    let exe = std::env::current_exe()?;
-    let mut cmd = std::process::Command::new(exe);
-    cmd.arg("proxy")
-        .arg("start")
-        .env("ANTRA_DAEMON", "1")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .stdin(std::process::Stdio::null());
-
-    let child = cmd.spawn()?;
-    let _child_pid = child.id();
-
-    // Wait for daemon to start
-    for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        if is_daemon_running() {
-            output::print_success("Daemon started");
-            return Ok(());
-        }
-    }
-
-    anyhow::bail!("Daemon failed to start within timeout");
+    tokio::task::spawn_blocking(super::ensure_daemon)
+        .await
+        .map_err(|e| anyhow::anyhow!("Daemon startup task failed: {e}"))??;
+    Ok(())
 }
 
 async fn run_inner(args: RunArgs) -> Result<()> {
@@ -153,14 +133,16 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 0. Auto-trust prompt (first run only)
     maybe_prompt_trust(args.no_trust_prompt, args.yes).await;
 
-    // 0b. Handle custom TLD
+    // 0b. Handle custom TLD + fold case (DNS is case-insensitive; browsers
+    // lowercase, so MyApp.localhost and myapp.localhost must be one route).
     let domain = if let Some(tld) = &args.tld {
         // Build domain with custom TLD: appname.tld
         let app_name = args.domain.split('.').next().unwrap_or(&args.domain);
         format!("{app_name}.{tld}")
     } else {
         args.domain.clone()
-    };
+    }
+    .to_ascii_lowercase();
 
     // 1. Determine port
     let port = match args.port {
@@ -220,13 +202,14 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // clobber it (parity with `alias`, which warns): record the previous
     // mapping so it can be warned about now and restored if the new
     // backend fails. `--force` has its own louder message below.
-    let mut replaced_port: Option<u16> = None;
+    // Full RouteInfo is kept (not just port) so restore preserves pid/managed.
+    let mut replaced_route: Option<crate::ipc::protocol::RouteInfo> = None;
     if let Ok(resp) =
         crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::ListRoutes).await
     {
         if let crate::ipc::protocol::IpcPayload::RoutesList(list) = resp.payload {
             if let Some(existing) = list.routes.iter().find(|r| r.domain == domain) {
-                replaced_port = Some(existing.port);
+                replaced_route = Some(existing.clone());
                 if !args.force && existing.port != port {
                     output::print_warning(&format!(
                         "Domain {domain} is already routed to port {} — replacing with port {port}",
@@ -285,12 +268,60 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 3. Ensure daemon is running
     ensure_daemon().await?;
 
-    // 4. Register route via IPC
+    // 4. Spawn child process FIRST so the route can be registered with the
+    // real child PID (managed=true). Registering before spawn born zombies:
+    // pid-less routes were persisted as static aliases and survived restarts.
+    // 5. Spawn child process
+    let program = args.command.first().unwrap_or(&"".to_string()).clone();
+
+    // Inject --port flag for frameworks that ignore PORT env var
+    let final_args = inject_port_flag(&args.command, port);
+    let final_program = final_args.first().unwrap_or(&program).clone();
+    let final_child_args: Vec<String> = final_args[1..].to_vec();
+
+    // Build environment with CA cert path for Node.js TLS trust
+    let mut cmd = Command::new(&final_program);
+    cmd.args(&final_child_args)
+        .env("PORT", port.to_string())
+        .env("HOST", "127.0.0.1")
+        .env("ANTRA_DOMAIN", &domain)
+        .env("ANTRA_URL", format!("https://{}", domain))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit());
+
+    // Inject NODE_EXTRA_CA_CERTS if CA exists
+    if let Ok(store) = crate::certs::store::CertStore::new() {
+        let ca_path = store.config_dir.join("ca.pem");
+        if ca_path.exists() {
+            cmd.env("NODE_EXTRA_CA_CERTS", ca_path.to_string_lossy().to_string());
+        }
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            // Nothing was registered yet (registration happens after spawn),
+            // so there is no dangling route to clean. With --force the old
+            // route was already killed+unregistered — restore it best-effort.
+            if args.force {
+                if let Some(prev) = &replaced_route {
+                    restore_previous_route(&domain, prev).await;
+                }
+            }
+            let _ = resolver.unregister(&domain);
+            return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
+        }
+    };
+
+    // 6. Register route with the REAL child PID as a managed route.
+    // Managed routes never reach aliases.json and die with their process.
+    let child_pid = child.id();
     match crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
         crate::ipc::protocol::RegisterRouteRequest {
             domain: domain.clone(),
             port,
-            pid: None,
+            pid: child_pid,
+            managed: true,
         },
     ))
     .await
@@ -301,15 +332,28 @@ async fn run_inner(args: RunArgs) -> Result<()> {
             }
             crate::ipc::protocol::IpcPayload::Error(err) => {
                 output::print_error(&err.message);
+                let _ = child.kill().await;
+                if let Some(prev) = &replaced_route {
+                    if !args.force {
+                        // Registration failed before overwriting — previous intact.
+                    } else {
+                        restore_previous_route(&domain, prev).await;
+                    }
+                }
+                let _ = resolver.unregister(&domain);
                 return Err(anyhow::anyhow!("{}", err.message));
             }
             other => {
                 output::print_error(&format!("Unexpected response: {other:?}"));
+                let _ = child.kill().await;
+                let _ = resolver.unregister(&domain);
                 return Err(anyhow::anyhow!("Unexpected IPC response"));
             }
         },
         Err(e) => {
             output::print_error(&format!("Failed to register route: {e}"));
+            let _ = child.kill().await;
+            let _ = resolver.unregister(&domain);
             return Err(e);
         }
     }
@@ -343,72 +387,18 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     }
     println!();
 
-    // 5. Spawn child process
-    let program = args.command.first().unwrap_or(&"".to_string()).clone();
-
-    // Inject --port flag for frameworks that ignore PORT env var
-    let final_args = inject_port_flag(&args.command, port);
-    let final_program = final_args.first().unwrap_or(&program).clone();
-    let final_child_args: Vec<String> = final_args[1..].to_vec();
-
-    // Build environment with CA cert path for Node.js TLS trust
-    let mut cmd = Command::new(&final_program);
-    cmd.args(&final_child_args)
-        .env("PORT", port.to_string())
-        .env("HOST", "127.0.0.1")
-        .env("ANTRA_DOMAIN", &domain)
-        .env("ANTRA_URL", format!("https://{}", domain))
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit());
-
-    // Inject NODE_EXTRA_CA_CERTS if CA exists
-    if let Ok(store) = crate::certs::store::CertStore::new() {
-        let ca_path = store.config_dir.join("ca.pem");
-        if ca_path.exists() {
-            cmd.env("NODE_EXTRA_CA_CERTS", ca_path.to_string_lossy().to_string());
-        }
-    }
-
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => {
-            // The backend never started — don't leave a dangling route
-            // behind pointing at a port nothing listens on. If this run
-            // replaced an existing mapping (and --force didn't kill its
-            // owner), put the previous route back instead of deleting it.
-            if !args.force {
-                if let Some(prev) = replaced_port {
-                    restore_previous_route(&domain, prev).await;
-                    return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
-                }
-            }
-            let _ = crate::ipc::client::send_command(
-                crate::ipc::protocol::IpcPayload::UnregisterRoute(
-                    crate::ipc::protocol::UnregisterRouteRequest {
-                        domain: domain.clone(),
-                    },
-                ),
-            )
-            .await;
-            let _ = resolver.unregister(&domain);
-            output::print_warning(&format!("Route removed: {domain}"));
-            return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
-        }
-    };
-
     // Capture stdout for port watching
     let child_stdout = child.stdout.take();
 
     output::print_success(&format!("Started: {}", final_args.join(" ")));
     println!();
 
-    // Start port watcher if stdout is captured
+    // Start port watcher if stdout is captured (carries owner PID forward)
     if let Some(stdout) = child_stdout {
-        port_watcher::watch_port_changes(stdout, domain.clone(), port);
+        port_watcher::watch_port_changes(stdout, domain.clone(), port, child_pid);
     }
 
-    // 6. Wait for child or signal
-    let child_pid = child.id();
+    // 7. Wait for child or signal
 
     // Set up signal handler
     #[cfg(unix)]
@@ -494,7 +484,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // existing mapping (and --force didn't kill its owner), restore the
     // previous route instead of leaving the domain routeless.
     if !args.force {
-        if let Some(prev) = replaced_port {
+        if let Some(prev) = &replaced_route {
             restore_previous_route(&domain, prev).await;
             println!();
             std::process::exit(exit_code);
@@ -518,17 +508,20 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 /// When `run` overwrites an existing domain mapping and the new backend
 /// fails, the domain must not be left with no route: put the previous
 /// mapping back instead of deleting the user's working route.
-async fn restore_previous_route(domain: &str, port: u16) {
+/// Preserves the original pid/managed so a static alias stays static.
+async fn restore_previous_route(domain: &str, prev: &crate::ipc::protocol::RouteInfo) {
     let _ = crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
         crate::ipc::protocol::RegisterRouteRequest {
             domain: domain.to_string(),
-            port,
-            pid: None,
+            port: prev.port,
+            pid: prev.pid,
+            managed: prev.managed,
         },
     ))
     .await;
     output::print_warning(&format!(
-        "Restored previous route: {domain} → 127.0.0.1:{port}"
+        "Restored previous route: {domain} → 127.0.0.1:{}",
+        prev.port
     ));
 }
 

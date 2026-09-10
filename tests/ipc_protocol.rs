@@ -8,8 +8,8 @@ fn test_ipc_message_new_sets_version() {
 }
 
 #[test]
-fn test_protocol_version_is_one() {
-    assert_eq!(PROTOCOL_VERSION, 1);
+fn test_protocol_version_is_two() {
+    assert_eq!(PROTOCOL_VERSION, 2);
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn test_ping_pong_roundtrip() {
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: IpcMessage = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(decoded.version, 1);
+    assert_eq!(decoded.version, 2);
     assert!(matches!(decoded.payload, IpcPayload::Ping));
 }
 
@@ -28,6 +28,7 @@ fn test_register_route_roundtrip() {
         domain: "myapp.localhost".to_string(),
         port: 5173,
         pid: Some(1234),
+        managed: true,
     }));
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: IpcMessage = serde_json::from_str(&json).unwrap();
@@ -37,6 +38,20 @@ fn test_register_route_roundtrip() {
             assert_eq!(req.domain, "myapp.localhost");
             assert_eq!(req.port, 5173);
             assert_eq!(req.pid, Some(1234));
+            assert!(req.managed);
+        }
+        _ => panic!("Expected RegisterRoute"),
+    }
+}
+
+#[test]
+fn test_register_route_v1_compat_defaults_unmanaged() {
+    // Old v1 JSON without `managed` must decode as unmanaged (static).
+    let json = r#"{"version":1,"payload":{"type":"RegisterRoute","domain":"a.localhost","port":3000,"pid":null}}"#;
+    let decoded: IpcMessage = serde_json::from_str(json).unwrap();
+    match decoded.payload {
+        IpcPayload::RegisterRoute(req) => {
+            assert!(!req.managed);
         }
         _ => panic!("Expected RegisterRoute"),
     }
@@ -112,12 +127,14 @@ fn test_routes_list_response_roundtrip() {
                 domain: "a.localhost".to_string(),
                 port: 3000,
                 pid: None,
+                managed: false,
                 created_at_secs: 10,
             },
             RouteInfo {
                 domain: "b.localhost".to_string(),
                 port: 4000,
                 pid: Some(5678),
+                managed: true,
                 created_at_secs: 60,
             },
         ],
@@ -171,6 +188,7 @@ fn test_empty_domain_roundtrip() {
         domain: String::new(),
         port: 0,
         pid: None,
+        managed: false,
     }));
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: IpcMessage = serde_json::from_str(&json).unwrap();

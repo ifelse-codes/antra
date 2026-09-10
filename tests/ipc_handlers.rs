@@ -11,6 +11,7 @@ fn make_route(domain: &str, port: u16) -> Route {
         host: IpAddr::V4(Ipv4Addr::LOCALHOST),
         port,
         pid: None,
+        managed: false,
         protocol: Protocol::Http,
         created_at: Instant::now(),
     }
@@ -23,6 +24,7 @@ fn test_handle_register_route_success() {
         domain: "myapp.localhost".to_string(),
         port: 5173,
         pid: None,
+        managed: false,
     };
 
     // handle_register_route is private, test via the public handler path
@@ -32,6 +34,7 @@ fn test_handle_register_route_success() {
         host: IpAddr::V4(Ipv4Addr::LOCALHOST),
         port: req.port,
         pid: req.pid,
+        managed: req.managed,
         protocol: Protocol::Http,
         created_at: Instant::now(),
     };

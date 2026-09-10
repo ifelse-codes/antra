@@ -96,21 +96,36 @@ impl CertStore {
         })
     }
 
-    /// Save a leaf cert to disk.
+    /// Save a leaf cert to disk (atomic — see save_ca_to_pem).
     pub fn save_leaf(&self, hostname: &str, leaf: &LeafCert) -> Result<()> {
-        std::fs::write(self.leaf_cert_path(hostname), &leaf.cert_pem)?;
-        std::fs::write(self.leaf_key_path(hostname), &leaf.key_pem)?;
-
+        crate::certs::ca::atomic_write(
+            &self.leaf_cert_path(hostname),
+            leaf.cert_pem.as_bytes(),
+            None,
+        )?;
         #[cfg(unix)]
         {
+            crate::certs::ca::atomic_write(
+                &self.leaf_key_path(hostname),
+                leaf.key_pem.as_bytes(),
+                Some(0o600),
+            )?;
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(
                 self.leaf_key_path(hostname),
                 std::fs::Permissions::from_mode(0o600),
             )?;
+            Ok(())
         }
-
-        Ok(())
+        #[cfg(not(unix))]
+        {
+            crate::certs::ca::atomic_write(
+                &self.leaf_key_path(hostname),
+                leaf.key_pem.as_bytes(),
+                None,
+            )?;
+            Ok(())
+        }
     }
 
     /// Generate or load a leaf cert for a hostname.

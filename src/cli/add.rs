@@ -107,12 +107,13 @@ struct AddRouteArgs {
 fn execute_route(args: AddRouteArgs) -> Result<()> {
     output::print_header();
 
-    let domain = if let Some(tld) = &args.tld {
+    let raw_domain = if let Some(tld) = &args.tld {
         let app_name = args.domain.split('.').next().unwrap_or(&args.domain);
         format!("{app_name}.{tld}")
     } else {
         args.domain.clone()
     };
+    let domain = raw_domain.to_ascii_lowercase();
 
     // Resolve domain to 127.0.0.1
     let resolver = select_resolver(&domain)?;
@@ -143,6 +144,7 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
             domain: domain.clone(),
             port: args.port,
             pid: None,
+            managed: false,
         },
     )) {
         Ok(msg) => match msg.payload {
