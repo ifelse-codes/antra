@@ -120,6 +120,48 @@ pub fn named_pipe_path() -> String {
     r"\\.\pipe\antra-daemon".to_string()
 }
 
+/// True when a PID refers to a live process.
+///
+/// Unix: signal-0 probe. Windows: `tasklist /FI "PID eq <pid>"` — avoids new
+/// native deps and works for any process the caller can see. Used by route
+/// restore (drop stale managed routes) and `--force` kill paths. Infrequent
+/// calls only; never on the proxy hot path.
+#[cfg(unix)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    // nix is only a unix dependency.
+    #[allow(clippy::useless_conversion)]
+    {
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+        kill(Pid::from_raw(pid as i32), None).is_ok()
+    }
+}
+
+/// Windows PID liveness via `tasklist`.
+#[cfg(windows)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        // If we cannot query, assume alive so callers don't delete routes
+        // or skip kills based on a probe failure.
+        return true;
+    };
+    if !output.status.success() {
+        return true;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // CSV lines look like: `"node.exe","1234","Console","1","45,000 K"`.
+    // Match the exact PID field, never a substring of another PID.
+    stdout.lines().any(|line| {
+        line.split(',')
+            .any(|field| field.trim().trim_matches('"') == pid.to_string())
+    })
+}
+
 // Platform-specific modules for future use
 #[cfg(target_os = "macos")]
 pub mod macos;

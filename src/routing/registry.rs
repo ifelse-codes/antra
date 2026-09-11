@@ -12,17 +12,36 @@ pub struct RouteRegistry {
     persist: bool,
 }
 
-/// Snapshot the static (unmanaged) routes to disk so they survive
-/// daemon restarts. Managed `run`/`dev` routes carry `managed=true` and are
-/// intentionally excluded — they die with their process.
-fn static_alias_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
+/// Snapshot routes to disk so they survive daemon restarts.
+///
+/// - Static aliases (`managed=false`) are always persisted.
+/// - Managed `run`/`dev` routes (`managed=true`) persist only with a real
+///   child PID so a restart can keep them when the owner is still alive and
+///   drop them when it is gone. Pid-less managed routes are zombies from a
+///   pre-spawn registration and must never reach disk.
+///
+/// Hot path (`lookup`/`list`) never touches disk; only register/unregister
+/// write, and restore reads once at daemon start.
+fn persist_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
     routes
         .values()
-        .filter(|r| !r.managed)
+        .filter(|r| !r.managed || r.pid.is_some())
         .map(|r| AliasEntry {
             domain: r.domain.clone(),
             port: r.port,
+            pid: r.pid,
+            managed: r.managed,
         })
+        .collect()
+}
+
+/// Kept for readability in tests/diffs: the legacy name for the static-only
+/// view. Delegates to [`persist_snapshot`] filtered to unmanaged routes.
+#[cfg(test)]
+fn static_alias_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
+    persist_snapshot(routes)
+        .into_iter()
+        .filter(|e| !e.managed)
         .collect()
 }
 
@@ -60,7 +79,7 @@ impl RouteRegistry {
                 .write()
                 .map_err(|e| anyhow::anyhow!("Lock poisoned: {e}"))?;
             routes.insert(route.domain.clone(), route);
-            static_alias_snapshot(&routes)
+            persist_snapshot(&routes)
         };
         self.maybe_persist(&snapshot);
         Ok(())
@@ -73,7 +92,7 @@ impl RouteRegistry {
                 .write()
                 .map_err(|e| anyhow::anyhow!("Lock poisoned: {e}"))?;
             routes.remove(domain);
-            static_alias_snapshot(&routes)
+            persist_snapshot(&routes)
         };
         self.maybe_persist(&snapshot);
         Ok(())
@@ -116,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_routes_excluded_from_persist_snapshot() {
+    fn persist_snapshot_keeps_static_and_managed_with_pid() {
         let mut map = HashMap::new();
         map.insert(
             "static.localhost".to_string(),
@@ -126,9 +145,15 @@ mod tests {
             "run.localhost".to_string(),
             route("run.localhost", 5173, Some(1234), true),
         );
-        let snap = static_alias_snapshot(&map);
-        assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].domain, "static.localhost");
+        let snap = persist_snapshot(&map);
+        assert_eq!(snap.len(), 2);
+        let managed = snap.iter().find(|e| e.domain == "run.localhost").unwrap();
+        assert!(managed.managed);
+        assert_eq!(managed.pid, Some(1234));
+        // Static-only view still excludes managed.
+        let statics = static_alias_snapshot(&map);
+        assert_eq!(statics.len(), 1);
+        assert_eq!(statics[0].domain, "static.localhost");
     }
 
     #[test]
@@ -139,6 +164,6 @@ mod tests {
             "orphan.localhost".to_string(),
             route("orphan.localhost", 4000, None, true),
         );
-        assert!(static_alias_snapshot(&map).is_empty());
+        assert!(persist_snapshot(&map).is_empty());
     }
 }

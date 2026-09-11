@@ -2,14 +2,25 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// A static domain→port mapping created by `antra alias` or
-/// `antra add route`. Unlike managed `run`/`dev` routes (which have a PID
-/// and die with their process), aliases are meant to be long-lived, so the
-/// daemon persists them to disk and restores them on restart.
+/// A persisted domain→port mapping.
+///
+/// - Static aliases (`antra alias` / `antra add route`): `managed=false`,
+///   `pid=None` — long-lived, always restored.
+/// - Managed routes (`antra run` / `dev`): `managed=true`, `pid=Some(..)` —
+///   restored only when the recorded PID is still alive; stale entries are
+///   dropped on daemon start.
+///
+/// `pid`/`managed` default for backward compat: `aliases.json` files written
+/// before managed persistence contain only `{domain, port}` and deserialize
+/// as static aliases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasEntry {
     pub domain: String,
     pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub managed: bool,
 }
 
 fn aliases_path() -> Option<PathBuf> {
@@ -64,10 +75,14 @@ mod tests {
             AliasEntry {
                 domain: "a.localhost".to_string(),
                 port: 1000,
+                pid: None,
+                managed: false,
             },
             AliasEntry {
                 domain: "b.localhost".to_string(),
                 port: 2000,
+                pid: Some(1234),
+                managed: true,
             },
         ];
         let json = serde_json::to_string_pretty(&entries).unwrap();
@@ -75,6 +90,14 @@ mod tests {
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].domain, "a.localhost");
         assert_eq!(back[1].port, 2000);
+        assert_eq!(back[1].pid, Some(1234));
+        assert!(back[1].managed);
+        // Legacy files with only {domain, port} decode as static aliases.
+        let legacy: Vec<AliasEntry> =
+            serde_json::from_str(r#"[{"domain":"old.localhost","port":3000}]"#).unwrap();
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].pid, None);
+        assert!(!legacy[0].managed);
         // Corrupt input must yield empty, never panic (daemon must start).
         let corrupt: Vec<AliasEntry> = serde_json::from_str("not json{[}").unwrap_or_default();
         assert!(corrupt.is_empty());

@@ -443,7 +443,103 @@ fn check_port_holder_with_timeout(pid: u32, port: u16) -> bool {
     }
 }
 
+/// Windows: PID file + `tasklist` liveness + `netstat -ano -p TCP` LISTEN check.
+///
+/// Never substring-matches `:80` vs `:8080`: the local-address token's port
+/// is parsed as `u16` and compared exactly, and only `LISTENING` rows owned
+/// by the daemon PID count. Outbound `ESTABLISHED` rows and other PIDs are
+/// ignored so a free port is never reported "in use".
 #[cfg(not(unix))]
-fn is_antra_daemon_port(_port: u16) -> bool {
-    false
+fn is_antra_daemon_port(port: u16) -> bool {
+    let Some(pid) = crate::ipc::server::read_daemon_pid() else {
+        return false;
+    };
+    if !crate::platform::is_pid_alive(pid) {
+        return false;
+    }
+    check_windows_port_holder(pid, port)
+}
+
+/// True when `netstat -ano -p TCP` shows `pid` in LISTENING on exactly `port`.
+#[cfg(not(unix))]
+fn check_windows_port_holder(pid: u32, port: u16) -> bool {
+    let output = std::process::Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .any(|line| netstat_line_matches(line, pid, port))
+}
+
+/// Parse one `netstat -ano` line.
+///
+/// Expected shape (whitespace-separated):
+/// `TCP  0.0.0.0:443  0.0.0.0:0  LISTENING  1234`
+/// IPv6 form: `TCP  [::]:443  [::]:0  LISTENING  1234`.
+/// Returns true only for LISTENING + exact port + exact PID.
+#[cfg(not(unix))]
+fn netstat_line_matches(line: &str, pid: u32, port: u16) -> bool {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 5 {
+        return false;
+    }
+    if !parts[0].eq_ignore_ascii_case("TCP") {
+        return false;
+    }
+    if !parts[3].eq_ignore_ascii_case("LISTENING") {
+        return false;
+    }
+    if parts[4].parse::<u32>().ok() != Some(pid) {
+        return false;
+    }
+    // Local address is parts[1] (`0.0.0.0:443` or `[::]:443`).
+    let local = parts[1];
+    let port_str = local.rsplit(':').next().unwrap_or("");
+    // Strip trailing `]` (defensive; rsplit on `[::]:443` yields `443`).
+    let port_str = port_str.trim_end_matches(|c: char| !c.is_ascii_digit());
+    port_str.parse::<u16>().ok() == Some(port)
+}
+
+#[cfg(all(test, not(unix)))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn netstat_exact_port_match() {
+        assert!(netstat_line_matches(
+            "  TCP    0.0.0.0:443            0.0.0.0:0              LISTENING       1234",
+            1234,
+            443
+        ));
+        // :8080 must not match :80.
+        assert!(!netstat_line_matches(
+            "  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       1234",
+            1234,
+            80
+        ));
+        // Wrong PID.
+        assert!(!netstat_line_matches(
+            "  TCP    0.0.0.0:443            0.0.0.0:0              LISTENING       9999",
+            1234,
+            443
+        ));
+        // ESTABLISHED (outbound) is not a listen.
+        assert!(!netstat_line_matches(
+            "  TCP    127.0.0.1:443          127.0.0.1:5000         ESTABLISHED     1234",
+            1234,
+            443
+        ));
+        // IPv6 listen.
+        assert!(netstat_line_matches(
+            "  TCP    [::]:443               [::]:0                 LISTENING       1234",
+            1234,
+            443
+        ));
+    }
 }
