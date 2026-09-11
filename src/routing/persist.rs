@@ -46,6 +46,10 @@ pub fn save_aliases(entries: &[AliasEntry]) {
     }
     if let Ok(json) = serde_json::to_string_pretty(entries) {
         let _ = std::fs::write(&path, json);
+        // sudo-root daemon writes into the user's config dir: hand the file
+        // back so later unprivileged commands can update it.
+        #[cfg(unix)]
+        crate::platform::chown_to_invoking_user(&path);
     }
 }
 

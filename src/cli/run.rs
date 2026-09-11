@@ -7,8 +7,7 @@ use crate::config::global;
 use crate::resolver::util::select_resolver;
 use crate::util::output;
 use crate::util::port::{
-    detect_port_from_command, find_free_port, find_free_port_in_range, inject_port_flag,
-    is_port_available,
+    detect_port_from_command, find_free_port_in_range, inject_port_flag, is_port_available,
 };
 use crate::util::port_watcher;
 
@@ -147,35 +146,42 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 1. Determine port
     let port = match args.port {
         Some(p) => {
-            // User specified a port — honor it verbatim. Only remap on a real
-            // conflict, and say so loudly (silent remaps route traffic nowhere).
+            // User specified a port — honor it verbatim or fail loudly.
+            // Silently remapping to a random free port born the classic
+            // 503: frameworks that ignore $PORT (Vite behind `npm run`,
+            // static servers with pinned args) keep listening on `p`
+            // while the route points at the remap. Auto-assign stays
+            // available by omitting --port.
             if is_port_available(p) {
                 output::print_success(&format!("Using port {p}"));
                 p
-            } else if detect_port_from_command(&args.command) == Some(p) {
-                // The child's own args pin it to the busy port (e.g.
-                // `python3 -m http.server 18090`), so spawning it would only
-                // dump a raw `Address already in use` traceback. Fail fast
-                // with the actionable message instead — before registering
-                // anything, so there is nothing to clean up.
+            } else {
                 output::print_error(&format!("Port {p} is already in use."));
-                output::print_warning(&format!(
-                    "Your command looks pinned to port {p} (`{}`), so it cannot start there.",
-                    args.command.join(" ")
-                ));
+                if detect_port_from_command(&args.command) == Some(p) {
+                    // The child's own args pin it to the busy port (e.g.
+                    // `python3 -m http.server 18090`), so spawning it would
+                    // only dump a raw `Address already in use` traceback.
+                    // Fail fast with the actionable message instead —
+                    // before registering anything, so there is nothing to
+                    // clean up.
+                    output::print_warning(&format!(
+                        "Your command looks pinned to port {p} (`{}`), so it cannot start there.",
+                        args.command.join(" ")
+                    ));
+                } else if std::net::TcpStream::connect_timeout(
+                    &std::net::SocketAddr::from(([127, 0, 0, 1], p)),
+                    std::time::Duration::from_millis(200),
+                )
+                .is_ok()
+                {
+                    output::print_warning(&format!(
+                        "Something is already serving on port {p} — did you mean `antra alias` to front it instead of `run`?"
+                    ));
+                }
                 output::print_warning(
                     "Stop the process on that port (see `antra list`), or pass a free --port.",
                 );
                 return Err(anyhow::anyhow!("Port {p} is already in use"));
-            } else {
-                let alt = find_free_port()?;
-                output::print_warning(&format!(
-                    "Port {p} is already in use. Assigned port {alt} instead."
-                ));
-                output::print_warning(
-                    "Tip: make sure your server listens on $PORT, or pass a free --port.",
-                );
-                alt
             }
         }
         None => {

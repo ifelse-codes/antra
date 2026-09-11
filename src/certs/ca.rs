@@ -109,6 +109,10 @@ pub(crate) fn atomic_write(
     }
     tmp.persist(path)
         .map_err(|e| anyhow::anyhow!("Failed to persist {}: {e}", path.display()))?;
+    // sudo-root daemon writes into the user's config dir: hand the file back
+    // so a later unprivileged daemon/CLI can read/overwrite it.
+    #[cfg(unix)]
+    crate::platform::chown_to_invoking_user(path);
     Ok(())
 }
 

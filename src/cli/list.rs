@@ -9,6 +9,16 @@ pub fn execute() -> Result<()> {
     println!();
 
     if !is_daemon_running() {
+        #[cfg(unix)]
+        if crate::platform::daemon_socket_permission_denied() {
+            println!(
+                "  {} {}",
+                "⚠".yellow().bold(),
+                "Daemon running as root (socket permission denied)".yellow()
+            );
+            println!("    Use {} to manage it.", "sudo antra proxy status".cyan());
+            return Ok(());
+        }
         println!(
             "  {} {}",
             "⚠".yellow().bold(),

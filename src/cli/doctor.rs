@@ -91,6 +91,20 @@ pub fn execute() -> Result<()> {
     // `issues` (exit 2, with a fix command), informational notes go to
     // `warnings` (exit 1). Nothing is counted as both.
     let daemon_running = is_daemon_running();
+    #[cfg(unix)]
+    let daemon_root_owned = !daemon_running && crate::platform::daemon_socket_permission_denied();
+    #[cfg(not(unix))]
+    let daemon_root_owned = false;
+    if daemon_root_owned {
+        println!(
+            "  {} {}",
+            "⚠".yellow().bold(),
+            "Proxy daemon running as root (socket permission denied)".yellow()
+        );
+        warnings.push(
+            "Daemon running as root — use `sudo antra proxy status` or stop it (`sudo antra proxy stop`)".to_string(),
+        );
+    }
     if daemon_running {
         println!(
             "  {} {}",
@@ -148,10 +162,11 @@ pub fn execute() -> Result<()> {
                 );
             }
         }
-    } else {
+    } else if !daemon_root_owned {
         // Counted as an error below (exit 2), so display it as one: ✗ red,
         // not ⚠ yellow. Glyphs always match their bucket (✗ = error,
         // ⚠ = warning) so the "N error(s), N warning(s)" summary is exact.
+        // (Root-owned daemons report above as a warning instead.)
         println!(
             "  {} {}",
             "✗".red().bold(),

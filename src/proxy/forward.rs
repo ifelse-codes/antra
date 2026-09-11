@@ -5,6 +5,16 @@ use hyper::{Request, Response, Uri};
 use crate::proxy::headers;
 use crate::routing::types::{Protocol, Route};
 
+/// Hostname the proxy dials for a route: `localhost` for loopback routes
+/// (resolves to ::1 + 127.0.0.1 so single-stack dev servers are reachable),
+/// the literal address otherwise. Pure so it is unit-testable.
+fn upstream_dial_host(route: &Route) -> String {
+    if route.host.is_loopback() {
+        "localhost".to_string()
+    } else {
+        route.host.to_string()
+    }
+}
 /// Forward an incoming request to the upstream server specified by the route.
 ///
 /// Streams the upstream body verbatim (no buffering) so SSE / chunked /
@@ -29,8 +39,15 @@ pub async fn forward_request(
 
     let upstream_addr = format!("{}:{}", route.host, route.port);
 
+    // Dial `localhost` (not the literal 127.0.0.1) for loopback routes so
+    // the client resolves BOTH ::1 and 127.0.0.1 and tries each in turn.
+    // Dev servers that bind ::1-only (Vite's default on some machines)
+    // refused v4 connections and surfaced as a confusing 503. The Host
+    // header below stays the literal address — only the dial target widens.
+    let dial_addr = format!("{}:{}", upstream_dial_host(route), route.port);
+
     // Build upstream URI
-    let uri: Uri = format!("http://{upstream_addr}{path_and_query}")
+    let uri: Uri = format!("http://{dial_addr}{path_and_query}")
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid upstream URI: {e}"))?;
 
@@ -94,4 +111,42 @@ pub async fn forward_request(
     // Stream the upstream body verbatim — never collect(). Buffering broke
     // SSE (infinite streams never completed) and spiked memory on large bodies.
     Ok(upstream_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routing::types::Protocol;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::time::Instant;
+
+    fn route(host: IpAddr) -> Route {
+        Route {
+            domain: "app.localhost".to_string(),
+            host,
+            port: 5173,
+            pid: None,
+            managed: false,
+            protocol: Protocol::Http,
+            created_at: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn loopback_routes_dial_localhost_for_dual_stack() {
+        assert_eq!(
+            upstream_dial_host(&route(IpAddr::V4(Ipv4Addr::LOCALHOST))),
+            "localhost"
+        );
+        assert_eq!(
+            upstream_dial_host(&route(IpAddr::V6(Ipv6Addr::LOCALHOST))),
+            "localhost"
+        );
+    }
+
+    #[test]
+    fn non_loopback_routes_dial_literal_address() {
+        let host = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10));
+        assert_eq!(upstream_dial_host(&route(host)), "192.168.1.10");
+    }
 }

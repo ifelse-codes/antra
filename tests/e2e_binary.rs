@@ -362,3 +362,38 @@ fn test_open_doesnt_panic() {
     let (stdout, _, code) = run_antra(&["open", "test.localhost"]);
     assert!(code == 0 || stdout.contains("error") || code != -1);
 }
+
+// ===================================================================
+// SECTION 10: Explicit --port conflicts fail loudly (no silent remap)
+// ===================================================================
+
+#[test]
+fn test_run_with_busy_explicit_port_fails_instead_of_remapping() {
+    // Hold a port, then demand it via --port: must error, never silently
+    // route somewhere else (that mismatch born 503s for $PORT-ignoring
+    // frameworks like Vite behind `npm run`).
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port();
+
+    let (stdout, stderr, code) = run_antra(&[
+        "run",
+        "--domain",
+        "busy-port-test.localhost",
+        "--port",
+        &port.to_string(),
+        "--",
+        "echo",
+        "hi",
+    ]);
+    let combined = format!("{stdout}\n{stderr}");
+    assert_ne!(code, 0, "busy --port must fail, got: {combined}");
+    assert!(
+        combined.contains("already in use"),
+        "must say the port is busy, got: {combined}"
+    );
+    assert!(
+        !combined.contains("Assigned port"),
+        "must not remap to another port, got: {combined}"
+    );
+    drop(held);
+}
