@@ -56,6 +56,12 @@ pub async fn send_command(payload: IpcPayload) -> Result<IpcMessage> {
         }
 
         let stream = UnixStream::connect(&sock_path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                return anyhow::anyhow!(
+                    "Cannot reach daemon at {} (permission denied — daemon is running as root; use `sudo antra proxy status` / `sudo antra proxy stop`, or stop it and restart unprivileged).",
+                    sock_path.display()
+                );
+            }
             anyhow::anyhow!(
                 "Cannot reach daemon at {} ({e}). It may have crashed leaving a stale socket — run `antra proxy stop` then `antra proxy start`.",
                 sock_path.display()

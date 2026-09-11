@@ -13,7 +13,7 @@
   <a href="https://github.com/ifelse-codes/antra/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ifelse-codes/antra/ci.yml?branch=main&style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/rust-native-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/version-0.3.0-0ea5e9?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.1-0ea5e9?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-111827?style=flat-square" alt="Platforms">
 </p>
 
@@ -436,7 +436,7 @@ If you are contributing, start with [`AGENT.md`](AGENT.md) — architecture, pha
 
 Phases 0–10 are complete. Antra is a working local proxy: HTTP, HTTPS, WebSockets, domain resolution, CA trust, daemon/IPC, DX commands, `antra.toml`, and cross-platform builds.
 
-This is `0.3.0`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
+This is `0.3.1`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
 
 MVP definition: [`docs/mvp.md`](docs/mvp.md)
 

@@ -226,6 +226,10 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
 
     // Write PID file
     std::fs::write(&pid_file, std::process::id().to_string())?;
+    // sudo-root daemon, user-owned HOME: hand the pid file back to the
+    // invoking user so unprivileged `status`/`stop` can read it.
+    #[cfg(unix)]
+    crate::platform::chown_to_invoking_user(&pid_file);
 
     // Create the IPC listener (the atomic singleton claim: exactly one
     // starter wins the bind; the loser fails here with EADDRINUSE)
@@ -243,6 +247,10 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&sock_path, PermissionsExt::from_mode(0o600));
+        // sudo-root daemon, user-owned HOME: hand the socket back to the
+        // invoking user so unprivileged CLI can connect (0600 still holds,
+        // now enforced for the user instead of root).
+        crate::platform::chown_to_invoking_user(&sock_path);
     }
 
     // Restore static aliases persisted by `antra alias` / `antra add route`

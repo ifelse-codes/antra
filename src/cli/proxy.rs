@@ -51,6 +51,34 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(start_daemon(config))?;
             } else {
+                // Refuse a second daemon when one is already reachable: the
+                // child would exit "already running" while this parent still
+                // reports success with a fresh (wrong) PID.
+                if crate::ipc::client::is_daemon_running() {
+                    println!("  {} Daemon is already running", "•".cyan().bold());
+                    match crate::ipc::client::get_startup_status() {
+                        Ok(status) => {
+                            println!(
+                                "  HTTPS :{} · HTTP :{}",
+                                status.https_port, status.http_port
+                            );
+                        }
+                        Err(e) => println!("  {e}"),
+                    }
+                    println!();
+                    println!("  Stop it first with: antra proxy stop");
+                    return Ok(());
+                }
+                // A root-owned daemon (sudo start) is invisible to
+                // is_daemon_running() but must not be shadowed by a fallback
+                // user daemon on the same socket path.
+                #[cfg(unix)]
+                if crate::platform::daemon_socket_permission_denied() {
+                    anyhow::bail!(
+                        "Daemon is running as root (socket permission denied).\n\
+                         Use `sudo antra proxy status` / `sudo antra proxy stop`, or stop it and restart unprivileged."
+                    );
+                }
                 // Spawn a separate process for the daemon
                 println!("  Starting daemon...");
 
@@ -60,6 +88,10 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     .create(true)
                     .append(true)
                     .open(&log_path)?;
+                // sudo-root start writes into the user's data dir: hand the
+                // log back so later unprivileged starts can append to it.
+                #[cfg(unix)]
+                crate::platform::chown_to_invoking_user(&log_path);
 
                 let mut cmd = std::process::Command::new(exe);
                 cmd.arg("proxy")
@@ -267,6 +299,15 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
         }
         ProxyCommands::Stop => {
             println!("Stopping Antra daemon...");
+            #[cfg(unix)]
+            if crate::platform::daemon_socket_permission_denied() {
+                println!(
+                    "  {} Daemon is running as root (socket permission denied).",
+                    "✗".red().bold()
+                );
+                println!("  Stop it with: sudo antra proxy stop");
+                return Ok(());
+            }
             match stop_daemon() {
                 Ok(()) => {
                     println!("  ✓ Daemon stopped");
@@ -278,6 +319,14 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
             Ok(())
         }
         ProxyCommands::Status => {
+            #[cfg(unix)]
+            if crate::platform::daemon_socket_permission_denied() {
+                println!("ANTRA");
+                println!();
+                println!("  Daemon is running as root (socket permission denied)");
+                println!("  Use: sudo antra proxy status");
+                return Ok(());
+            }
             match daemon_status() {
                 Ok(status) => {
                     println!("ANTRA");

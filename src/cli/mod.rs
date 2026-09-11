@@ -33,6 +33,17 @@ pub(crate) fn ensure_daemon() -> Result<bool> {
         return Ok(true);
     }
 
+    // A root-owned daemon (sudo start, pre-fix sockets) is alive but
+    // unreachable: starting a second user daemon would collide on the same
+    // socket path and ports. Point at sudo instead of half-starting.
+    #[cfg(unix)]
+    if crate::platform::daemon_socket_permission_denied() {
+        anyhow::bail!(
+            "Daemon is running as root (socket permission denied).\n\
+             Use `sudo antra proxy stop` then `antra proxy start`, or manage it with sudo."
+        );
+    }
+
     output::print_warning("Daemon not running, starting it...");
 
     let exe = std::env::current_exe()?;
@@ -232,6 +243,15 @@ impl Cli {
                 // Read-only when the daemon is down: there are no routes to remove.
                 if !is_daemon_running() {
                     println!("  {} Removing route for {}", "→".cyan().bold(), domain);
+                    #[cfg(unix)]
+                    if crate::platform::daemon_socket_permission_denied() {
+                        println!(
+                            "  {} {}",
+                            "⚠".yellow().bold(),
+                            "Daemon running as root — use: sudo antra remove".yellow()
+                        );
+                        std::process::exit(1);
+                    }
                     println!(
                         "  {} {}",
                         "⚠".yellow().bold(),
