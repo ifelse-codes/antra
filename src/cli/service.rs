@@ -102,6 +102,28 @@ fn install_windows_service() -> Result<()> {
     println!("  {}", "Start it with: sc.exe start AntraDaemon".dimmed());
     println!("  {}", "Or keep using: antra proxy start".dimmed());
     println!();
+    // The service runs as SYSTEM: its CA and aliases.json live under the
+    // SYSTEM profile, not the installing user's. Without this note the mode
+    // looks broken end-to-end (different CA than `antra trust` installed,
+    // none of the user's aliases). Say it up front instead.
+    println!(
+        "  {} {}",
+        "⚠".yellow().bold(),
+        "Limitation: the service runs as SYSTEM, so it uses the SYSTEM".yellow()
+    );
+    println!(
+        "  {}",
+        "  profile's CA and aliases — not yours. Trust/aliases you created".dimmed()
+    );
+    println!(
+        "  {}",
+        "  as yourself won't apply to it (expect TLS warnings). For".dimmed()
+    );
+    println!(
+        "  {}",
+        "  single-user dev, prefer `antra proxy start`.".dimmed()
+    );
+    println!();
     Ok(())
 }
 

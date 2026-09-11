@@ -483,7 +483,11 @@ fn check_windows_port_holder(pid: u32, port: u16) -> bool {
 /// `TCP  0.0.0.0:443  0.0.0.0:0  LISTENING  1234`
 /// IPv6 form: `TCP  [::]:443  [::]:0  LISTENING  1234`.
 /// Returns true only for LISTENING + exact port + exact PID.
-#[cfg(not(unix))]
+///
+/// Pure string parsing with no OS dependency, so it is compiled on all
+/// platforms under `test` — CI runs macOS + Ubuntu only, and gating it
+/// `not(unix)` meant this parser shipped with zero test coverage.
+#[cfg(any(test, not(unix)))]
 fn netstat_line_matches(line: &str, pid: u32, port: u16) -> bool {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 5 {
@@ -506,7 +510,7 @@ fn netstat_line_matches(line: &str, pid: u32, port: u16) -> bool {
     port_str.parse::<u16>().ok() == Some(port)
 }
 
-#[cfg(all(test, not(unix)))]
+#[cfg(test)]
 mod windows_tests {
     use super::*;
 

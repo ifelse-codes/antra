@@ -35,16 +35,6 @@ fn persist_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
         .collect()
 }
 
-/// Kept for readability in tests/diffs: the legacy name for the static-only
-/// view. Delegates to [`persist_snapshot`] filtered to unmanaged routes.
-#[cfg(test)]
-fn static_alias_snapshot(routes: &HashMap<String, Route>) -> Vec<AliasEntry> {
-    persist_snapshot(routes)
-        .into_iter()
-        .filter(|e| !e.managed)
-        .collect()
-}
-
 impl RouteRegistry {
     /// Production registry: static aliases are persisted to disk.
     pub fn new() -> Self {
@@ -150,8 +140,7 @@ mod tests {
         let managed = snap.iter().find(|e| e.domain == "run.localhost").unwrap();
         assert!(managed.managed);
         assert_eq!(managed.pid, Some(1234));
-        // Static-only view still excludes managed.
-        let statics = static_alias_snapshot(&map);
+        let statics: Vec<_> = snap.iter().filter(|e| !e.managed).collect();
         assert_eq!(statics.len(), 1);
         assert_eq!(statics[0].domain, "static.localhost");
     }

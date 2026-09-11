@@ -517,12 +517,8 @@ fn install_ca_windows_current_user(ca_pem: &str) -> Result<()> {
     let cert_path = dir.path().join("antra-ca.pem");
     std::fs::write(&cert_path, ca_pem)?;
     let output = std::process::Command::new("certutil")
-        .args([
-            "-user",
-            "-addstore",
-            "Root",
-            cert_path.to_str().unwrap_or_default(),
-        ])
+        .args(["-user", "-addstore", "Root"])
+        .arg(&cert_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()?;

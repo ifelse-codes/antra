@@ -256,6 +256,16 @@ antra proxy stop
 
 The daemon starts itself on the first `antra run`. You only need these commands when you want it explicit.
 
+### `antra service`
+
+```bash
+antra service install    # Windows: sc.exe AntraDaemon (manual start, needs admin)
+antra service status
+antra service uninstall
+```
+
+Windows limitation: the service runs as SYSTEM, so it uses the SYSTEM profile's CA and aliases — not yours. Trust and aliases you created as yourself won't apply to it (expect TLS warnings). For single-user dev, prefer `antra proxy start`.
+
 ### `antra trust`
 
 ```bash

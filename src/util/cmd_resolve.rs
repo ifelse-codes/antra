@@ -104,17 +104,38 @@ mod tests {
         assert_eq!(resolve_program(&exe.to_string_lossy()), exe);
     }
 
+    /// Process-global `PATH` is mutated below: serialize against parallel
+    /// tests touching the environment and restore on drop so a panicking
+    /// assert cannot leak the temp dir into other tests' lookups.
+    static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct RestorePath {
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for RestorePath {
+        fn drop(&mut self) {
+            match self.old.take() {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
     #[test]
     fn finds_program_in_path() {
+        let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = RestorePath {
+            old: std::env::var_os("PATH"),
+        };
         let dir = tempfile::tempdir().unwrap();
         #[cfg(windows)]
         let name = "antra-test-prog.cmd";
         #[cfg(not(windows))]
         let name = "antra-test-prog";
         std::fs::write(dir.path().join(name), "x").unwrap();
-        let old = std::env::var_os("PATH");
         let mut paths = vec![dir.path().to_path_buf()];
-        if let Some(p) = &old {
+        if let Some(p) = &_restore.old {
             paths.extend(std::env::split_paths(p));
         }
         let joined = std::env::join_paths(paths).unwrap();
@@ -126,9 +147,6 @@ mod tests {
             resolved.is_file(),
             "expected {stem} to resolve, got {resolved:?}"
         );
-        if let Some(o) = old {
-            std::env::set_var("PATH", o);
-        }
     }
 
     #[test]
