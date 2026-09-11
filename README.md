@@ -232,6 +232,10 @@ ANTRA_URL=https://myapp.localhost
 
 Point your framework at `HOST` + `PORT` and forget the rest.
 
+`antra run` is foreground: Ctrl-C stops the child and removes the route.
+For a background server you already started, use `antra alias` instead
+(no `--detach` mode — `run` never detaches).
+
 ### `antra alias`
 
 Front a process you already started:
@@ -251,6 +255,16 @@ antra proxy stop
 ```
 
 The daemon starts itself on the first `antra run`. You only need these commands when you want it explicit.
+
+### `antra service`
+
+```bash
+antra service install    # Windows: sc.exe AntraDaemon (manual start, needs admin)
+antra service status
+antra service uninstall
+```
+
+Windows limitation: the service runs as SYSTEM, so it uses the SYSTEM profile's CA and aliases — not yours. Trust and aliases you created as yourself won't apply to it (expect TLS warnings). For single-user dev, prefer `antra proxy start`.
 
 ### `antra trust`
 
@@ -385,13 +399,20 @@ curl -fsSL https://raw.githubusercontent.com/ifelse-codes/antra/main/install.sh 
 brew install ifelse-codes/antra/antra
 ```
 
-**From source:**
+**From source (requires Rust ≥ 1.85 — `serde_spanned` needs `edition2024` support):**
 
 ```bash
+rustup update
+rustc --version  # confirm ≥ 1.85
 git clone https://github.com/ifelse-codes/antra.git && cd antra
 cargo install --path .
 antra --help
 ```
+
+On Windows, `npm` is resolved via `PATH` plus `C:\Program Files\nodejs\`,
+`%APPDATA%\npm\`, and `%LOCALAPPDATA%\Programs\nodejs\` (with `.cmd` /
+`.exe` / `.bat` extension probes), so `antra run --domain myapp.localhost --
+npm run dev -- --port 3001` works without a full path.
 
 **Release binaries** (GitHub Releases, tagged `v*`)
 

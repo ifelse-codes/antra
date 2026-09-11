@@ -285,10 +285,13 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     let final_program = final_args.first().unwrap_or(&program).clone();
     let final_child_args: Vec<String> = final_args[1..].to_vec();
 
-    // Build environment with CA cert path for Node.js TLS trust
-    let mut cmd = Command::new(&final_program);
-    cmd.args(&final_child_args)
-        .env("PORT", port.to_string())
+    // Resolve the program via PATH + well-known Windows locations so
+    // `npm` works without a full path even when the daemon env differs
+    // from the user's shell. On Windows a `.cmd`/`.bat` target must go
+    // through `cmd /C` (CreateProcess cannot run batch files directly).
+    let resolved = crate::util::cmd_resolve::resolve_program(&final_program);
+    let mut cmd = build_spawn_command(&resolved, &final_child_args);
+    cmd.env("PORT", port.to_string())
         .env("HOST", "127.0.0.1")
         .env("ANTRA_DOMAIN", &domain)
         .env("ANTRA_URL", format!("https://{}", domain))
@@ -315,12 +318,17 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                 }
             }
             let _ = resolver.unregister(&domain);
-            return Err(anyhow::anyhow!("Failed to spawn '{}': {e}", final_program));
+            let hint = crate::util::cmd_resolve::spawn_hint(&final_program, &resolved);
+            return Err(anyhow::anyhow!(
+                "Failed to spawn '{final_program}' (resolved to '{}'): {e}. {hint}",
+                resolved.display()
+            ));
         }
     };
 
     // 6. Register route with the REAL child PID as a managed route.
-    // Managed routes never reach aliases.json and die with their process.
+    // Managed routes persist with their PID and are restored only while the
+    // owner is alive; stale entries are dropped on daemon start.
     let child_pid = child.id();
     match crate::ipc::client::send_command(crate::ipc::protocol::IpcPayload::RegisterRoute(
         crate::ipc::protocol::RegisterRouteRequest {
@@ -404,7 +412,13 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         port_watcher::watch_port_changes(stdout, domain.clone(), port, child_pid);
     }
 
-    // 7. Wait for child or signal
+    // 7. Wait for child or signal.
+    //
+    // `antra run` is FOREGROUND: Ctrl-C forwards to the child process group
+    // (taskkill /T tree on Windows), unregisters the route, and exits with
+    // the child's code. For a long-lived background server, start it yourself
+    // and front it instead: `antra alias myapp.localhost 3001`.
+    // (A `--detach` background mode is intentionally not implemented.)
 
     // Set up signal handler
     #[cfg(unix)]
@@ -531,6 +545,29 @@ async fn restore_previous_route(domain: &str, prev: &crate::ipc::protocol::Route
     ));
 }
 
+/// Build the `tokio::process::Command` for a resolved program.
+///
+/// On Windows, `.cmd`/`.bat` files (e.g. `npm.cmd`) cannot be executed
+/// directly via `CreateProcess` — route them through `cmd /C`.
+fn build_spawn_command(resolved: &std::path::Path, child_args: &[String]) -> Command {
+    #[cfg(windows)]
+    {
+        let ext_is_script = resolved
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+            .unwrap_or(false);
+        if ext_is_script {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg(resolved.as_os_str()).args(child_args);
+            return cmd;
+        }
+    }
+    let mut cmd = Command::new(resolved);
+    cmd.args(child_args);
+    cmd
+}
+
 /// Kill a process by PID.
 #[cfg(unix)]
 fn kill_process(pid: u32) {
@@ -548,9 +585,15 @@ fn kill_process(pid: u32) {
 }
 
 #[cfg(not(unix))]
-fn kill_process(_pid: u32) {
-    // On Windows, would need taskkill
-    // For now, no-op
+fn kill_process(pid: u32) {
+    // Mirror the Ctrl-C handler below: force-kill the whole tree so child
+    // servers (npm -> node) don't linger. Best-effort; failures are ignored
+    // because the route cleanup that follows matters more.
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
 }
 
 /// Check if a PID is alive.
@@ -563,6 +606,6 @@ fn is_pid_alive(pid: u32) -> bool {
 
 #[cfg(not(unix))]
 #[allow(dead_code)]
-fn is_pid_alive(_pid: u32) -> bool {
-    true
+fn is_pid_alive(pid: u32) -> bool {
+    crate::platform::is_pid_alive(pid)
 }

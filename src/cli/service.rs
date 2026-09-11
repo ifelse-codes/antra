@@ -33,15 +33,98 @@ fn install_service() -> Result<()> {
         install_systemd()
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        install_windows_service()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         println!(
             "  {} {}",
             "✗".red().bold(),
-            "Service install is only supported on macOS and Linux".red()
+            "Service install is only supported on macOS, Linux, and Windows".red()
         );
         Ok(())
     }
+}
+
+/// Windows service install via `sc.exe` (manual start, `AntraDaemon`).
+///
+/// Manual start (not auto) so a logout/boot never surprises with bound :443.
+/// Requires elevation; without it `sc.exe` fails and we print the
+/// elevated retry instead of a stack trace.
+#[cfg(target_os = "windows")]
+fn install_windows_service() -> Result<()> {
+    let antra_path = std::env::current_exe()?;
+    let bin_path = format!("\"{}\" proxy start", antra_path.display());
+
+    let output = std::process::Command::new("sc.exe")
+        .args([
+            "create",
+            "AntraDaemon",
+            &format!("binPath= {bin_path}"),
+            "start=",
+            "demand",
+        ])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        if stdout.contains("Access is denied") || stderr.contains("Access is denied") {
+            println!(
+                "  {} {}",
+                "✗".red().bold(),
+                "Elevation required: run in an Administrator terminal,".red()
+            );
+            println!("    then retry: antra service install");
+            return Ok(());
+        }
+        println!(
+            "  {} Failed to create service: {} {}",
+            "✗".red().bold(),
+            stdout.trim(),
+            stderr.trim()
+        );
+        return Ok(());
+    }
+    let _ = std::process::Command::new("sc.exe")
+        .args([
+            "description",
+            "AntraDaemon",
+            "Antra local development proxy (manual start)",
+        ])
+        .output();
+    println!(
+        "  {} Service 'AntraDaemon' installed (manual start)",
+        "✓".green().bold()
+    );
+    println!("  {}", "Start it with: sc.exe start AntraDaemon".dimmed());
+    println!("  {}", "Or keep using: antra proxy start".dimmed());
+    println!();
+    // The service runs as SYSTEM: its CA and aliases.json live under the
+    // SYSTEM profile, not the installing user's. Without this note the mode
+    // looks broken end-to-end (different CA than `antra trust` installed,
+    // none of the user's aliases). Say it up front instead.
+    println!(
+        "  {} {}",
+        "⚠".yellow().bold(),
+        "Limitation: the service runs as SYSTEM, so it uses the SYSTEM".yellow()
+    );
+    println!(
+        "  {}",
+        "  profile's CA and aliases — not yours. Trust/aliases you created".dimmed()
+    );
+    println!(
+        "  {}",
+        "  as yourself won't apply to it (expect TLS warnings). For".dimmed()
+    );
+    println!(
+        "  {}",
+        "  single-user dev, prefer `antra proxy start`.".dimmed()
+    );
+    println!();
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -248,12 +331,36 @@ fn service_status() -> Result<()> {
         }
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        let output = std::process::Command::new("sc.exe")
+            .args(["query", "AntraDaemon"])
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if output.status.success() && stdout.contains("AntraDaemon") {
+            println!(
+                "  {} Service 'AntraDaemon' is installed",
+                "✓".green().bold()
+            );
+            for line in stdout.lines().take(8) {
+                println!("  {}", line.trim().dimmed());
+            }
+        } else {
+            println!(
+                "  {} {}",
+                "⚠".yellow().bold(),
+                "Service is not installed".yellow()
+            );
+            println!("    Run: antra service install (Administrator terminal)");
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         println!(
             "  {} {}",
             "✗".red().bold(),
-            "Service management is only supported on macOS and Linux".red()
+            "Service management is only supported on macOS, Linux, and Windows".red()
         );
     }
 
@@ -313,12 +420,31 @@ fn uninstall_service() -> Result<()> {
         println!("  {} Service uninstalled", "✓".green().bold());
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("sc.exe")
+            .args(["stop", "AntraDaemon"])
+            .output();
+        let output = std::process::Command::new("sc.exe")
+            .args(["delete", "AntraDaemon"])
+            .output()?;
+        if output.status.success() {
+            println!("  {} Service 'AntraDaemon' uninstalled", "✓".green().bold());
+        } else {
+            println!(
+                "  {} {}",
+                "⚠".yellow().bold(),
+                "Service is not installed (or needs an Administrator terminal)".yellow()
+            );
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         println!(
             "  {} {}",
             "✗".red().bold(),
-            "Service management is only supported on macOS and Linux".red()
+            "Service management is only supported on macOS, Linux, and Windows".red()
         );
     }
 

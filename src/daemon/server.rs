@@ -253,23 +253,72 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         crate::platform::chown_to_invoking_user(&sock_path);
     }
 
-    // Restore static aliases persisted by `antra alias` / `antra add route`
-    // so they survive daemon restarts. Managed `run`/`dev` routes carry
-    // `managed=true` and never reach disk, so only unmanaged entries load.
+    // Restore persisted routes so they survive daemon restarts.
+    // - Static aliases (`managed=false`) always restore.
+    // - Managed `run`/`dev` routes restore only when their PID is still
+    //   alive; stale entries (dead owner) are dropped and pruned from disk
+    //   by the re-persist triggered below.
     let restored = crate::routing::persist::load_aliases();
+    let mut restored_count = 0usize;
+    let mut dropped_stale = 0usize;
     for entry in &restored {
-        let _ = registry.register(Route {
-            domain: entry.domain.clone(),
-            host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            port: entry.port,
-            pid: None,
-            managed: false,
-            protocol: Protocol::Http,
-            created_at: Instant::now(),
-        });
+        if entry.managed {
+            match entry.pid {
+                Some(pid) if crate::platform::is_pid_alive(pid) => {
+                    let _ = registry.register(Route {
+                        domain: entry.domain.clone(),
+                        host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                        port: entry.port,
+                        pid: entry.pid,
+                        managed: true,
+                        protocol: Protocol::Http,
+                        created_at: Instant::now(),
+                    });
+                    restored_count += 1;
+                }
+                _ => {
+                    dropped_stale += 1;
+                    tracing::info!(
+                        domain = %entry.domain,
+                        pid = ?entry.pid,
+                        "Dropping stale managed route (owner dead)"
+                    );
+                }
+            }
+        } else {
+            let _ = registry.register(Route {
+                domain: entry.domain.clone(),
+                host: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                port: entry.port,
+                pid: None,
+                managed: false,
+                protocol: Protocol::Http,
+                created_at: Instant::now(),
+            });
+            restored_count += 1;
+        }
     }
-    if !restored.is_empty() {
-        tracing::info!(count = restored.len(), "Restored persisted static aliases");
+    if restored_count > 0 || dropped_stale > 0 {
+        tracing::info!(
+            restored = restored_count,
+            dropped_stale,
+            "Restored persisted routes"
+        );
+    }
+    // Prune stale managed entries from disk when nothing was re-registered
+    // (all stale) — otherwise the dead PIDs would resurrect on every start.
+    if dropped_stale > 0 {
+        let live: Vec<crate::routing::persist::AliasEntry> = registry
+            .list()
+            .iter()
+            .map(|r| crate::routing::persist::AliasEntry {
+                domain: r.domain.clone(),
+                port: r.port,
+                pid: r.pid,
+                managed: r.managed,
+            })
+            .collect();
+        crate::routing::persist::save_aliases(&live);
     }
 
     tracing::info!(pid = std::process::id(), "Daemon starting");

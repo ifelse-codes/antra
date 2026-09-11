@@ -1,3 +1,4 @@
+pub mod cmd_resolve;
 pub mod detect;
 pub mod output;
 pub mod port;

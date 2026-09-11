@@ -25,8 +25,38 @@ pub fn is_daemon_running() -> bool {
     }
     #[cfg(windows)]
     {
+        // `Path::exists` is always false for `\\.\pipe\...`. Probe by
+        // opening the pipe: success = daemon alive. A stale pid file alone
+        // never counts — the pipe connect is the source of truth, mirroring
+        // the Unix socket-connect check above.
+        //
+        // Must stay sync (no Tokio runtime): `proxy start`'s health loop and
+        // `doctor` call this from plain sync contexts, and Tokio's
+        // `ClientOptions::open` panics with "no reactor running" there.
+        // `File::open` on `\\.\pipe\...` issues a plain `CreateFileW`.
+        // Retry on ERROR_PIPE_BUSY (231): with several accept workers there
+        // is still a moment with no pending instance under burst load.
         let pipe_name = super::server::pipe_path();
-        std::path::Path::new(&pipe_name).exists()
+        for attempt in 0..10 {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&pipe_name)
+            {
+                Ok(_) => return true,
+                Err(e) => {
+                    let busy = e.raw_os_error() == Some(231);
+                    if !busy || attempt == 9 {
+                        if std::env::var_os("ANTRA_DEBUG_PIPE").is_some() {
+                            eprintln!("pipe probe {pipe_name} failed: {e}");
+                        }
+                        return false;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            }
+        }
+        false
     }
 }
 

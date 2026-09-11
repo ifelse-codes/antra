@@ -212,6 +212,13 @@ pub mod windows_server {
     #[allow(unused_imports)]
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
+    /// Parallel accept workers so concurrent clients never see
+    /// `ERROR_PIPE_BUSY` (os error 231). A single create→connect loop offers
+    /// only one pending instance: a liveness probe holding its connection
+    /// (open, no write yet) starves the real command behind it, and
+    /// `is_daemon_running` falsely reported "not running".
+    const ACCEPT_WORKERS: usize = 4;
+
     pub async fn start_ipc_server(
         registry: Arc<RouteRegistry>,
         start_time: Instant,
@@ -220,84 +227,115 @@ pub mod windows_server {
         let pipe_name = pipe_path();
         tracing::info!(pipe = %pipe_name, "IPC server listening (Windows named pipe)");
 
-        loop {
-            let mut server = ServerOptions::new()
-                .first_pipe_instance(false)
-                .create(&pipe_name)?;
-
-            server.connect().await?;
-
+        for _ in 0..ACCEPT_WORKERS {
+            let pipe_name = pipe_name.clone();
             let registry = Arc::clone(&registry);
             let last_activity = Arc::clone(&last_activity);
-
             tokio::spawn(async move {
-                // AsyncRead is implemented for NamedPipeServer (owned), takes &mut self
-                let mut buf = vec![0u8; 4096];
-                let n = match server.read(&mut buf).await {
-                    Ok(n) if n > 0 => n,
-                    Ok(_) => return,
-                    Err(e) => {
-                        tracing::error!(error = %e, "IPC read error");
-                        return;
+                loop {
+                    let server = match ServerOptions::new()
+                        .first_pipe_instance(false)
+                        .create(&pipe_name)
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::error!(error = %e, "IPC pipe create failed, retrying");
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            continue;
+                        }
+                    };
+                    if let Err(e) = server.connect().await {
+                        tracing::error!(error = %e, "IPC pipe connect failed");
+                        continue;
                     }
-                };
 
-                let line = match String::from_utf8(buf[..n].to_vec()) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::error!(error = %e, "IPC invalid UTF-8");
-                        return;
-                    }
-                };
+                    let registry = Arc::clone(&registry);
+                    let last_activity = Arc::clone(&last_activity);
 
-                if line.is_empty() {
-                    return;
+                    tokio::spawn(async move {
+                        handle_pipe_connection(server, &registry, start_time, &last_activity).await;
+                    });
                 }
+            });
+        }
 
-                let msg: IpcMessage = match serde_json::from_str(line.trim()) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::error!(error = %e, "IPC invalid JSON");
-                        return;
-                    }
-                };
+        // Workers run until the daemon's shutdown select drops this future.
+        std::future::pending::<()>().await;
+        #[allow(unreachable_code)]
+        Ok(())
+    }
 
-                if msg.version != PROTOCOL_VERSION {
-                    tracing::error!("IPC protocol version mismatch");
-                    return;
-                }
+    async fn handle_pipe_connection(
+        mut server: NamedPipeServer,
+        registry: &Arc<RouteRegistry>,
+        start_time: Instant,
+        last_activity: &Arc<RwLock<Instant>>,
+    ) {
+        // AsyncRead is implemented for NamedPipeServer (owned), takes &mut self
+        let mut buf = vec![0u8; 4096];
+        let n = match server.read(&mut buf).await {
+            Ok(n) if n > 0 => n,
+            Ok(_) => return,
+            Err(e) => {
+                tracing::error!(error = %e, "IPC read error");
+                return;
+            }
+        };
 
-                *last_activity.write().await = Instant::now();
+        let line = match String::from_utf8(buf[..n].to_vec()) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(error = %e, "IPC invalid UTF-8");
+                return;
+            }
+        };
 
-                let response = match msg.payload {
-                    IpcPayload::RegisterRoute(req) => handle_register_route(req, &registry),
-                    IpcPayload::UnregisterRoute(req) => handle_unregister_route(req, &registry),
-                    IpcPayload::ListRoutes => handle_list_routes(&registry),
-                    IpcPayload::Ping => IpcMessage::new(IpcPayload::Pong),
-                    IpcPayload::Shutdown => {
-                        let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
-                            message: "Shutting down".to_string(),
-                        }));
-                        let json = serde_json::to_string(&resp).unwrap_or_default();
-                        // AsyncWrite is implemented for NamedPipeServer (owned)
-                        let _ = server.write_all(json.as_bytes()).await;
-                        let _ = server.write_all(b"\n").await;
-                        signal_shutdown();
-                        return;
-                    }
-                    IpcPayload::Status(_) => handle_status(start_time, &registry),
-                    IpcPayload::GetStartupStatus => handle_get_startup_status().await,
-                    _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
-                        message: "Unknown command".to_string(),
-                    })),
-                };
+        if line.is_empty() {
+            return;
+        }
 
-                let json = serde_json::to_string(&response).unwrap_or_default();
+        let msg: IpcMessage = match serde_json::from_str(line.trim()) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(error = %e, "IPC invalid JSON");
+                return;
+            }
+        };
+
+        if msg.version != PROTOCOL_VERSION {
+            tracing::error!("IPC protocol version mismatch");
+            return;
+        }
+
+        *last_activity.write().await = Instant::now();
+
+        let response = match msg.payload {
+            IpcPayload::RegisterRoute(req) => handle_register_route(req, registry),
+            IpcPayload::UnregisterRoute(req) => handle_unregister_route(req, registry),
+            IpcPayload::ListRoutes => handle_list_routes(registry),
+            IpcPayload::Ping => IpcMessage::new(IpcPayload::Pong),
+            IpcPayload::Shutdown => {
+                let resp = IpcMessage::new(IpcPayload::Ok(OkResponse {
+                    message: "Shutting down".to_string(),
+                }));
+                let json = serde_json::to_string(&resp).unwrap_or_default();
                 // AsyncWrite is implemented for NamedPipeServer (owned)
                 let _ = server.write_all(json.as_bytes()).await;
                 let _ = server.write_all(b"\n").await;
-            });
-        }
+                signal_shutdown();
+                return;
+            }
+            IpcPayload::Status(_) => handle_status(start_time, registry),
+            IpcPayload::GetStartupStatus => handle_get_startup_status().await,
+            _ => IpcMessage::new(IpcPayload::Error(ErrorResponse {
+                message: "Unknown command".to_string(),
+            })),
+        };
+
+        let json = serde_json::to_string(&response).unwrap_or_default();
+        // AsyncWrite is implemented for NamedPipeServer (owned)
+        let _ = server.write_all(json.as_bytes()).await;
+        let _ = server.write_all(b"\n").await;
     }
 }
 

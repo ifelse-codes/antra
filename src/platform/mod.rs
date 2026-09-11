@@ -120,6 +120,114 @@ pub fn named_pipe_path() -> String {
     r"\\.\pipe\antra-daemon".to_string()
 }
 
+/// True when a PID refers to a live process.
+///
+/// Unix: signal-0 probe. Windows: `tasklist /FI "PID eq <pid>"` — avoids new
+/// native deps and works for any process the caller can see. Used by route
+/// restore (drop stale managed routes) and `--force` kill paths. Infrequent
+/// calls only; never on the proxy hot path.
+#[cfg(unix)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    // nix is only a unix dependency.
+    #[allow(clippy::useless_conversion)]
+    {
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+        kill(Pid::from_raw(pid as i32), None).is_ok()
+    }
+}
+
+/// Windows PID liveness via `tasklist`.
+#[cfg(windows)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    let Ok(output) = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        // If we cannot query, assume alive so callers don't delete routes
+        // or skip kills based on a probe failure.
+        return true;
+    };
+    if !output.status.success() {
+        return true;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .any(|line| tasklist_line_matches_pid(line, pid))
+}
+
+/// True when a `tasklist /FO CSV /NH` line reports `pid` in its PID column.
+///
+/// CSV lines look like: `"node.exe","1234","Console","1","45,000 K"`.
+/// Only the 2nd field (PID) is compared: matching any field false-positives
+/// on the session column (`"1"`) and on mem-usage fragments (`"45,000 K"`
+/// splits at the comma, yielding a bare `"45` fragment). Splitting on `","`
+/// (rather than `,`) keeps commas inside quoted fields from shifting columns.
+/// Pure parsing, compiled everywhere under `test` so CI covers it.
+#[cfg(any(test, windows))]
+fn tasklist_line_matches_pid(line: &str, pid: u32) -> bool {
+    let trimmed = line.trim();
+    let inner = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    inner
+        .split("\",\"")
+        .nth(1)
+        .is_some_and(|field| field == pid.to_string())
+}
+
+#[cfg(test)]
+mod tasklist_tests {
+    use super::*;
+
+    #[test]
+    fn pid_column_matches() {
+        assert!(tasklist_line_matches_pid(
+            r#""node.exe","1234","Console","1","45,000 K""#,
+            1234
+        ));
+    }
+
+    #[test]
+    fn session_column_does_not_match() {
+        // Session id "1" must not count as PID 1.
+        assert!(!tasklist_line_matches_pid(
+            r#""node.exe","1234","Console","1","45,000 K""#,
+            1
+        ));
+    }
+
+    #[test]
+    fn memory_fragment_does_not_match() {
+        // "45,000 K" splits at the comma — the "45 fragment is not a PID.
+        assert!(!tasklist_line_matches_pid(
+            r#""node.exe","1234","Console","1","45,000 K""#,
+            45
+        ));
+        assert!(!tasklist_line_matches_pid(
+            r#""node.exe","1234","Console","1","45,000 K""#,
+            45_000
+        ));
+    }
+
+    #[test]
+    fn image_name_and_header_lines_do_not_match() {
+        assert!(!tasklist_line_matches_pid(
+            r#""1234.exe","5678","Console","1","8,000 K""#,
+            1234
+        ));
+        assert!(!tasklist_line_matches_pid(
+            r#"INFO: No tasks are running which match the specified criteria."#,
+            1234
+        ));
+        assert!(!tasklist_line_matches_pid("", 1234));
+    }
+}
+
 // Platform-specific modules for future use
 #[cfg(target_os = "macos")]
 pub mod macos;

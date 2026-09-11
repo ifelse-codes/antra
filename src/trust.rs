@@ -371,11 +371,38 @@ pub fn install_ca() -> Result<()> {
                     }
                 }
             }
+            // Windows: fall back to CurrentUser scope (no elevation) instead
+            // of hard-failing. Per-user trust is enough for the current
+            // user's browsers.
+            #[cfg(target_os = "windows")]
+            {
+                eprintln!("  Trying CurrentUser store instead (no elevation)...");
+                match install_ca_windows_current_user(&ca.cert_pem) {
+                    Ok(()) => {
+                        println!(
+                            "{}",
+                            "  ✓ CA installed into CurrentUser Root store.".green()
+                        );
+                        println!(
+                            "    {}",
+                            "No elevation needed. HTTPS works for this Windows user.".dimmed()
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("    CurrentUser install failed: {e}");
+                    }
+                }
+            }
             eprintln!();
             eprintln!("    Try: {}", "sudo antra trust".bold());
             #[cfg(target_os = "macos")]
             {
                 eprintln!("    Or: {}", "antra trust --user-level".bold());
+            }
+            #[cfg(target_os = "windows")]
+            {
+                eprintln!("    Or run in an Administrator terminal and retry.");
             }
             anyhow::bail!("Elevation required to install CA")
         }
@@ -463,10 +490,47 @@ fn install_ca_noninteractive_system() -> Result<()> {
         return Ok(());
     }
 
+    // Windows: system scope needs elevation — fall back to CurrentUser
+    // (per-user Root) so non-admin auto-trust still yields warning-free
+    // HTTPS for the current user.
+    #[cfg(target_os = "windows")]
+    {
+        if install_ca_windows_current_user(&ca.cert_pem).is_ok() {
+            return Ok(());
+        }
+    }
+
     anyhow::bail!(
         "Could not install CA automatically. Try: {}",
         "sudo antra trust".bold()
     )
+}
+
+/// Install the Antra CA into the Windows CurrentUser Root store (no elevation).
+///
+/// Uses `certutil -user -addstore Root <ca.pem>`. The CA is local-only and
+/// reversible (`certutil -user -delstore Root "Antra Local CA"`). Best-effort:
+/// callers report the error with a manual retry hint.
+#[cfg(target_os = "windows")]
+fn install_ca_windows_current_user(ca_pem: &str) -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let cert_path = dir.path().join("antra-ca.pem");
+    std::fs::write(&cert_path, ca_pem)?;
+    let output = std::process::Command::new("certutil")
+        .args(["-user", "-addstore", "Root"])
+        .arg(&cert_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = format!(
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    anyhow::bail!("certutil CurrentUser install failed: {}", detail.trim())
 }
 
 /// Prompt, then install the Antra CA into the user's login keychain.
