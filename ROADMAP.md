@@ -12,7 +12,7 @@
 | 1 | Zero-Config `antra dev` | **NOW** | Detect `package.json` / `Cargo.toml` / `go.mod` / `pyproject.toml` etc. Infer app name, infer "dev" command, auto-assign port. Run `antra dev` bare with zero flags. Language-agnostic detection, not Node-only. | Large | Must support: Node (package.json), Rust (Cargo.toml), Go (go.mod), Python (pyproject.toml/package.json), Ruby (Gemfile), Elixir (mix.exs), PHP (composer.json). Fallback to directory name. |
 | 2 | PORT + HOST Env Injection | **NOW** | Always assign a free port (4000-4999). Inject `PORT`, `HOST=127.0.0.1`, `ANTRA_URL`, `ANTRA_DOMAIN` into child process. Parse command to detect framework and inject `--port` flag when framework ignores `PORT` env. | Medium | Frameworks to detect: Vite, Astro, React Router, Angular, Expo, React Native, Next.js (respects PORT), Express (respects PORT), Nuxt (respects PORT). |
 | 3 | `NODE_EXTRA_CA_CERTS` Injection | **NOW** | Set `NODE_EXTRA_CA_CERTS=<ca-cert-path>` in child process env so Node.js trusts the local CA automatically. No manual config needed. | Trivial | One env var. Check `certs/store.rs` for CA path. |
-| 4 | Fix Install URL | **NOW** | Website `https://antra.iifelse.com/install.sh` returns HTML. README has `install` (no `.sh`). Fix routing so the script is served correctly, or use GitHub raw URL. | Trivial | Check Cloudflare Worker routing config. |
+| 4 | Fix Install URL | **DONE** (v0.4.0) | `https://antra.iifelse.com/install.sh` serves shell script with `Content-Type: text/plain` (via `landing/_headers`). README + landing all canonical. | Trivial | Fixed 2026-09-23 — `_headers` pins MIME type; static file shadowed the earlier Pages Function. |
 | 5 | Fix `select_resolver` Duplication | **NOW** | `select_resolver` is copy-pasted 3x in `cli/mod.rs`, `cli/run.rs`, `cli/alias.rs` with inconsistent behavior. Consolidate into one function. | Small | DRY violation causing bugs. |
 
 ---
@@ -21,10 +21,10 @@
 
 | # | Feature | Status | Description | Effort | Notes |
 |---|---------|--------|-------------|--------|-------|
-| 6 | OS Service Install | **NEXT** | `antra service install\|status\|uninstall`. Register daemon as launchd (macOS), systemd (Linux), Task Scheduler (Windows). HTTPS URLs survive reboots. | Medium | Copy portless approach. Root-owned service for port 443 binding. |
-| 7 | Custom TLD + Multi-Segment | **NEXT** | `antra run --tld dev.example.com` for OAuth-friendly local URLs. Multi-segment TLDs that match production domain structure. Auto-sync `/etc/hosts` for non-`.localhost` TLDs. | Medium | Critical for OAuth redirect URIs (Google, Apple reject `.localhost`). |
-| 8 | Safari DNS Fix | **NEXT** | Auto-sync `/etc/hosts` for `.localhost` subdomains (Safari doesn't resolve them). Add `antra hosts sync\|clean` commands. | Small | portless does this by default. |
-| 9 | `antra prune` | **NEXT** | Kill orphaned dev servers from crashed sessions. Scan route table for dead PIDs, clean up. | Small | Simple: check PID alive, remove dead routes. |
+| 6 | OS Service Install | **DONE** | `antra service install\|status\|uninstall`. Registers daemon as launchd (macOS), systemd (Linux), sc.exe (Windows). | Medium | Shipped — verified present in CLI. Root-owned service for port 443 binding. |
+| 7 | Custom TLD + Multi-Segment | **DONE** | `antra run --tld dev.example.com` for OAuth-friendly local URLs. Multi-segment TLDs that match production domain structure. Auto-sync `/etc/hosts` for non-`.localhost` TLDs. | Medium | Shipped — `--tld <TLD>` + `--allow-custom-domain` verified in CLI; auto-hosts-sync included. |
+| 8 | Safari DNS Fix | **DONE** | Auto-sync `/etc/hosts` for `.localhost` subdomains (Safari doesn't resolve them). `antra hosts sync\|clean` commands. | Small | Shipped — `antra hosts sync/clean` verified in CLI. |
+| 9 | `antra prune` | **DONE** | Kill orphaned dev servers from crashed sessions. Scan route table for dead PIDs, clean up. | Small | Shipped — `antra prune` verified in CLI. |
 | 10 | `--force` Route Takeover | **NEXT** | Kill existing process occupying a port and take over its route. | Small | `antra run --domain myapp.localhost --force -- pnpm dev` |
 | 11 | Loop Detection | **NEXT** | Detect infinite proxy loops (frontend proxying to another antra app with wrong Host header). Return clear error with fix instructions. | Medium | portless returns `508 Loop Detected`. |
 

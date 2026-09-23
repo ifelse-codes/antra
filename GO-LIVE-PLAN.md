@@ -173,7 +173,7 @@ Work completed this session against the plan above. Canonical domain decision:
 
 | Plan item | Status | Note |
 |-----------|--------|------|
-| 1. GitHub release `v0.4.0` | ⏳ Pending | Not performed — out of session scope |
+| 1. GitHub release `v0.4.0` | ✅ **DONE 2026-09-23** | Tag pushed, built, verified, **published** as latest. See Session Progress below |
 | 2. Social posts (Tweet/HN/PH/Lobsters) | ⏳ Pending | Out of session scope |
 | 3. GitHub Discussions | ⏳ Pending | Out of session scope |
 | 4. Testimonials / "Used by" | ⏳ Pending | Needs real users |
@@ -214,11 +214,11 @@ Work completed this session against the plan above. Canonical domain decision:
 - `landing` now ships: `index.html` (analytics tag, v0.4.0 pin), `install.sh` (v0.4.0), `privacy.html`, `terms.html`, `_headers`.
 - **Fix applied:** the planned `landing/functions/install.sh.ts` Pages Function was **shadowed by the static `install.sh`** (Cloudflare Pages serves the static file for an exact-matching path, function never ran). Replaced with a `landing/_headers` file that pins `Content-Type: text/plain` on the static asset directly; removed the dead function.
 
-### v0.4.0 release drafted ✅ (pending publish decision)
+### v0.4.0 release PUBLISHED ✅
 
 - Version bumped `0.3.1 → 0.4.0` across `Cargo.toml`, `Cargo.lock`, `README.md`, `install.sh`, `landing/install.sh`, `landing/index.html`, issue-template placeholders.
 - `cargo build --release` clean → `antra 0.4.0`; full test suite passes (61 unit/integration + doc tests).
-- Tag `v0.4.0` pushed → `Release` workflow built 5 targets (macOS x2, Linux x2, Windows) and created a **draft** release `v0.4.0`.
+- Tag `v0.4.0` pushed → `Release` workflow built 5 targets (macOS x2, Linux x2, Windows) with checksums.
 - **Artifacts + checksums verified** — downloaded all 5 binaries, `shasum -a 256` matches every published `.sha256`:
   - `antra-aarch64-apple-darwin` `b7e47450…`
   - `antra-x86_64-apple-darwin` `4a201bcf…`
@@ -226,12 +226,36 @@ Work completed this session against the plan above. Canonical domain decision:
   - `antra-x86_64-linux` `5c7bdfba…`
   - `antra-x86_64-windows.exe` `05a59c40…`
 - **Homebrew Formula updated** to `v0.4.0` with the new per-target sha256 (committed + pushed).
-- **Remaining (decision):** publish the draft release (currently `isDraft: true`), then post Phase 2 launch announcements (tweets/HN/PH/Lobsters), enable GitHub Discussions, add testimonials, quick-start video, examples repo, CLI reference page.
+- **Published 2026-09-23 15:54 UTC** as `isDraft: false`, `prerelease: false`, marked **Latest**.
+  - Title: "Antra 0.4.0 — public launch" with full release notes (replaced the thin auto-generated body).
+  - URL: https://github.com/ifelse-codes/antra/releases/tag/v0.4.0
+  - 10 assets attached (5 binaries + 5 `.sha256`).
+  - **Note:** setting `--latest` on a draft is rejected by the GitHub API (`Latest release cannot be draft or prerelease`) — must edit notes/title first while still draft, then set `--draft=false --latest` in a second call, then re-verify.
 
-### Still open (unchanged scope)
+### Session close-out — 2026-09-23 (Go-Live / v0.4.0)
 
-- Buy/setup Plausible account + register domain (analytics won't collect until then).
-- Phase 2 launch comms: publish the draft release, tweets/HN/PH/Lobsters, GitHub Discussions, testimonials, quick-start video, examples repo, CLI reference page.
+**Publishing work DONE this session (all committed to `origin/main`):**
+
+| Commit | What |
+|--------|------|
+| `965bbab` | `release: bump to v0.4.0` — version bump across Cargo, README, install.sh, landing, issue templates |
+| `c2386f2` | `docs: pre-launch site content...` — privacy/terms, SECURITY.md, ISSUE_TEMPLATEs, GO-LIVE-PLAN.md, Pages function |
+| `0c6e38d` | `fix: set install.sh Content-Type text/plain via _headers` — **killed the shadowed Pages Function** |
+| `94f97c3` | `docs: record go-live site deploy & release in plan` |
+| `fb4a45a` | `chore: homebrew formula tracks v0.4.0 with release sha256` |
+| `7c8b5fa` | `docs: record v0.4.0 artifacts verification in go-live plan` |
+
+**Key finding worth remembering:** a Cloudflare Pages **Function does NOT run when a static file shares the exact same path** — the static asset wins and the Function is silently shadowed (no error). Use a `landing/_headers` file to set headers on static assets instead; it's simpler and reliable. The original `landing/functions/install.sh.ts` approach was dead code and was removed.
+
+**Verification evidence:**
+- `https://antra.iifelse.com/install.sh` → HTTP 200, `Content-Type: text/plain`, v0.4.0 content (verified with cache-busting `?<timestamp>` query param — the custom domain initially returned stale edge-cache `application/x-sh` until cache-bypass confirmed the new deploy).
+- `https://antra.iifelse.com/privacy.html` / `terms.html` → 200.
+- `antra 0.4.0` build + full test suite green.
+- Release `v0.4.0` live as latest with verified checksums.
+
+**Remaining after close-out (unchanged scope — decisions/actions outside release):**
+- **Plausible**: account does not exist; the tag is live but no account/domain registered → analytics won't collect until then.
+- Phase 2 launch comms: social posts (Tweet/HN/PH/Lobsters), GitHub Discussions, testimonials/"Used by", quick-start video, examples repo, CLI reference page.
 - Phase 3: community channel.
 
 ---
@@ -250,7 +274,7 @@ antra run --domain myapp.localhost -- pnpm dev
 
 Built in Rust. No cloud. No accounts. No telemetry.
 
-👉 https://antra.dev
+👉 https://antra.iifelse.com
  GitHub: https://github.com/ifelse-codes/antra
 ```
 
