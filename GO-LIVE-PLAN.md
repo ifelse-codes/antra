@@ -214,12 +214,19 @@ Work completed this session against the plan above. Canonical domain decision:
 - `landing` now ships: `index.html` (analytics tag, v0.4.0 pin), `install.sh` (v0.4.0), `privacy.html`, `terms.html`, `_headers`.
 - **Fix applied:** the planned `landing/functions/install.sh.ts` Pages Function was **shadowed by the static `install.sh`** (Cloudflare Pages serves the static file for an exact-matching path, function never ran). Replaced with a `landing/_headers` file that pins `Content-Type: text/plain` on the static asset directly; removed the dead function.
 
-### v0.4.0 release in progress 🚀
+### v0.4.0 release drafted ✅ (pending publish decision)
 
 - Version bumped `0.3.1 → 0.4.0` across `Cargo.toml`, `Cargo.lock`, `README.md`, `install.sh`, `landing/install.sh`, `landing/index.html`, issue-template placeholders.
-- `cargo build --release` clean → `antra 0.4.0`; full test suite passes.
-- Tag `v0.4.0` pushed → `Release` workflow building 5 targets (macOS x2, Linux x2, Windows) with checksums, then creates a **draft** release.
-- **Remaining:** verify artifacts after build; then update `Formula/antra.rb` with the new per-target sha256 + version, publish the draft release, and post launch announcements (Phase 2).
+- `cargo build --release` clean → `antra 0.4.0`; full test suite passes (61 unit/integration + doc tests).
+- Tag `v0.4.0` pushed → `Release` workflow built 5 targets (macOS x2, Linux x2, Windows) and created a **draft** release `v0.4.0`.
+- **Artifacts + checksums verified** — downloaded all 5 binaries, `shasum -a 256` matches every published `.sha256`:
+  - `antra-aarch64-apple-darwin` `b7e47450…`
+  - `antra-x86_64-apple-darwin` `4a201bcf…`
+  - `antra-aarch64-linux` `4c5072d9…`
+  - `antra-x86_64-linux` `5c7bdfba…`
+  - `antra-x86_64-windows.exe` `05a59c40…`
+- **Homebrew Formula updated** to `v0.4.0` with the new per-target sha256 (committed + pushed).
+- **Remaining (decision):** publish the draft release (currently `isDraft: true`), then post Phase 2 launch announcements (tweets/HN/PH/Lobsters), enable GitHub Discussions, add testimonials, quick-start video, examples repo, CLI reference page.
 
 ### Still open (unchanged scope)
 
