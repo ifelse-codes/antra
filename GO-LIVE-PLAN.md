@@ -8,7 +8,7 @@ Antra solves a real, painful problem: developers hate port-based URLs (`localhos
 
 ### Engineering Status: PRODUCTION-READY ✅
 
-- **Version:** 0.3.1
+- **Version:** 0.4.0
 - **All 10 phases complete** (CLI, proxy, HTTPS, WebSocket, CA trust, daemon/IPC, cross-platform)
 - **Tests:** 62/62 passing
 - **CI/CD:** GitHub Actions for macOS, Linux, Windows with clippy, fmt, tests
@@ -198,10 +198,34 @@ Work completed this session against the plan above. Canonical domain decision:
 
 ### Outstanding deployment steps (not part of repo changes)
 
-1. Redeploy landing site: `wrangler pages deploy . --project-name antra-landing` — publishes new `install.sh` (v0.3.1), Pages Function (`text/plain`), privacy/terms pages, analytics tag.
-2. Register `antra.iifelse.com` in the Plausible account for analytics to collect.
-3. After deploy, re-verify `/install.sh` returns `Content-Type: text/plain`.
-4. Re-deploy the `v0.4.0` release per Phase 2 launch checklist (not done here).
+1. ~~Redeploy landing site~~ ✅ **DONE 2026-09-23** — `wrangler pages deploy . --project-name antra-landing`. Publishes `install.sh` (v0.4.0), privacy/terms pages, analytics tag.
+2. ~~Register `antra.iifelse.com` in Plausible~~ ⏳ **Still requires account-side registration** — snippet is live (`data-domain="antra.iifelse.com"`), but no Plausible account/domain registered yet, so no data collects.
+3. ~~After deploy, re-verify `/install.sh` returns `Content-Type: text/plain`~~ ✅ **DONE 2026-09-23** — verified `text/plain`.
+4. ~~Re-deploy the `v0.4.0` release~~ ✅ **DONE 2026-09-23** — tag `v0.4.0` pushed, release workflow running; artifacts build cross-platform.
+
+---
+
+## Session Progress — 2026-09-23 (Go-Live / v0.4.0)
+
+### Site published ✅
+
+- Landing site redeployed to Cloudflare Pages (project `antra-landing`) on 2026-09-23.
+- `/install.sh` now returns `Content-Type: text/plain` **verified** on the custom domain.
+- `landing` now ships: `index.html` (analytics tag, v0.4.0 pin), `install.sh` (v0.4.0), `privacy.html`, `terms.html`, `_headers`.
+- **Fix applied:** the planned `landing/functions/install.sh.ts` Pages Function was **shadowed by the static `install.sh`** (Cloudflare Pages serves the static file for an exact-matching path, function never ran). Replaced with a `landing/_headers` file that pins `Content-Type: text/plain` on the static asset directly; removed the dead function.
+
+### v0.4.0 release in progress 🚀
+
+- Version bumped `0.3.1 → 0.4.0` across `Cargo.toml`, `Cargo.lock`, `README.md`, `install.sh`, `landing/install.sh`, `landing/index.html`, issue-template placeholders.
+- `cargo build --release` clean → `antra 0.4.0`; full test suite passes.
+- Tag `v0.4.0` pushed → `Release` workflow building 5 targets (macOS x2, Linux x2, Windows) with checksums, then creates a **draft** release.
+- **Remaining:** verify artifacts after build; then update `Formula/antra.rb` with the new per-target sha256 + version, publish the draft release, and post launch announcements (Phase 2).
+
+### Still open (unchanged scope)
+
+- Buy/setup Plausible account + register domain (analytics won't collect until then).
+- Phase 2 launch comms: publish the draft release, tweets/HN/PH/Lobsters, GitHub Discussions, testimonials, quick-start video, examples repo, CLI reference page.
+- Phase 3: community channel.
 
 ---
 
