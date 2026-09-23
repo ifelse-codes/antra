@@ -1,0 +1,30 @@
+name: Question
+description: Ask a question about installing or using Antra
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions are welcome. Please first check the [README](https://github.com/ifelse-codes/antra/blob/main/README.md) and [docs](https://github.com/ifelse-codes/antra/blob/main/docs/security.md).
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and what's unclear?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Antra version (if relevant)
+      placeholder: "0.4.0"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system (if relevant)
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Not applicable

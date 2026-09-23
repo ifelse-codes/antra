@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — Antra</title>
+<meta name="description" content="Antra privacy policy: no cloud, no accounts, no telemetry.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0A0A0C;--bg-card:#121217;--text-heading:#ECECEF;--text-body:#A4A4AE;--text-muted:#6A6A75;
+  --violet:#8B7CF6;--violet-bright:#B7AEFF;--line:rgba(255,255,255,0.075);--line-strong:rgba(255,255,255,0.14);
+  --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',monospace;
+  --max-w:760px;--pad:28px;
+}
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{color:var(--text-body);font-family:var(--font-body);font-size:15px;line-height:1.7;background-color:#07080c;background-image:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(139,124,246,0.12),transparent 70%)}
+a{color:var(--violet-bright);text-decoration:none}
+a:hover{text-decoration:underline}
+nav{position:sticky;top:0;z-index:100;background:rgba(10,10,12,0.72);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad);height:56px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--text-heading)}
+.nav-logo span{color:var(--violet)}
+.nav-links a{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);margin-left:24px}
+.nav-links a:hover{color:var(--text-heading)}
+.container{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad)}
+main{padding:56px 0 80px}
+h1{color:var(--text-heading);font-weight:600;font-size:1.9rem;letter-spacing:-0.03em;margin-bottom:8px}
+.updated{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.18em;margin-bottom:32px}
+h2{color:var(--text-heading);font-weight:600;font-size:1.15rem;letter-spacing:-0.01em;margin:32px 0 8px}
+p{margin:10px 0}
+em{color:var(--text-heading);font-style:normal}
+ul{margin:10px 0 10px 20px}
+li{margin:6px 0}
+footer{border-top:1px solid var(--line);padding:40px 0}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+.footer-left{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.22em}
+.footer-links a{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.14em;margin-left:20px}
+.footer-links a:hover{color:var(--text-heading)}
+@media(max-width:640px){.nav-links{display:none}}
+</style>
+</head>
+<body>
+
+<nav>
+<div class="nav-inner">
+  <a class="nav-logo" href="/"><span>a</span>ntra</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </div>
+</div>
+</nav>
+
+<main class="container">
+  <h1>Privacy Policy</h1>
+  <div class="updated">Last updated: September 22, 2026</div>
+
+  <p>Antra is a local development tool. It runs on your machine, does not require an account, and does not send your usage data anywhere by default.</p>
+
+  <h2>The short version</h2>
+  <p>We do not collect personal information. Antra has <em>no telemetry</em>, <em>no analytics in the CLI</em>, and <em>no cloud dependency</em>. Everything it does happens on your own computer.</p>
+
+  <h2>What Antra does locally</h2>
+  <ul>
+    <li>Generates a <em>local certificate authority</em> (CA) and per-app HTTPS certificates, stored on your machine.</li>
+    <li>Writes entries into your OS <em>hosts file</em> (e.g. <code>/etc/hosts</code>) so your apps resolve to clean local domains.</li>
+    <li>Runs a local reverse proxy that forwards requests to your own dev servers.</li>
+  </ul>
+  <p>All of the above stays on your device. Generated certificates and configuration live in your user directory and are never transmitted.</p>
+
+  <h2>This website (antra.iifelse.com)</h2>
+  <p>This website is hosted on Cloudflare Pages. We use lightweight, privacy-friendly analytics (no cookies, no cross-site tracking) to understand aggregate traffic like page views. The analytics provider does not receive your name, email, or browsing history from other sites.</p>
+
+  <h2>What we do NOT do</h2>
+  <ul>
+    <li>No accounts or sign-in of any kind.</li>
+    <li>No tracking cookies.</li>
+    <li>No selling or sharing of personal data.</li>
+    <li>No phone-home or crash-reporting from the CLI.</li>
+    <li>No server-side storage of your certificates, domains, or config.</li>
+  </ul>
+
+  <h2>Cloudflare Pages</h2>
+  <p>Cloudflare, our hosting provider, may process standard connection metadata (such as IP address and request logs) to operate and secure the service, in line with Cloudflare's privacy policy. This is limited to serving this website.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy? Open a GitHub issue at <a href="https://github.com/ifelse-codes/antra">github.com/ifelse-codes/antra</a> or review the open source code directly — Antra is fully auditable.</p>
+</main>
+
+<footer>
+<div class="container"><div class="footer-inner">
+  <div class="footer-left">Antra — Built in Rust. No cloud. No accounts. No telemetry.</div>
+  <div class="footer-links">
+    <a href="https://github.com/ifelse-codes/antra">GitHub</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </div>
+</div></div>
+</footer>
+
+</body>
+</html>

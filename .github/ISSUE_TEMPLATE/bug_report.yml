@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible problem with Antra
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much as you can.
+  - type: input
+    id: version
+    attributes:
+      label: Antra version
+      description: Output of `antra --version`
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: arch
+    attributes:
+      label: Architecture
+      description: Output of `uname -m`
+      placeholder: "arm64"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal command(s) that trigger the bug.
+      placeholder: |
+        1. antra run --domain myapp.localhost -- pnpm dev
+        2. open https://myapp.localhost
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output / logs
+      description: Paste `antra doctor`, error output, or debug logs.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for a duplicate
+          required: true
+        - label: I can reproduce this on the latest release

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service — Antra</title>
+<meta name="description" content="Antra terms of service: MIT-licensed open-source software for local development.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0A0A0C;--bg-card:#121217;--text-heading:#ECECEF;--text-body:#A4A4AE;--text-muted:#6A6A75;
+  --violet:#8B7CF6;--violet-bright:#B7AEFF;--line:rgba(255,255,255,0.075);--line-strong:rgba(255,255,255,0.14);
+  --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',monospace;
+  --max-w:760px;--pad:28px;
+}
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{color:var(--text-body);font-family:var(--font-body);font-size:15px;line-height:1.7;background-color:#07080c;background-image:radial-gradient(ellipse 90% 55% at 50% 0%,rgba(139,124,246,0.12),transparent 70%)}
+a{color:var(--violet-bright);text-decoration:none}
+a:hover{text-decoration:underline}
+nav{position:sticky;top:0;z-index:100;background:rgba(10,10,12,0.72);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad);height:56px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--text-heading)}
+.nav-logo span{color:var(--violet)}
+.nav-links a{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:0.22em;color:var(--text-muted);margin-left:24px}
+.nav-links a:hover{color:var(--text-heading)}
+.container{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad)}
+main{padding:56px 0 80px}
+h1{color:var(--text-heading);font-weight:600;font-size:1.9rem;letter-spacing:-0.03em;margin-bottom:8px}
+.updated{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.18em;margin-bottom:32px}
+h2{color:var(--text-heading);font-weight:600;font-size:1.15rem;letter-spacing:-0.01em;margin:32px 0 8px}
+p{margin:10px 0}
+em{color:var(--text-heading);font-style:normal}
+ul{margin:10px 0 10px 20px}
+li{margin:6px 0}
+footer{border-top:1px solid var(--line);padding:40px 0}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px}
+.footer-left{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.22em}
+.footer-links a{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.14em;margin-left:20px}
+.footer-links a:hover{color:var(--text-heading)}
+@media(max-width:640px){.nav-links{display:none}}
+</style>
+</head>
+<body>
+
+<nav>
+<div class="nav-inner">
+  <a class="nav-logo" href="/"><span>a</span>ntra</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </div>
+</div>
+</nav>
+
+<main class="container">
+  <h1>Terms of Service</h1>
+  <div class="updated">Last updated: September 22, 2026</div>
+
+  <p>By downloading, installing, or using Antra, you agree to these terms.</p>
+
+  <h2>License</h2>
+  <p>Antra is open-source software released under the <a href="https://github.com/ifelse-codes/antra/blob/main/LICENSE">MIT License</a>. You are free to use, modify, and distribute it in accordance with that license. These product terms apply to the website and the distribution of the software provided here.</p>
+
+  <h2>Use at your own risk</h2>
+  <p>Antra is provided "as is", without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability arising from, out of, or in connection with the software or its use.</p>
+
+  <h2>Local trust store &amp; hosts file</h2>
+  <p>Antra installs a local certificate authority and may modify your OS hosts file. These are local, user-visible changes made on your own machine and are reversible via <code>antra trust --remove</code> and <code>antra clean</code>. You are responsible for using Antra only on systems you control or are authorised to modify.</p>
+
+  <h2>No cloud service</h2>
+  <p>Antra does not provide a hosted service. It runs entirely on your machine — on your own infrastructure. This website only distributes the software and documentation.</p>
+
+  <h2>Changes to these terms</h2>
+  <p>We may update these terms from time to time. Material changes will be reflected by an updated revision date above. Continued use of the software or website after changes constitutes acceptance.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about these terms? Open an issue at <a href="https://github.com/ifelse-codes/antra">github.com/ifelse-codes/antra</a>.</p>
+</main>
+
+<footer>
+<div class="container"><div class="footer-inner">
+  <div class="footer-left">Antra — Built in Rust. No cloud. No accounts. No telemetry.</div>
+  <div class="footer-links">
+    <a href="https://github.com/ifelse-codes/antra">GitHub</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </div>
+</div></div>
+</footer>
+
+</body>
+</html>

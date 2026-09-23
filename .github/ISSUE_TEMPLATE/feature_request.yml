@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an enhancement or new capability for Antra
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing, check the [roadmap](https://github.com/ifelse-codes/antra/blob/main/ROADMAP.md) and existing issues to avoid duplicates.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the workflow or pain point you're hitting.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: How should it work? Include example commands if relevant.
+      placeholder: |
+        antra run --tld dev.example.com -- pnpm dev
+        → https://myapp.dev.example.com
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - New command / flag
+        - Platform support (OSX/Linux/Windows)
+        - Performance / reliability
+        - Documentation
+        - Other
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, or related issues.
