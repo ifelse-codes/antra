@@ -1,5 +1,31 @@
 # Antra Go-To-Market Plan
 
+---
+
+## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-24)
+
+**Current state: `v0.4.0` is PUBLISHED and the site is deployed.** Everything mechanical is done and committed to `origin/main`. The launch is technically live.
+
+**DONE & verified (see Session Progress — 2026-09-23 below for detail/evidence):**
+- Sites ✅ `antra.iifelse.com` deployed; `/install.sh` → `Content-Type: text/plain`, v0.4.0; privacy/terms 200.
+- Release ✅ `v0.4.0` published as Latest (assets + checksums verified); Homebrew Formula updated.
+- Docs ✅ `GO-LIVE-PLAN.md` + `ROADMAP.md` updated; working tree clean.
+
+**NEXT SESSION — remaining open work (all need a human; none block the above):**
+1. **Plausible analytics** — create account, register domain `antra.iifelse.com` (tag is live but no account → no data collects). This is the single highest-value item.
+2. **Phase 2 launch comms** — publish social posts (draft Tweet is in the "Asset Templates" section below): Tweet, Hacker News, Product Hunt, Lobsters; email dev newsletters.
+3. **GitHub Discussions** — enable on `ifelse-codes/antra`.
+4. **Social proof** — testimonials, "Used by" section, GitHub Stars count on landing.
+5. **DX assets** — 60-sec quick-start video, examples repo (Vite/Next/Express), CLI reference page at `antra.iifelse.com/cli`.
+6. **Phase 3** — Discord/Telegram community channel; roadmap NOW items.
+
+**Reusable gotchas to remember (they cost time this session):**
+- Cloudflare Pages **Function is silently shadowed by a static file at the same path** — use `landing/_headers` instead of a Function.
+- GitHub API **rejects `--latest` on a draft release** — edit notes/title first, then `--draft=false --latest` in a second call.
+- Custom-domain curl shows **stale edge cache** — verify with a cache-busting `?<timestamp>` query param after deploy.
+
+---
+
 ## Project Readiness Assessment
 
 ### Product-Market Fit: STRONG ✅
