@@ -34,12 +34,8 @@ fn show_status() -> Result<()> {
     let installed = trust::check_trust_status()?;
 
     if installed {
-        println!(
-            "  {} {}",
-            "✓".green(),
-            "CA is trusted by the system".green()
-        );
-    } else if trust::check_user_level_trust() {
+        println!("  {} {}", "✓".green(), "CA is trusted".green());
+    } else if trust::check_user_level_trust()? {
         println!(
             "  {} {}",
             "✓".green(),

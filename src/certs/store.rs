@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rustls::pki_types::CertificateDer;
 
 use crate::certs::ca::{self, CaCert};
@@ -35,6 +35,15 @@ impl CertStore {
     /// Get path to CA certificate PEM.
     fn ca_cert_path(&self) -> PathBuf {
         self.config_dir.join("ca.pem")
+    }
+
+    pub fn read_existing_ca_pem(config_dir: &Path) -> Result<Option<String>> {
+        let path = config_dir.join("ca.pem");
+        match std::fs::read_to_string(&path) {
+            Ok(pem) => Ok(Some(pem)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("Failed to read {}", path.display())),
+        }
     }
 
     /// Get path to CA private key PEM.
@@ -170,6 +179,22 @@ fn ensure_leaf_version(certs_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_read_existing_ca_pem_does_not_create_config_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = root.path().join("antra");
+
+        assert_eq!(CertStore::read_existing_ca_pem(&config_dir).unwrap(), None);
+        assert!(!config_dir.exists());
+
+        std::fs::create_dir(&config_dir).unwrap();
+        std::fs::write(config_dir.join("ca.pem"), "existing").unwrap();
+        assert_eq!(
+            CertStore::read_existing_ca_pem(&config_dir).unwrap(),
+            Some("existing".to_string())
+        );
+    }
 
     #[test]
     fn test_ensure_leaf_version_purges_stale_leafs() {

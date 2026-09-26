@@ -35,9 +35,17 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
             port,
             http_port,
             routes,
+            allow_custom_domain,
         } => {
             println!("ANTRA");
             println!();
+            for route in &routes {
+                let (domain, _) = parse_route(route)?;
+                crate::resolver::util::validate_domain_for_registration(
+                    &domain,
+                    allow_custom_domain,
+                )?;
+            }
 
             let config = DaemonConfig {
                 https_port: port,
@@ -94,6 +102,11 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 crate::platform::chown_to_invoking_user(&log_path);
 
                 let mut cmd = std::process::Command::new(exe);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+                    cmd.process_group(0);
+                }
                 cmd.arg("proxy")
                     .arg("start")
                     .arg("--port")
@@ -106,6 +119,9 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                     .stdin(std::process::Stdio::null());
 
                 // Add routes
+                if allow_custom_domain {
+                    cmd.arg("--allow-custom-domain");
+                }
                 for route in &routes {
                     cmd.arg("--route").arg(route);
                 }

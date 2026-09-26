@@ -17,9 +17,15 @@ pub struct DevArgs {
     #[arg(long)]
     pub port: Option<u16>,
 
+    #[arg(long, help = "Allow registering a custom domain")]
+    pub allow_custom_domain: bool,
+
     /// Skip the trust CA prompt on first run
     #[arg(long)]
     pub no_trust_prompt: bool,
+
+    #[arg(short, long, help = "Skip prompts and auto-install CA")]
+    pub yes: bool,
 }
 pub fn execute(args: DevArgs) -> Result<()> {
     // First try to load antra.toml
@@ -62,9 +68,9 @@ pub fn execute(args: DevArgs) -> Result<()> {
             domain: args.domain.unwrap_or_else(|| config.domain.clone()),
             port: args.port.or(config.server.port),
             tld: None,
-            allow_custom_domain: config.server.allow_custom_domain,
+            allow_custom_domain: args.allow_custom_domain || config.server.allow_custom_domain,
             no_trust_prompt: args.no_trust_prompt,
-            yes: false,
+            yes: args.yes,
             force: false,
             command: command_parts,
         };
@@ -120,9 +126,9 @@ pub fn execute(args: DevArgs) -> Result<()> {
         domain,
         port,
         tld: None,
-        allow_custom_domain: false,
+        allow_custom_domain: args.allow_custom_domain,
         no_trust_prompt: args.no_trust_prompt,
-        yes: false,
+        yes: args.yes,
         force: false,
         command: command_parts,
     };

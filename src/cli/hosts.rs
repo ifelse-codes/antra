@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use anyhow::Result;
 use colored::Colorize;
 
@@ -114,17 +116,11 @@ fn clean_hosts() -> Result<()> {
     println!("{}", "ANTRA HOSTS CLEAN".bold());
     println!();
 
-    // Read current hosts file
     let hosts_path = hosts::hosts_path();
     let content = hosts::read_hosts(&hosts_path)?;
+    let cleaned = hosts::remove_managed_block(&content)?;
 
-    let block = hosts::extract_managed_block(&content);
-    let entries: Vec<&str> = block
-        .lines()
-        .filter(|line| line.starts_with("127.0.0.1"))
-        .collect();
-
-    if entries.is_empty() {
+    if cleaned == content {
         println!(
             "  {} {}",
             "✓".green().bold(),
@@ -133,20 +129,21 @@ fn clean_hosts() -> Result<()> {
         return Ok(());
     }
 
-    println!("  Found {} managed entr(y/ies):", entries.len());
-    for entry in &entries {
-        println!("  {} {}", "→".dimmed(), entry.dimmed());
+    println!("  Antra-managed hosts entries will be removed.");
+    print!("  Continue? [y/N] ");
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let answer = input.trim();
+    if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
+        println!("  {}", "Cancelled.".dimmed());
+        return Ok(());
     }
-    println!();
 
-    // Clear the managed block
-    let content = hosts::replace_managed_block(&content, "");
-    hosts::write_hosts_atomic(&hosts_path, &content)?;
-
+    hosts::write_hosts_atomic(&hosts_path, &cleaned)?;
     println!(
-        "  {} Cleaned {} entr(y/ies) from {}",
+        "  {} Cleaned Antra-managed entries from {}",
         "✓".green().bold(),
-        entries.len(),
         hosts_path.display()
     );
     println!();

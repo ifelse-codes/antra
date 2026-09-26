@@ -1,10 +1,11 @@
+use std::io::{IsTerminal, Write};
+
 use anyhow::Result;
 use clap::Args;
 use colored::Colorize;
 use tokio::process::Command;
 
 use crate::config::global;
-use crate::resolver::util::select_resolver;
 use crate::util::output;
 use crate::util::port::{
     detect_port_from_command, find_free_port_in_range, inject_port_flag, is_port_available,
@@ -25,8 +26,7 @@ pub struct RunArgs {
     #[arg(long)]
     pub tld: Option<String>,
 
-    /// Allow custom (non-.localhost, non-.test) domains
-    #[arg(long)]
+    #[arg(long, help = "Approve a custom domain before registration")]
     pub allow_custom_domain: bool,
 
     /// Skip the trust CA prompt on first run
@@ -51,49 +51,115 @@ pub fn execute(args: RunArgs) -> Result<()> {
     rt.block_on(async { run_inner(args).await })
 }
 
-/// Auto-install the CA on first run (no prompt).
-/// Only runs once per install. Falls back gracefully if sudo is unavailable.
-async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
-    // Skip if user explicitly opted out
+#[derive(Debug, PartialEq, Eq)]
+enum TrustAnswer {
+    Yes,
+    No,
+}
+
+fn parse_trust_answer(input: &str) -> Option<TrustAnswer> {
+    let answer = input.trim();
+    if answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
+        Some(TrustAnswer::Yes)
+    } else if answer.eq_ignore_ascii_case("n") || answer.eq_ignore_ascii_case("no") {
+        Some(TrustAnswer::No)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn trust_hint() -> &'static str {
+    "antra trust --user-level"
+}
+
+#[cfg(not(target_os = "macos"))]
+fn trust_hint() -> &'static str {
+    "antra trust"
+}
+
+fn prompt_for_trust_consent() -> Option<TrustAnswer> {
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
+    let mut input = String::new();
+    loop {
+        print!("  {} ", "Install the Antra local CA? [Y/n]".yellow());
+        if stdout.flush().is_err() {
+            return None;
+        }
+        input.clear();
+        match stdin.read_line(&mut input) {
+            Ok(0) => {
+                println!();
+                println!("  No response received — skipping automatic CA install.");
+                println!("  Run {} to enable warning-free HTTPS", trust_hint().bold());
+                return None;
+            }
+            Ok(_) => match parse_trust_answer(&input) {
+                Some(answer) => return Some(answer),
+                None => println!("  Please answer y, yes, n, or no."),
+            },
+            Err(e) => {
+                println!("  Could not read the CA consent answer: {e}");
+                println!("  Run {} to install it manually", trust_hint().bold());
+                return None;
+            }
+        }
+    }
+}
+
+fn maybe_prompt_trust(no_trust_prompt: bool, yes: bool) {
     if no_trust_prompt {
         return;
     }
 
-    // Never block on OS auth dialogs without a terminal (background jobs,
-    // pipes, CI). The `security` prompt would hang forever with no TTY.
-    #[cfg(unix)]
-    let interactive = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
-    #[cfg(not(unix))]
-    let interactive = true;
-    // macOS-first hint: user-level trust needs no sudo.
-    #[cfg(target_os = "macos")]
-    let trust_hint = "antra trust --user-level";
-    #[cfg(not(target_os = "macos"))]
-    let trust_hint = "antra trust";
-    if !interactive {
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            println!();
+            println!(
+                "  {} Non-interactive session — skipping automatic CA install.",
+                "ℹ".cyan()
+            );
+            println!("  Run {} to enable warning-free HTTPS", trust_hint().bold());
+            println!();
+            return;
+        }
+
+        if global::was_trust_prompted() {
+            return;
+        }
+
+        if crate::trust::is_trusted_for_https() {
+            println!(
+                "  {} CA is already trusted — HTTPS ready",
+                "✓".green().bold()
+            );
+            let _ = global::mark_trust_prompted();
+            return;
+        }
+
         println!();
-        println!(
-            "  {} Non-interactive session — skipping automatic CA install.",
-            "ℹ".cyan()
-        );
-        println!("  Run {} to enable warning-free HTTPS", trust_hint.bold());
+        println!("  Antra needs a local CA certificate for warning-free HTTPS.");
+        println!("  It is local-only and can be removed with `antra trust --remove`.");
         println!();
-        return;
+        match prompt_for_trust_consent() {
+            Some(TrustAnswer::Yes) => {}
+            Some(TrustAnswer::No) => {
+                println!(
+                    "  {} Skipped. HTTPS will show certificate warnings.",
+                    "ℹ".cyan()
+                );
+                println!(
+                    "  Run {} when you want warning-free HTTPS",
+                    trust_hint().bold()
+                );
+                let _ = global::mark_trust_prompted();
+                return;
+            }
+            None => return,
+        }
     }
 
-    // Skip if already prompted before
-    if global::was_trust_prompted() {
-        return;
-    }
-
-    // Check if CA is already trusted (system store OR macOS login keychain —
-    // user-level trust alone gives warning-free HTTPS, no reinstall needed)
-    if crate::trust::is_trusted_for_https() {
-        let _ = global::mark_trust_prompted();
-        return;
-    }
-
-    // CA not trusted — auto-install it
     println!();
     println!("  {} Setting up HTTPS (one-time)...", "▸".cyan());
     match crate::trust::install_ca_noninteractive() {
@@ -105,7 +171,7 @@ async fn maybe_prompt_trust(no_trust_prompt: bool, _yes: bool) {
             println!("  {} Auto-trust failed: {e}", "⚠".yellow());
             println!(
                 "  Run {} to install the CA, then re-run your command",
-                trust_hint.bold()
+                trust_hint().bold()
             );
         }
     }
@@ -129,9 +195,6 @@ async fn ensure_daemon() -> Result<()> {
 async fn run_inner(args: RunArgs) -> Result<()> {
     output::print_header();
 
-    // 0. Auto-trust prompt (first run only)
-    maybe_prompt_trust(args.no_trust_prompt, args.yes).await;
-
     // 0b. Handle custom TLD + fold case (DNS is case-insensitive; browsers
     // lowercase, so MyApp.localhost and myapp.localhost must be one route).
     let domain = if let Some(tld) = &args.tld {
@@ -142,6 +205,10 @@ async fn run_inner(args: RunArgs) -> Result<()> {
         args.domain.clone()
     }
     .to_ascii_lowercase();
+    let resolver =
+        crate::resolver::util::select_resolver_for_registration(&domain, args.allow_custom_domain)?;
+
+    maybe_prompt_trust(args.no_trust_prompt, args.yes);
 
     // 1. Determine port
     let port = match args.port {
@@ -261,13 +328,6 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     }
 
     // 2. Resolve domain to 127.0.0.1 (hosts file or no-op).
-    // --allow-custom-domain bypasses the known-public-domain blocklist.
-    let resolver: Box<dyn crate::resolver::traits::DomainResolver> =
-        if args.allow_custom_domain && crate::resolver::util::is_custom_domain(&domain) {
-            Box::new(crate::resolver::custom::CustomResolver::new().with_allow_public(true))
-        } else {
-            select_resolver(&domain)?
-        };
     resolver.register(&domain)?;
     output::print_success(&format!("Domain resolved: {}", domain));
 
@@ -565,6 +625,8 @@ fn build_spawn_command(resolved: &std::path::Path, child_args: &[String]) -> Com
     }
     let mut cmd = Command::new(resolved);
     cmd.args(child_args);
+    #[cfg(unix)]
+    cmd.process_group(0);
     cmd
 }
 
@@ -608,4 +670,32 @@ fn is_pid_alive(pid: u32) -> bool {
 #[allow(dead_code)]
 fn is_pid_alive(pid: u32) -> bool {
     crate::platform::is_pid_alive(pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trust_answer_parser_defaults_to_yes() {
+        assert_eq!(parse_trust_answer(""), Some(TrustAnswer::Yes));
+        assert_eq!(parse_trust_answer("  \t"), Some(TrustAnswer::Yes));
+    }
+
+    #[test]
+    fn trust_answer_parser_accepts_explicit_answers() {
+        for input in ["y", "Y", "yes", "YES"] {
+            assert_eq!(parse_trust_answer(input), Some(TrustAnswer::Yes));
+        }
+        for input in ["n", "N", "no", "NO"] {
+            assert_eq!(parse_trust_answer(input), Some(TrustAnswer::No));
+        }
+    }
+
+    #[test]
+    fn trust_answer_parser_rejects_invalid_answers() {
+        for input in ["maybe", "ye", "nope", "1", "0"] {
+            assert_eq!(parse_trust_answer(input), None);
+        }
+    }
 }

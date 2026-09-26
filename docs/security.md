@@ -18,22 +18,24 @@ Antra runs locally and modifies system configuration (hosts file, trust store). 
 | `*.localhost`, `localhost` | ✅ Always safe — browsers resolve natively |
 | `*.test` | ✅ Always safe — IANA reserved |
 | `*.internal`, `*.local` | ⚠️ Warn but allow |
-| Known public domains (google.com, github.com, etc.) | ❌ Reject unless `--allow-custom-domain` |
-| Any other custom domain | ⚠️ Require explicit `--allow-custom-domain` flag |
+| Public or other custom domains | ⚠️ Require explicit `--allow-custom-domain` approval |
+
+A custom-domain approval is a warning boundary, not a public-domain allowlist. Antra warns when an approved domain uses a public-looking TLD and never edits the hosts file before approval.
 
 ### CA Key Safety
 
 - Private key stored at `~/.config/antra/ca-key.pem` with `0o600` permissions
 - Never logged, never printed, never committed to git
 - Never transmitted over IPC
-- `antra clean` securely deletes the key
+- `antra clean` removes the local key after trust and hosts cleanup succeeds
 
 ### Hosts File Safety
 
 - Only modify entries within `# BEGIN ANTRA MANAGED HOSTS` block
 - Never overwrite unrelated entries
-- Atomic write (write to temp file, then rename)
-- Handle concurrent modification by re-reading before write
+- Writes use a temporary file and replacement path
+- Unix replacement is atomic; Windows replacement is best-effort
+- `antra clean` verifies the managed block before and after removal
 
 ### Process Safety
 
@@ -48,8 +50,10 @@ Installing a custom root CA is classified as **MITRE ATT&CK T1553.004** (Subvert
 
 1. **Always prompt** before modifying the system trust store
 2. **Explain** what will happen and why
-3. **Provide** a way to undo (`antra trust --remove`)
+3. **Provide** a way to undo (`antra trust --remove` or `antra clean`)
 4. **Never** install silently or without consent
+
+`antra run` and `antra dev` show a first-run `[Y/n]` prompt; Enter accepts. `--yes` is an explicit non-interactive opt-in, and `--no-trust-prompt` skips the flow for that invocation. `antra clean` removes the exact current CA from applicable system and user trust stores before deleting local state.
 
 ### Platform Behavior
 
@@ -57,7 +61,7 @@ Installing a custom root CA is classified as **MITRE ATT&CK T1553.004** (Subvert
 |----------|-----------------|-------|
 | macOS (Big Sur+) | GUI authentication dialog | Root alone is insufficient |
 | macOS (pre-Big Sur) | Root access suffices | Headless install possible |
-| Windows (user store) | Confirmation dialog | Can suppress with `-f` |
+| Windows (user store) | Confirmation dialog | Can suppress with `--yes` |
 | Windows (machine store) | Admin elevation | Triggers security software alerts |
 | Linux | Root access suffices | No GUI dialog exists |
 
@@ -66,6 +70,6 @@ Installing a custom root CA is classified as **MITRE ATT&CK T1553.004** (Subvert
 - ❌ No cloud telemetry
 - ❌ No network calls from core proxy
 - ❌ No automatic system trust modification without consent
-- ❌ No silent hosts file changes
+- ❌ No custom-domain hosts changes without explicit approval
 - ❌ No credential logging
 - ❌ No private key exposure

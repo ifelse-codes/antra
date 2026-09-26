@@ -2,40 +2,65 @@ use anyhow::Result;
 
 use crate::resolver::traits::DomainResolver;
 
-/// Select the appropriate resolver based on the domain suffix.
-///
-/// - `.localhost` domains use `LocalhostResolver` (browser-native, no hosts file)
-/// - `.test` domains use `HostsResolver` (managed hosts block)
-/// - `.internal`/`.local` domains use `HostsResolver` with a warning
-/// - Custom domains use `CustomResolver` (validates against public domain blocklist)
+const RISKY_PUBLIC_TLDS: &[&str] = &["com", "org", "net", "io", "dev", "app"];
+
 pub fn select_resolver(domain: &str) -> Result<Box<dyn DomainResolver>> {
-    // Validate shape FIRST so malformed input (e.g. "not a domain") fails
-    // fast with a clear error instead of reaching privileged writes like
-    // /etc/hosts and surfacing as a misleading "needs sudo" hint.
     validate_domain_shape(domain)?;
+    let domain = domain.to_ascii_lowercase();
     if domain == "localhost" || domain.ends_with(".localhost") {
         Ok(Box::new(crate::resolver::localhost::LocalhostResolver))
-    } else if domain.ends_with(".test") {
-        Ok(Box::new(crate::resolver::test::HostsResolver::new()))
-    } else if domain.ends_with(".internal") || domain.ends_with(".local") {
-        // Warn but allow
-        tracing::warn!(%domain, "Using .internal/.local domain — ensure DNS resolves to 127.0.0.1");
+    } else if domain.ends_with(".test")
+        || domain.ends_with(".internal")
+        || domain.ends_with(".local")
+    {
         Ok(Box::new(crate::resolver::test::HostsResolver::new()))
     } else {
-        // Custom domain — validation happens inside CustomResolver
         Ok(Box::new(crate::resolver::custom::CustomResolver::new()))
     }
 }
 
-/// True when the domain falls through to `CustomResolver` (i.e. not
-/// `.localhost` / `.test` / `.internal` / `.local`). Used to gate
-/// `--allow-custom-domain` overrides.
 pub fn is_custom_domain(domain: &str) -> bool {
+    let domain = domain.to_ascii_lowercase();
     !(domain == "localhost"
         || domain.ends_with(".localhost")
         || domain.ends_with(".test")
         || domain.ends_with(".internal")
         || domain.ends_with(".local"))
+}
+
+pub fn validate_domain_for_registration(domain: &str, allow_custom_domain: bool) -> Result<()> {
+    validate_domain_shape(domain)?;
+    let domain = domain.to_ascii_lowercase();
+    if domain == "localhost" || domain.ends_with(".localhost") || domain.ends_with(".test") {
+        return Ok(());
+    }
+    if domain.ends_with(".internal") || domain.ends_with(".local") {
+        tracing::warn!(%domain, "Domain uses a collision-prone local TLD");
+        return Ok(());
+    }
+    if !allow_custom_domain {
+        anyhow::bail!("Custom domain '{domain}' requires explicit --allow-custom-domain approval");
+    }
+    if let Some(tld) = domain.rsplit('.').next() {
+        if RISKY_PUBLIC_TLDS.contains(&tld) {
+            tracing::warn!(%domain, %tld, "Domain uses a public TLD. Ensure this is intentional");
+        }
+    }
+    Ok(())
+}
+
+pub fn select_resolver_for_registration(
+    domain: &str,
+    allow_custom_domain: bool,
+) -> Result<Box<dyn DomainResolver>> {
+    validate_domain_for_registration(domain, allow_custom_domain)?;
+    if is_custom_domain(domain) {
+        Ok(Box::new(
+            crate::resolver::custom::CustomResolver::new().with_custom_domain_allowed(true),
+        ))
+    } else {
+        select_resolver(domain)
+    }
 }
 
 /// Validate that a string is shaped like a DNS hostname: dot-separated
@@ -136,5 +161,37 @@ mod tests {
         // Previously fell through to CustomResolver and attempted an
         // /etc/hosts write, surfacing as a bogus "needs sudo" hint.
         assert!(select_resolver("not a domain").is_err());
+    }
+
+    #[test]
+    fn test_registration_policy_allows_automatic_suffixes_without_approval() {
+        for domain in [
+            "localhost",
+            "app.localhost",
+            "api.app.localhost",
+            "app.test",
+            "app.internal",
+            "app.local",
+        ] {
+            assert!(
+                validate_domain_for_registration(domain, false).is_ok(),
+                "{domain} should be automatic"
+            );
+        }
+    }
+
+    #[test]
+    fn test_registration_policy_rejects_custom_and_public_domains_without_approval() {
+        for domain in ["api.example", "preview.customer.dev", "github.com"] {
+            let error = validate_domain_for_registration(domain, false).unwrap_err();
+            assert!(error.to_string().contains("--allow-custom-domain"));
+        }
+    }
+
+    #[test]
+    fn test_registration_policy_accepts_custom_and_public_domains_with_approval() {
+        for domain in ["api.example", "preview.customer.dev", "github.com"] {
+            assert!(validate_domain_for_registration(domain, true).is_ok());
+        }
     }
 }

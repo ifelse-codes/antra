@@ -156,8 +156,7 @@ pub enum Commands {
         /// Target port (e.g., 8080)
         port: u16,
 
-        /// Allow known-public custom domains (not recommended)
-        #[arg(long)]
+        #[arg(long, help = "Allow registering a custom domain")]
         allow_custom_domain: bool,
     },
 
@@ -204,6 +203,9 @@ pub enum ProxyCommands {
         /// Static route in domain:port format (can be repeated)
         #[arg(long = "route", action = clap::ArgAction::Append)]
         routes: Vec<String>,
+
+        #[arg(long, help = "Allow registering custom domains in routes")]
+        allow_custom_domain: bool,
     },
 
     /// Stop the proxy daemon
@@ -234,6 +236,11 @@ impl Cli {
                 port,
                 allow_custom_domain,
             } => {
+                let domain = domain.to_ascii_lowercase();
+                crate::resolver::util::validate_domain_for_registration(
+                    &domain,
+                    allow_custom_domain,
+                )?;
                 let _ = ensure_daemon();
                 alias::execute(&domain, port, allow_custom_domain)
             }

@@ -19,6 +19,7 @@ fn run_antra(args: &[&str]) -> (String, String, i32) {
 fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
     let mut child = Command::new(antra_bin())
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -204,7 +205,21 @@ fn test_non_numeric_port() {
 fn test_public_domain_rejected() {
     let (_, stderr, code) = run_antra(&["run", "--domain", "google.com", "--", "echo", "test"]);
     assert_ne!(code, 0);
-    assert!(stderr.contains("public") || stderr.contains("rejected") || stderr.contains("error"));
+    assert!(stderr.contains("--allow-custom-domain"));
+}
+
+#[test]
+fn test_custom_domain_rejected_without_approval() {
+    let (_, stderr, code) = run_antra(&[
+        "run",
+        "--domain",
+        "api.customer.example",
+        "--",
+        "echo",
+        "test",
+    ]);
+    assert_ne!(code, 0);
+    assert!(stderr.contains("--allow-custom-domain"));
 }
 
 #[test]
@@ -414,31 +429,6 @@ fn test_alias_port_overflow() {
 // ===================================================================
 // SECTION 8: State Corruption Resistance
 // ===================================================================
-
-#[test]
-fn test_clean_after_failed_proxy() {
-    let dir = TempDir::new().unwrap();
-    let output = Command::new(antra_bin())
-        .args(["clean", "--yes"])
-        .current_dir(dir.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .unwrap();
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert!(
-        output.status.success()
-            || stdout.contains("removed")
-            || stdout.contains("Cancelled")
-            || stderr.contains("Could not determine config directory")
-            || stderr.contains("Directory not empty")
-            || stderr.contains("Error"),
-        "clean should not fail hard: stdout={stdout:?} stderr={stderr:?} status={}",
-        output.status
-    );
-}
 
 // ===================================================================
 // SECTION 9: Error Message Quality

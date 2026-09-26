@@ -446,6 +446,20 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     Ok(())
 }
 
+fn wait_for_daemon_exit(timeout: std::time::Duration) -> Option<u32> {
+    let start = std::time::Instant::now();
+    loop {
+        let pid = crate::ipc::server::read_daemon_pid()?;
+        if !crate::platform::is_pid_alive(pid) {
+            return None;
+        }
+        if start.elapsed() >= timeout {
+            return Some(pid);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// Stop a running daemon
 pub fn stop_daemon() -> Result<()> {
     let pid_file = pid_path();
@@ -458,9 +472,9 @@ pub fn stop_daemon() -> Result<()> {
         // No socket — but the daemon may still be alive without one
         // (socketless). Only reap the pid file when its PID is dead;
         // never delete a live daemon's last proof of existence.
-        if let Some(pid) = crate::ipc::server::is_daemon_pid_alive() {
+        if let Some(pid) = wait_for_daemon_exit(std::time::Duration::from_secs(2)) {
             anyhow::bail!(
-                "Daemon (PID {pid}) seems to be running without a socket. Stop it with `kill {pid}`, then retry."
+                "Daemon (PID {pid}) seems to be running without a socket. Stop it, then retry."
             );
         }
         let _ = std::fs::remove_file(&pid_file);
@@ -469,6 +483,11 @@ pub fn stop_daemon() -> Result<()> {
 
     #[cfg(windows)]
     if !crate::ipc::client::is_daemon_running() {
+        if let Some(pid) = wait_for_daemon_exit(std::time::Duration::from_secs(2)) {
+            anyhow::bail!(
+                "Daemon (PID {pid}) seems to be running without IPC. Stop it, then retry."
+            );
+        }
         let _ = std::fs::remove_file(&pid_file);
         anyhow::bail!("Daemon is not running");
     }
@@ -476,8 +495,9 @@ pub fn stop_daemon() -> Result<()> {
     // Send shutdown command
     match crate::ipc::client::send_command_sync(crate::ipc::protocol::IpcPayload::Shutdown) {
         Ok(_) => {
-            // Wait a moment for daemon to exit
-            std::thread::sleep(Duration::from_millis(500));
+            if let Some(pid) = wait_for_daemon_exit(std::time::Duration::from_secs(2)) {
+                anyhow::bail!("Daemon (PID {pid}) did not stop within 2 seconds");
+            }
 
             // Clean up files
             #[cfg(unix)]
