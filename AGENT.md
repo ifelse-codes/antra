@@ -29,6 +29,37 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
+## Session Handoff — 2026-09-25
+
+**Resume from `GO-LIVE-PLAN.md` first.** The published product is `v0.4.0`; security hardening and acceptance changes are currently an **uncommitted working-tree change**.
+
+**Verified in the latest session:**
+- `cargo fmt`, `cargo check --all-targets`, Clippy, release build, doc tests, and 299 test executions passed.
+- Real Chrome + Vite HMR passed through the proxy, including proxy-origin WebSocket, Vite update, and Ctrl+C route/process cleanup.
+- CA consent was tested with a real PTY: `n` skips trust; Enter accepts and installs the disposable CA.
+- Disposable macOS trust install/removal passed; the pre-existing Keychain certificate was unchanged.
+- Unapproved custom domains are rejected by `run`, `add route`, `alias`, and `proxy start --route` before daemon/hosts mutation.
+
+**Do not redo blindly:**
+- Do not run `antra clean` against the real `/etc/hosts`; it contains active Antra-managed entries.
+- Run Rust tests with a disposable `HOME`, while preserving `CARGO_HOME` and `RUSTUP_HOME`.
+- Firefox was not tested. Windows hermetic CI is configured, but local cross-compilation lacks `x86_64-w64-mingw32-gcc`.
+- No commit, tag, release, or deployment has been made for the hardening changes.
+
+**Reproduce the local gate:**
+```bash
+cargo fmt --all -- --check
+cargo check --all-targets
+cargo clippy --all-targets -- -D warnings
+TEST_HOME=$(mktemp -d /tmp/antra-test.XXXXXX)
+HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustup cargo test --all-targets -- --test-threads=4
+rm -rf "$TEST_HOME"
+```
+
+**Next actions:** run Windows CI on GitHub, complete the formal Chrome/Firefox MVP checklist after explicit CA trust approval, then review/tag/release the hardening changes. Later GTM work remains in `GO-LIVE-PLAN.md`.
+
+---
+
 ## Project Status
 
 | Phase | Name | Status | Notes |
@@ -45,7 +76,7 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** All phases (0-10) complete. Antra is fully built with cross-platform support, CI/CD, and release workflow.
+**Current state:** Phases (0-10) are implemented and `v0.4.0` is published. The latest security hardening and acceptance changes are verified locally but remain uncommitted; Windows runtime CI and the formal browser checklist are still open.
 
 ### Landing Page
 

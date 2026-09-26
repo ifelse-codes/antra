@@ -1,15 +1,20 @@
 use std::io::Write;
+use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::Colorize;
 
 use crate::ipc::client::{is_daemon_running, send_command_sync};
 use crate::ipc::protocol::IpcPayload;
+use crate::resolver::hosts;
+use crate::trust;
 
 pub fn execute(yes: bool) -> Result<()> {
     println!("{}", "ANTRA CLEAN".bold());
     println!();
-    println!("  This will remove:");
+    println!("  This will permanently remove:");
+    println!("    • System trust entries for the current Antra CA");
+    println!("    • The complete Antra-managed hosts block");
     println!("    • Root CA certificate and key");
     println!("    • All cached leaf certificates");
     println!("    • Saved static aliases");
@@ -17,7 +22,6 @@ pub fn execute(yes: bool) -> Result<()> {
     println!();
 
     if !yes {
-        // Confirmation prompt
         print!("  Continue? [y/N] ");
         std::io::stdout().flush()?;
 
@@ -33,72 +37,32 @@ pub fn execute(yes: bool) -> Result<()> {
     }
 
     println!();
+    print!("  Stopping daemon... ");
+    std::io::stdout().flush()?;
+    stop_daemon()?;
+    println!("{}", "done".green().bold());
 
-    // Stop daemon first if running
-    if is_daemon_running() {
-        print!("  Stopping daemon... ");
-        match send_command_sync(IpcPayload::Shutdown) {
-            Ok(_) => {
-                println!("{}", "✓".green().bold());
-                // Wait for daemon to exit
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-            Err(_) => {
-                // IPC failed — only force-clean when the recorded daemon is
-                // actually dead. SIGTERM a live-but-unresponsive daemon and
-                // wait; never delete the socket of a process we couldn't stop
-                // (that orphans it: ports held, invisible, next start steals
-                // the socket).
-                #[cfg(unix)]
-                if let Some(pid) = crate::ipc::server::is_daemon_pid_alive() {
-                    println!("{}", "unresponsive, signalling...".yellow().bold());
-                    signal_pid(pid);
-                    let mut waited = 0;
-                    while crate::ipc::server::is_daemon_pid_alive().is_some() && waited < 20 {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                        waited += 1;
-                    }
-                    if crate::ipc::server::is_daemon_pid_alive().is_some() {
-                        anyhow::bail!(
-                            "Daemon (PID {pid}) is running but will not stop. Stop it with `kill {pid}`, then retry — refusing to wipe state under a live daemon."
-                        );
-                    }
-                }
-                println!("{}", "✓".green().bold());
-            }
-        }
-    } else {
-        // No reachable socket — still refuse to wipe under a live daemon
-        // that merely lost its socket file.
-        #[cfg(unix)]
-        if let Some(pid) = crate::ipc::server::is_daemon_pid_alive() {
-            anyhow::bail!(
-                "Daemon (PID {pid}) seems to be running without a socket. Stop it with `kill {pid}`, then retry — refusing to wipe state under a live daemon."
-            );
-        }
-    }
+    print!("  Removing trusted CA... ");
+    std::io::stdout().flush()?;
+    trust::remove_ca_noninteractive()
+        .context("Trust removal failed; local config and CA were kept for retry")?;
+    println!("{}", "done".green().bold());
 
-    // Remove daemon files
-    print!("  Removing daemon files... ");
-    #[cfg(unix)]
-    {
-        let sock = crate::ipc::server::socket_path();
-        let _ = std::fs::remove_file(&sock);
-    }
-    let pid = crate::ipc::server::pid_path();
-    let _ = std::fs::remove_file(&pid);
-    println!("{}", "✓".green().bold());
+    print!("  Removing Antra-managed hosts block... ");
+    std::io::stdout().flush()?;
+    remove_managed_hosts()
+        .context("Managed hosts removal failed; local config and CA were kept for retry")?;
+    println!("{}", "done".green().bold());
 
-    // Remove certificates
-    print!("  Removing certificates... ");
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
-        .join("antra");
+    print!("  Removing runtime state... ");
+    std::io::stdout().flush()?;
+    remove_runtime_state().context("Failed to remove Antra runtime state")?;
+    println!("{}", "done".green().bold());
 
-    if config_dir.exists() {
-        let _ = std::fs::remove_dir_all(&config_dir);
-    }
-    println!("{}", "✓".green().bold());
+    print!("  Removing local config and certificates... ");
+    std::io::stdout().flush()?;
+    remove_local_state().context("Failed to remove Antra local state")?;
+    println!("{}", "done".green().bold());
 
     println!();
     println!("  {}", "All Antra state removed.".green().bold());
@@ -107,12 +71,143 @@ pub fn execute(yes: bool) -> Result<()> {
     Ok(())
 }
 
-/// Best-effort graceful shutdown of a PID (unix). The daemon handles
-/// SIGTERM by unregistering nothing (managed routes die with it) and
-/// removing its own socket + pid file.
-#[cfg(unix)]
-fn signal_pid(pid: u32) {
-    use nix::sys::signal::{kill, Signal};
-    use nix::unistd::Pid;
-    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+fn stop_daemon() -> Result<()> {
+    if !is_daemon_running() {
+        if let Some(pid) = recorded_live_daemon_pid() {
+            anyhow::bail!(
+                "Daemon (PID {pid}) seems to be running without a socket. Stop it, then retry — refusing to remove state under a live daemon."
+            );
+        }
+        return Ok(());
+    }
+
+    send_command_sync(IpcPayload::Shutdown)
+        .context("Failed to stop daemon; refusing to remove Antra state")?;
+    ensure_daemon_stopped()
+}
+
+fn recorded_live_daemon_pid() -> Option<u32> {
+    crate::ipc::server::read_daemon_pid().filter(|pid| crate::platform::is_pid_alive(*pid))
+}
+
+fn ensure_daemon_stopped() -> Result<()> {
+    for _ in 0..50 {
+        if recorded_live_daemon_pid().is_none() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if let Some(pid) = recorded_live_daemon_pid() {
+        anyhow::bail!(
+            "Daemon (PID {pid}) is still running. Stop it, then retry — refusing to remove state under a live daemon."
+        );
+    }
+    Ok(())
+}
+
+fn remove_managed_hosts() -> Result<()> {
+    remove_managed_hosts_at(&hosts::hosts_path())
+}
+
+fn remove_managed_hosts_at(path: &Path) -> Result<()> {
+    let content = match hosts::read_hosts(path) {
+        Ok(content) => content,
+        Err(e)
+            if e.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(())
+        }
+        Err(e) => return Err(e).with_context(|| format!("Failed to read {}", path.display())),
+    };
+
+    let cleaned = hosts::remove_managed_block(&content)
+        .with_context(|| format!("Invalid Antra-managed block in {}", path.display()))?;
+    if cleaned == content {
+        return Ok(());
+    }
+
+    hosts::write_hosts_atomic(path, &cleaned)
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let verified =
+        hosts::read_hosts(path).with_context(|| format!("Failed to verify {}", path.display()))?;
+    let verified_clean = hosts::remove_managed_block(&verified)
+        .with_context(|| format!("Invalid Antra-managed block in {}", path.display()))?;
+    if verified_clean != verified {
+        anyhow::bail!("Antra-managed hosts block remains in {}", path.display());
+    }
+    Ok(())
+}
+
+fn remove_runtime_state() -> Result<()> {
+    #[cfg(unix)]
+    remove_file_if_exists(&crate::ipc::server::socket_path(), "daemon socket")?;
+    remove_file_if_exists(&crate::ipc::server::pid_path(), "daemon PID file")
+}
+
+fn remove_local_state() -> Result<()> {
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
+        .join("antra");
+    remove_dir_all_if_exists(&config_dir, "Antra config directory")
+}
+
+fn remove_file_if_exists(path: &Path, description: &str) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to remove {description} {}", path.display()))
+        }
+    }
+}
+
+fn remove_dir_all_if_exists(path: &Path, description: &str) -> Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            Err(e).with_context(|| format!("Failed to remove {description} {}", path.display()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_hosts_cleanup_preserves_unmanaged_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hosts");
+        std::fs::write(
+            &path,
+            "127.0.0.1 localhost\n# BEGIN ANTRA MANAGED HOSTS\n127.0.0.1 app.test\n# END ANTRA MANAGED HOSTS\n# keep\n",
+        )
+        .unwrap();
+
+        remove_managed_hosts_at(&path).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "127.0.0.1 localhost\n# keep\n"
+        );
+    }
+
+    #[test]
+    fn managed_hosts_cleanup_missing_file_is_success() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(remove_managed_hosts_at(&dir.path().join("hosts")).is_ok());
+    }
+
+    #[test]
+    fn managed_hosts_cleanup_rejects_malformed_block_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hosts");
+        let content = "# END ANTRA MANAGED HOSTS\n# BEGIN ANTRA MANAGED HOSTS\n";
+        std::fs::write(&path, content).unwrap();
+
+        assert!(remove_managed_hosts_at(&path).is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), content);
+    }
 }

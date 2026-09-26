@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::ipc::client::send_command_sync;
 use crate::ipc::protocol::IpcPayload;
-use crate::resolver::util::select_resolver;
+use crate::resolver::util::select_resolver_for_registration;
 use crate::util::output;
 
 #[derive(Args)]
@@ -25,6 +25,9 @@ pub struct AddArgs {
     /// Custom TLD (e.g., dev.example.com for myapp.dev.example.com)
     #[arg(long)]
     pub tld: Option<String>,
+
+    #[arg(long, help = "Allow registering a custom domain")]
+    pub allow_custom_domain: bool,
 }
 
 #[derive(Subcommand)]
@@ -42,6 +45,9 @@ pub enum AddCommands {
         /// Custom TLD
         #[arg(long)]
         tld: Option<String>,
+
+        #[arg(long, help = "Allow registering a custom domain")]
+        allow_custom_domain: bool,
     },
 
     /// Wrap a package.json script to run through antra
@@ -65,9 +71,17 @@ pub enum AddCommands {
 
 pub fn execute(args: AddArgs) -> Result<()> {
     match args.command {
-        Some(AddCommands::Route { domain, port, tld }) => {
-            execute_route(AddRouteArgs { domain, port, tld })
-        }
+        Some(AddCommands::Route {
+            domain,
+            port,
+            tld,
+            allow_custom_domain,
+        }) => execute_route(AddRouteArgs {
+            domain,
+            port,
+            tld,
+            allow_custom_domain,
+        }),
         Some(AddCommands::WrapScript {
             name,
             command,
@@ -86,6 +100,7 @@ pub fn execute(args: AddArgs) -> Result<()> {
                     domain,
                     port,
                     tld: args.tld,
+                    allow_custom_domain: args.allow_custom_domain,
                 }),
                 _ => {
                     output::print_error("Please specify --domain and --port, or use a subcommand:");
@@ -102,6 +117,7 @@ struct AddRouteArgs {
     domain: String,
     port: u16,
     tld: Option<String>,
+    allow_custom_domain: bool,
 }
 
 fn execute_route(args: AddRouteArgs) -> Result<()> {
@@ -116,7 +132,7 @@ fn execute_route(args: AddRouteArgs) -> Result<()> {
     let domain = raw_domain.to_ascii_lowercase();
 
     // Resolve domain to 127.0.0.1
-    let resolver = select_resolver(&domain)?;
+    let resolver = select_resolver_for_registration(&domain, args.allow_custom_domain)?;
     resolver.register(&domain)?;
     output::print_success(&format!("Domain resolved: {}", domain));
 

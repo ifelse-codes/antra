@@ -2,22 +2,37 @@
 
 ---
 
-## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-24)
+## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-25)
 
-**Current state: `v0.4.0` is PUBLISHED and the site is deployed.** Everything mechanical is done and committed to `origin/main`. The launch is technically live.
+**Current state: `v0.4.0` is PUBLISHED and the site is deployed.** The release is technically live; security hardening and acceptance work is now in the working tree and has not been released yet.
 
 **DONE & verified (see Session Progress — 2026-09-23 below for detail/evidence):**
 - Sites ✅ `antra.iifelse.com` deployed; `/install.sh` → `Content-Type: text/plain`, v0.4.0; privacy/terms 200.
 - Release ✅ `v0.4.0` published as Latest (assets + checksums verified); Homebrew Formula updated.
-- Docs ✅ `GO-LIVE-PLAN.md` + `ROADMAP.md` updated; working tree clean.
+- Docs ✅ `GO-LIVE-PLAN.md` + `ROADMAP.md` updated; security hardening is documented below and remains uncommitted.
 
-**NEXT SESSION — remaining open work (all need a human; none block the above):**
+**LATEST VERIFICATION — 2026-09-25:**
+- `cargo fmt`, `cargo check --all-targets`, Clippy, release build, doc tests, and **299 test executions** passed.
+- Chrome 153 + Vite 8.2.1 passed through the proxy: HTTP 200, proxy-origin `wss://` HMR socket, Vite `update` frame, no direct backend WebSocket, and clean Ctrl+C route/process cleanup.
+- A real PTY verified both CA consent answers: `n` skips trust; Enter installs the disposable CA. The disposable CA was removed afterward and the pre-existing Keychain certificate stayed unchanged.
+- `run`, `add route`, `alias`, and `proxy start --route` reject unapproved custom domains before daemon or hosts mutation.
+- Firefox was not run. The full `antra clean` command was not run against the real `/etc/hosts` because it contains active Antra entries; the managed-block transformation is hermetically tested.
+
+**DO NOT REDO / SAFETY NOTES:**
+- Run Rust tests with a disposable `HOME`; preserve `CARGO_HOME=/Users/suman/.cargo` and `RUSTUP_HOME=/Users/suman/.rustup` so rustup still works.
+- Do not run `antra clean` against the real hosts file; it contains active Antra-managed entries.
+- Chrome transport/HMR used a disposable untrusted CA with `ignoreHTTPSErrors`; no-warning certificate proof still requires explicit real-CA trust approval.
+- Windows hermetic CI is configured, but local cross-compilation is blocked by missing `x86_64-w64-mingw32-gcc`; use GitHub Actions for Windows runtime verification.
+- No commit, tag, release, or deployment was made for the hardening changes.
+
+**NEXT SESSION — remaining open work (all need a human; none block the published release):**
 1. **Plausible analytics** — create account, register domain `antra.iifelse.com` (tag is live but no account → no data collects). This is the single highest-value item.
 2. **Phase 2 launch comms** — publish social posts (draft Tweet is in the "Asset Templates" section below): Tweet, Hacker News, Product Hunt, Lobsters; email dev newsletters.
 3. **GitHub Discussions** — enable on `ifelse-codes/antra`.
 4. **Social proof** — testimonials, "Used by" section, GitHub Stars count on landing.
 5. **DX assets** — 60-sec quick-start video, examples repo (Vite/Next/Express), CLI reference page at `antra.iifelse.com/cli`.
 6. **Phase 3** — Discord/Telegram community channel; roadmap NOW items.
+7. **Security release gate** — run the new Windows CI job, complete the formal browser checklist after explicit CA trust approval, then review and release the hardening changes.
 
 **Reusable gotchas to remember (they cost time this session):**
 - Cloudflare Pages **Function is silently shadowed by a static file at the same path** — use `landing/_headers` instead of a Function.
@@ -32,26 +47,23 @@
 
 Antra solves a real, painful problem: developers hate port-based URLs (`localhost:5173`), browser security warnings, and complex local dev setups. The product is **functionally complete** and ready for launch.
 
-### Engineering Status: PRODUCTION-READY ✅
+### Engineering Status: HARDENING COMPLETE IN WORKING TREE; RELEASE PENDING
 
-- **Version:** 0.4.0
-- **All 10 phases complete** (CLI, proxy, HTTPS, WebSocket, CA trust, daemon/IPC, cross-platform)
-- **Tests:** 62/62 passing
-- **CI/CD:** GitHub Actions for macOS, Linux, Windows with clippy, fmt, tests
+- **Published version:** 0.4.0
+- **Local verification:** `cargo fmt`, `cargo check --all-targets`, Clippy, doc tests, and 299 test executions passed
+- **CI/CD:** macOS/Ubuntu full tests; Windows hermetic tests are configured but still need a GitHub Actions run
 - **Release workflow:** Automated cross-platform builds with checksums
-- **Build:** Zero warnings (`cargo clippy -- -D warnings` passes)
-- **Documentation:** Comprehensive README, architecture docs, security docs, roadmap
+- **Security hardening:** CA consent, custom-domain approval, reversible cleanup, and Unix process-group isolation are implemented in the working tree
+- **Documentation:** Security behavior and acceptance evidence are recorded below
 
-### Gaps Before Launch ⚠️
+### Gaps Before Release ⚠️
 
 | Category | Status | Priority |
 |----------|--------|----------|
-| Website | ✅ Built | Deploy to `antra.iifelse.com` |
-| Install script | ⚠️ README has wrong URL | Fix `install.sh` routing |
-| Install.sh | ✅ Landing page has working script | Use `https://antra.iifelse.com/install.sh` |
-| Domains | ⚠️ No marketing domain purchased | Get `antra.dev` or similar |
-| Analytics | ❌ None | Add lightweight analytics (e.g., Plausible) |
-| Pricing page | ❌ Missing | Consider free tier + pro features |
+| Security hardening | ✅ Working tree; release pending | Review, tag, and publish |
+| Browser certificate acceptance | ⏳ Chrome transport/HMR passed; explicit trust refresh still required for no-warning proof | Complete after approval |
+| Windows CI execution | ⏳ Job configured; not run locally | Run on GitHub |
+| Analytics / launch work | ⏳ Later scope | Follow Phase 2/3 plan |
 
 ---
 
@@ -283,6 +295,41 @@ Work completed this session against the plan above. Canonical domain decision:
 - **Plausible**: account does not exist; the tag is live but no account/domain registered → analytics won't collect until then.
 - Phase 2 launch comms: social posts (Tweet/HN/PH/Lobsters), GitHub Discussions, testimonials/"Used by", quick-start video, examples repo, CLI reference page.
 - Phase 3: community channel.
+
+---
+
+## Session Progress — 2026-09-25 (Security hardening and acceptance)
+
+### Completed in the working tree
+
+- **CA consent:** `antra run` and `antra dev` now ask `Install the Antra local CA? [Y/n]` on an interactive first run. Enter means yes; `--yes` is an explicit non-interactive opt-in; `--no-trust-prompt` skips the flow. Non-interactive sessions never install trust without `--yes`.
+- **Custom-domain safety:** `.localhost`, `.test`, `.local`, and `.internal` remain automatic. Every other hostname requires `--allow-custom-domain` across `run`, `dev`, `alias`, `add route`, and `proxy start --route`. Approved public-looking TLDs produce a warning.
+- **Reversible cleanup:** `antra clean` now removes the exact current CA from applicable system, macOS login-keychain, and Windows CurrentUser trust stores, removes the complete Antra-managed hosts block, and only then deletes local state. Missing trust/hosts entries are idempotent; malformed state aborts safely.
+- **Process isolation:** Unix child processes and the auto-started daemon now get separate process groups, so Ctrl+C cleanup does not target the daemon accidentally.
+- **Windows CI:** Added a Windows hermetic test job. It compiles every test target, executes the safe library/integration allowlist serially, and excludes the known process-tree and real-state E2E targets.
+
+### Verification completed
+
+- `cargo fmt --all`
+- `cargo check --all-targets`
+- `cargo clippy --all-targets -- -D warnings`
+- Full test suite with a disposable `HOME`: **299 test executions passed, 0 failed**
+- Real Chrome 153 + Vite 8.2.1: page loaded through Antra, HMR connected via `wss://antra-v04.localhost:19443`, a Vite `update` frame arrived, and no direct backend WebSocket was used.
+- Ctrl+C removed the test route and Vite process cleanly.
+- Interactive CA consent test passed: a real PTY showed `Install the Antra local CA? [Y/n]`, accepted `n`, skipped trust installation, and cleaned the route.
+- Default-Enter consent test passed: pressing Enter installed the disposable CA, and the follow-up removal left the pre-existing keychain certificate unchanged.
+- CLI policy check passed: `run`, `add route`, `alias`, and `proxy start --route` all rejected an unapproved custom domain before daemon/hosts mutation; the explicit approval path was accepted.
+- Disposable macOS trust test passed: a temporary CA was installed into the login keychain, removed with the exact-removal path, and the pre-existing Antra-named certificate remained unchanged.
+- No-warning certificate acceptance was **not claimed**: the user chose Chrome-only testing without changing the Keychain, so the disposable test CA was intentionally untrusted. The browser correctly returned `ERR_CERT_AUTHORITY_INVALID` with certificate validation enabled.
+- Firefox was not run because it is not installed and was intentionally left out of this pass.
+
+### Still open
+
+- Run the formal MVP checklist in Chrome and Firefox after the user explicitly authorizes refreshing the current Antra CA trust.
+- The full `antra clean` orchestration was not run against the real `/etc/hosts` because it contains active Antra entries; its managed-block transformation is covered by hermetic tests.
+- Run the new Windows CI job on GitHub; the hermetic command is configured, but local Windows cross-compilation is blocked by the missing `x86_64-w64-mingw32-gcc` toolchain.
+- Keep the later launch work unchanged: Plausible registration, Discussions, launch communications, social proof, video/examples/CLI reference, community channels, LICENSE, and security-contact work.
+- This hardening is currently an uncommitted working-tree change; no release or deployment was made.
 
 ---
 

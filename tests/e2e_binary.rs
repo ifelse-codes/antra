@@ -20,6 +20,7 @@ fn run_antra(args: &[&str]) -> (String, String, i32) {
 fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
     let mut child = Command::new(antra_bin())
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -132,6 +133,18 @@ fn test_dev_help() {
     assert_eq!(code, 0);
     assert!(stdout.contains("--domain"));
     assert!(stdout.contains("--port"));
+    assert!(stdout.contains("--allow-custom-domain"));
+    assert!(stdout.contains("--yes"));
+}
+
+#[test]
+fn test_add_help() {
+    let (stdout, _, code) = run_antra(&["add", "--help"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("--allow-custom-domain"));
+    let (stdout, _, code) = run_antra(&["add", "route", "--help"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("--allow-custom-domain"));
 }
 
 #[test]
@@ -141,6 +154,10 @@ fn test_proxy_help() {
     assert!(stdout.contains("start"));
     assert!(stdout.contains("stop"));
     assert!(stdout.contains("status"));
+    let (stdout, _, code) = run_antra(&["proxy", "start", "--help"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("--route"));
+    assert!(stdout.contains("--allow-custom-domain"));
 }
 
 #[test]
@@ -319,6 +336,7 @@ fn test_clean_cancels_on_no() {
 
     let output = child.wait_with_output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(stdout.contains("System trust") && stdout.contains("Antra-managed hosts block"));
     assert!(stdout.contains("Cancelled") || stdout.contains("cancel") || !output.status.success());
 }
 

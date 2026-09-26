@@ -44,38 +44,42 @@ pub fn execute() -> Result<()> {
     // 2. Check CA trust (system store, then macOS user login keychain)
     match trust::check_trust_status() {
         Ok(true) => {
-            println!(
-                "  {} {}",
-                "✓".green().bold(),
-                "CA trusted by system".green()
-            );
+            println!("  {} {}", "✓".green().bold(), "CA trusted".green());
         }
-        Ok(false) if trust::check_user_level_trust() => {
-            println!(
-                "  {} {}",
-                "✓".green().bold(),
-                "CA trusted via login keychain (user-level, no sudo)".green()
-            );
-        }
-        Ok(false) => {
-            println!(
-                "  {} {}",
-                "✗".red().bold(),
-                "CA not trusted by system".red()
-            );
-            #[cfg(target_os = "macos")]
-            issues.push((
-                "CA not trusted (no warning-free HTTPS)".to_string(),
-                // Single executable command so `Auto-fix all issues?` works
-                // with one keypress — no sudo needed on macOS.
-                "antra trust --user-level".to_string(),
-            ));
-            #[cfg(not(target_os = "macos"))]
-            issues.push((
-                "CA not trusted by system".to_string(),
-                "antra trust".to_string(),
-            ));
-        }
+        Ok(false) => match trust::check_user_level_trust() {
+            Ok(true) => {
+                println!(
+                    "  {} {}",
+                    "✓".green().bold(),
+                    "CA trusted via login keychain (user-level, no sudo)".green()
+                );
+            }
+            Ok(false) => {
+                println!(
+                    "  {} {}",
+                    "✗".red().bold(),
+                    "CA not trusted by system".red()
+                );
+                #[cfg(target_os = "macos")]
+                issues.push((
+                    "CA not trusted (no warning-free HTTPS)".to_string(),
+                    "antra trust --user-level".to_string(),
+                ));
+                #[cfg(not(target_os = "macos"))]
+                issues.push((
+                    "CA not trusted by system".to_string(),
+                    "antra trust".to_string(),
+                ));
+            }
+            Err(e) => {
+                println!(
+                    "  {} {}",
+                    "?".yellow().bold(),
+                    format!("Could not check user-level trust: {e}").yellow()
+                );
+                warnings.push(format!("Could not check user-level trust: {e}"));
+            }
+        },
         Err(e) => {
             println!(
                 "  {} {}",

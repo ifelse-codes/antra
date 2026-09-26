@@ -130,6 +130,57 @@ pub fn replace_managed_block(content: &str, new_block: &str) -> String {
     }
 }
 
+pub fn remove_managed_block(content: &str) -> Result<String> {
+    let mut begin_positions = Vec::new();
+    let mut end_positions = Vec::new();
+
+    for (marker, positions) in [
+        (BEGIN_MARKER, &mut begin_positions),
+        (END_MARKER, &mut end_positions),
+    ] {
+        for (position, _) in content.match_indices(marker) {
+            let line_start = content[..position].rfind('\n').map_or(0, |i| i + 1);
+            let line_end = content[line_start..]
+                .find('\n')
+                .map_or(content.len(), |i| line_start + i);
+            let raw_line = &content[line_start..line_end];
+            let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+            if line != marker {
+                anyhow::bail!("Antra hosts marker must appear on its own line");
+            }
+            positions.push((position, line_start));
+        }
+    }
+
+    if begin_positions.is_empty() && end_positions.is_empty() {
+        return Ok(content.to_string());
+    }
+    if begin_positions.len() != 1 || end_positions.len() != 1 {
+        anyhow::bail!("Antra hosts block must contain exactly one begin and one end marker");
+    }
+
+    let (begin_position, begin_line_start) = begin_positions[0];
+    let (end_position, _) = end_positions[0];
+    if begin_position > end_position {
+        anyhow::bail!("Antra hosts block markers are reversed");
+    }
+
+    let end_line_start = content[..end_position].rfind('\n').map_or(0, |i| i + 1);
+    let end_line_end = content[end_line_start..]
+        .find('\n')
+        .map_or(content.len(), |i| end_line_start + i);
+    let remove_end = if end_line_end < content.len() {
+        end_line_end + 1
+    } else {
+        content.len()
+    };
+
+    let mut result = String::with_capacity(content.len());
+    result.push_str(&content[..begin_line_start]);
+    result.push_str(&content[remove_end..]);
+    Ok(result)
+}
+
 /// Check if a domain already exists in the managed block.
 pub fn domain_in_managed_block(content: &str, domain: &str) -> bool {
     let block = extract_managed_block(content);
@@ -186,6 +237,52 @@ pub fn remove_from_managed_block(content: &str, domain: &str) -> (String, bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_remove_managed_block_valid() {
+        let content = format!(
+            "127.0.0.1 localhost\n{BEGIN_MARKER}\n127.0.0.1 myapp.test\n{END_MARKER}\n255.255.255.255 broadcasthost\n"
+        );
+        assert_eq!(
+            remove_managed_block(&content).unwrap(),
+            "127.0.0.1 localhost\n255.255.255.255 broadcasthost\n"
+        );
+    }
+
+    #[test]
+    fn test_remove_managed_block_missing() {
+        let content = "127.0.0.1 localhost\n255.255.255.255 broadcasthost\n";
+        assert_eq!(remove_managed_block(content).unwrap(), content);
+    }
+
+    #[test]
+    fn test_remove_managed_block_reversed() {
+        let content = format!("{END_MARKER}\n127.0.0.1 myapp.test\n{BEGIN_MARKER}\n");
+        assert!(remove_managed_block(&content).is_err());
+    }
+
+    #[test]
+    fn test_remove_managed_block_duplicate() {
+        let content = format!("{BEGIN_MARKER}\n{BEGIN_MARKER}\n{END_MARKER}\n");
+        assert!(remove_managed_block(&content).is_err());
+    }
+
+    #[test]
+    fn test_remove_managed_block_rejects_single_marker() {
+        let content = format!("{BEGIN_MARKER}\n127.0.0.1 myapp.test\n");
+        assert!(remove_managed_block(&content).is_err());
+    }
+
+    #[test]
+    fn test_remove_managed_block_preserves_outside_content() {
+        let content = format!(
+            "# crab outside\r\n{BEGIN_MARKER}\r\n127.0.0.1 myapp.test\r\n{END_MARKER}\r\n# keep me\r\n"
+        );
+        assert_eq!(
+            remove_managed_block(&content).unwrap(),
+            "# crab outside\r\n# keep me\r\n"
+        );
+    }
 
     #[test]
     fn test_ensure_managed_block() {

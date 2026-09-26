@@ -3,9 +3,7 @@ use colored::Colorize;
 
 use crate::ipc::client::{is_daemon_running, send_command_sync};
 use crate::ipc::protocol::{IpcPayload, RegisterRouteRequest};
-use crate::resolver::custom::CustomResolver;
-use crate::resolver::traits::DomainResolver;
-use crate::resolver::util::{is_custom_domain, select_resolver};
+use crate::resolver::util::select_resolver_for_registration;
 use crate::util::output;
 
 pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()> {
@@ -28,12 +26,7 @@ pub fn execute(domain: &str, port: u16, allow_custom_domain: bool) -> Result<()>
     }
 
     // Resolve the domain (add to hosts if needed).
-    // --allow-custom-domain bypasses the known-public-domain blocklist.
-    let resolver: Box<dyn DomainResolver> = if allow_custom_domain && is_custom_domain(domain) {
-        Box::new(CustomResolver::new().with_allow_public(true))
-    } else {
-        select_resolver(domain)?
-    };
+    let resolver = select_resolver_for_registration(domain, allow_custom_domain)?;
     resolver.register(domain)?;
     println!(
         "  {} {}",

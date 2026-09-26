@@ -218,7 +218,9 @@ antra run --domain myapp.localhost --port 5173 -- pnpm dev
 |---|---|
 | `--domain` | Hostname to serve (required) |
 | `--port` | Upstream port. Auto-allocated if omitted |
-| `--allow-custom-domain` | Permit non-`.localhost` / non-`.test` names |
+| `--allow-custom-domain` | Approve a custom/public-looking domain before registration |
+| `--yes` | Skip the first-run CA question and explicitly install trust |
+| `--no-trust-prompt` | Skip CA setup for this invocation |
 | `-- <command>` | The process to spawn. Required. |
 
 Injected environment:
@@ -244,6 +246,8 @@ Front a process you already started:
 antra alias api.localhost 8080
 # → https://api.localhost
 ```
+
+Custom or public-looking names require `--allow-custom-domain`; `.localhost`, `.test`, `.local`, and `.internal` remain automatic development namespaces.
 
 ### `antra proxy`
 
@@ -274,7 +278,7 @@ antra trust --status
 antra trust --remove
 ```
 
-Installing a root CA is a trust-store change. Antra treats it that way: explain, prompt, make it reversible. See [`docs/security.md`](docs/security.md).
+Installing a root CA is a trust-store change. Antra explains the change, asks `[Y/n]` on first run (Enter accepts), and keeps it reversible through `antra trust --remove` or `antra clean`. See [`docs/security.md`](docs/security.md).
 
 ### `antra doctor`
 

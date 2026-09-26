@@ -4,47 +4,24 @@ use crate::resolver::hosts::{self, hosts_path};
 use crate::resolver::traits::DomainResolver;
 use crate::routing::types::ResolutionStatus;
 
-/// Known public domains that should never be routed locally.
-const BLOCKED_DOMAINS: &[&str] = &[
-    "google.com",
-    "github.com",
-    "youtube.com",
-    "facebook.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    "linkedin.com",
-    "microsoft.com",
-    "apple.com",
-    "amazon.com",
-    "netflix.com",
-    "reddit.com",
-    "wikipedia.org",
-    "stackoverflow.com",
-    "npmjs.com",
-    "crates.io",
-    "docs.rs",
-];
-
 /// Resolver for custom (non-.localhost, non-.test) domains.
 /// Requires explicit --allow-custom-domain flag (enforced at CLI level).
 /// Validates domains and manages /etc/hosts entries.
 pub struct CustomResolver {
     hosts_path: PathBuf,
-    allow_public: bool,
+    allow_custom: bool,
 }
 
 impl CustomResolver {
     pub fn new() -> Self {
         Self {
             hosts_path: hosts_path(),
-            allow_public: false,
+            allow_custom: false,
         }
     }
 
-    /// Permit known-public domains (explicit user opt-in via --allow-custom-domain).
-    pub fn with_allow_public(mut self, allow: bool) -> Self {
-        self.allow_public = allow;
+    pub fn with_custom_domain_allowed(mut self, allow: bool) -> Self {
+        self.allow_custom = allow;
         self
     }
 
@@ -52,41 +29,20 @@ impl CustomResolver {
     pub fn with_path(path: PathBuf) -> Self {
         Self {
             hosts_path: path,
-            allow_public: false,
+            allow_custom: false,
         }
     }
 
-    /// Validate that a domain is safe to register.
-    /// Returns Ok(()) if safe, or an error with a reason.
-    /// Pass `allow_public = true` only via explicit `--allow-custom-domain`.
-    pub fn validate_domain_with(domain: &str, allow_public: bool) -> anyhow::Result<()> {
-        // Shape first: reject garbage before any policy checks or writes.
+    pub fn validate_domain_with(domain: &str, allow_custom: bool) -> anyhow::Result<()> {
         super::util::validate_domain_shape(domain)?;
 
-        // Reject bare localhost
-        if domain == "localhost" {
+        if domain.eq_ignore_ascii_case("localhost") {
             anyhow::bail!("'localhost' already resolves natively — no hosts entry needed");
         }
 
-        // Reject known public domains (unless explicitly allowed)
-        if BLOCKED_DOMAINS.contains(&domain) && !allow_public {
+        if super::util::is_custom_domain(domain) && !allow_custom {
             anyhow::bail!(
-                "'{domain}' is a known public domain. Refusing to route locally.\n\
-                 To override (not recommended): antra run --domain '{domain}' --allow-custom-domain -- <command>"
-            );
-        }
-
-        // Reject domains that look like they could be production
-        if domain.ends_with(".com")
-            || domain.ends_with(".org")
-            || domain.ends_with(".net")
-            || domain.ends_with(".io")
-            || domain.ends_with(".dev")
-        {
-            // Only warn, don't reject — user must have used --allow-custom-domain
-            tracing::warn!(
-                %domain,
-                "Domain looks like a public TLD. Ensure this is intentional."
+                "Custom domain '{domain}' requires explicit --allow-custom-domain approval"
             );
         }
 
@@ -102,7 +58,7 @@ impl Default for CustomResolver {
 
 impl DomainResolver for CustomResolver {
     fn register(&self, domain: &str) -> anyhow::Result<()> {
-        Self::validate_domain_with(domain, self.allow_public)?;
+        Self::validate_domain_with(domain, self.allow_custom)?;
 
         let content = hosts::read_hosts(&self.hosts_path)?;
         let content = hosts::ensure_managed_block(&content);
@@ -163,8 +119,18 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_custom_domain_allowed() {
-        assert!(CustomResolver::validate_domain_with("myapp.custom", false).is_ok());
+    fn test_validate_custom_domain_requires_approval() {
+        assert!(CustomResolver::validate_domain_with("myapp.custom", false).is_err());
+        assert!(CustomResolver::validate_domain_with("myapp.custom", true).is_ok());
         assert!(CustomResolver::validate_domain_with("dev.local", false).is_ok());
+    }
+
+    #[test]
+    fn test_unregister_custom_domain_does_not_require_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let hosts_file = dir.path().join("hosts");
+        std::fs::write(&hosts_file, "").unwrap();
+        let resolver = CustomResolver::with_path(hosts_file);
+        assert!(resolver.unregister("api.example.com").is_ok());
     }
 }

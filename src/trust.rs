@@ -3,20 +3,33 @@ use colored::Colorize;
 
 use crate::certs::store::CertStore;
 
-/// Common Name of the Antra local root CA. Must match `certs::ca`.
-/// macOS-only: used for the login-keychain trust lookup.
-#[cfg(target_os = "macos")]
-pub const CA_COMMON_NAME: &str = "Antra Local CA";
-
 /// Check if the Antra CA is trusted by the OS.
 pub fn check_trust_status() -> Result<bool> {
-    let store = CertStore::new()?;
-    let ca = store.get_or_create_ca()?;
-    let os_cert = os_truststore::Cert::from_pem(&ca.cert_pem)
-        .context("Failed to parse CA certificate for trust check")?;
-    let installed = os_truststore::is_installed(&os_cert)
-        .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
-    Ok(installed)
+    let Some(cert) = load_existing_ca()? else {
+        return Ok(false);
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        match os_truststore::is_installed(&cert) {
+            Ok(true) => Ok(true),
+            Ok(false) => windows_current_user_contains(&cert),
+            Err(system_error) => match windows_current_user_contains(&cert) {
+                Ok(true) => Ok(true),
+                Ok(false) => Err(anyhow::anyhow!(
+                    "Failed to check the Windows system trust store: {system_error}"
+                )),
+                Err(user_error) => Err(anyhow::anyhow!(
+                    "Failed to check Windows trust stores: system: {system_error}; CurrentUser Root: {user_error}"
+                )),
+            },
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        os_truststore::is_installed(&cert)
+            .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))
+    }
 }
 
 /// Check if the Antra CA is trusted at user level (no sudo).
@@ -28,29 +41,55 @@ pub fn check_trust_status() -> Result<bool> {
 /// Compares certificate bytes, not just the Common Name: if the CA was
 /// regenerated since it was trusted, the keychain holds a *stale* cert and
 /// this correctly reports untrusted (re-run `trust --user-level` to fix).
-pub fn check_user_level_trust() -> bool {
+pub fn check_user_level_trust() -> Result<bool> {
+    let cert = load_existing_ca()?;
     #[cfg(target_os = "macos")]
     {
-        let ca_pem = CertStore::new()
-            .ok()
-            .and_then(|s| std::fs::read_to_string(s.config_dir.join("ca.pem")).ok());
-        let Some(ca_pem) = ca_pem else {
-            return false;
+        let Some(cert) = cert else {
+            return Ok(false);
         };
-        keychain_contains_cert(&ca_pem)
+        keychain_contains_cert(&cert)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        false
+        let _ = cert;
+        Ok(false)
     }
 }
 
-/// True when HTTPS will work with no warnings: system trust store OR
-/// macOS user-level login-keychain trust. Prefer this over
-/// `check_trust_status()` for "do we need to do anything?" decisions —
-/// otherwise macOS users get re-prompted despite already-trusted HTTPS.
 pub fn is_trusted_for_https() -> bool {
-    check_trust_status().unwrap_or(false) || check_user_level_trust()
+    check_trust_status().unwrap_or(false) || check_user_level_trust().unwrap_or(false)
+}
+
+fn load_existing_ca() -> Result<Option<os_truststore::Cert>> {
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
+        .join("antra");
+    let Some(ca_pem) = CertStore::read_existing_ca_pem(&config_dir)? else {
+        return Ok(None);
+    };
+    validate_existing_ca_pem(&ca_pem)?;
+    let cert = os_truststore::Cert::from_pem(&ca_pem)
+        .context("Existing ca.pem is not a valid CA certificate")?;
+    Ok(Some(cert))
+}
+
+fn validate_existing_ca_pem(pem: &str) -> Result<()> {
+    let begins: Vec<_> = pem.match_indices("-----BEGIN CERTIFICATE-----").collect();
+    let ends: Vec<_> = pem.match_indices("-----END CERTIFICATE-----").collect();
+    if begins.len() != 1 || ends.len() != 1 {
+        anyhow::bail!("Existing ca.pem must contain exactly one certificate");
+    }
+    let (begin, _) = begins[0];
+    let (end, _) = ends[0];
+    if begin >= end {
+        anyhow::bail!("Existing ca.pem has reversed certificate markers");
+    }
+    let end_tag_end = end + "-----END CERTIFICATE-----".len();
+    if !pem[..begin].trim().is_empty() || !pem[end_tag_end..].trim().is_empty() {
+        anyhow::bail!("Existing ca.pem contains data outside its certificate");
+    }
+    Ok(())
 }
 
 /// Path to the macOS login keychain.
@@ -69,90 +108,102 @@ fn pem_payload(pem: &str) -> String {
         .collect()
 }
 
-/// True when the login keychain contains a certificate byte-identical to
-/// `ca_pem`. Same Common Name is not enough — a regenerated CA shares the
-/// name but fails TLS verification against the old keychain entry.
-///
-/// Uses `-a` to compare EVERY same-name entry: `find-certificate` without
-/// it returns only the first match, which may be a stale duplicate while
-/// the current cert sits further down the list.
 #[cfg(target_os = "macos")]
-fn keychain_contains_cert(ca_pem: &str) -> bool {
-    let Some(keychain) = login_keychain_path() else {
-        return false;
-    };
+fn keychain_contains_cert(cert: &os_truststore::Cert) -> Result<bool> {
+    Ok(!matching_keychain_cert_hashes(cert)?.is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn matching_keychain_cert_hashes(cert: &os_truststore::Cert) -> Result<Vec<String>> {
+    let keychain = login_keychain_path()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine macOS login keychain path"))?;
+    let common_name = cert
+        .common_name()
+        .ok_or_else(|| anyhow::anyhow!("Existing ca.pem has no Common Name"))?;
     let output = std::process::Command::new("security")
-        .args([
-            "find-certificate",
-            "-c",
-            CA_COMMON_NAME,
-            "-a",
-            "-p",
-            keychain.to_str().unwrap_or_default(),
-        ])
+        .args(["find-certificate", "-c", common_name, "-a", "-Z", "-p"])
+        .arg(&keychain)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(output) = output else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .context("Failed to query the macOS login keychain")?;
+    if output.status.code() == Some(44) {
+        return Ok(Vec::new());
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let want = pem_payload(ca_pem);
-    // `-p` concatenates PEM blocks; split on the END marker and compare each.
-    stdout
-        .split("-----END CERTIFICATE-----")
-        .any(|block| !pem_payload(block).is_empty() && pem_payload(block) == want)
+    if !output.status.success() {
+        anyhow::bail!(
+            "Failed to query the macOS login keychain: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .context("macOS security returned a non-UTF-8 certificate listing")?;
+    parse_matching_keychain_hashes(&stdout, &pem_payload(cert.pem()))
 }
 
-/// SHA-1 hashes of every login-keychain certificate carrying our CA's
-/// Common Name.
 #[cfg(target_os = "macos")]
-fn keychain_ca_hashes() -> Vec<String> {
-    let Some(keychain) = login_keychain_path() else {
-        return Vec::new();
-    };
-    let output = std::process::Command::new("security")
-        .args([
-            "find-certificate",
-            "-c",
-            CA_COMMON_NAME,
-            "-a",
-            "-Z",
-            keychain.to_str().unwrap_or_default(),
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|l| {
-            l.trim()
-                .strip_prefix("SHA-1 hash: ")
-                .map(|h| h.trim().to_string())
-        })
-        .collect()
+fn parse_matching_keychain_hashes(stdout: &str, want: &str) -> Result<Vec<String>> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut pending_hash = String::new();
+    let mut block = String::new();
+    let mut in_pem = false;
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if let Some(hash) = trimmed.strip_prefix("SHA-1 hash: ") {
+            pending_hash = hash.trim().to_string();
+        } else if trimmed == "-----BEGIN CERTIFICATE-----" {
+            if in_pem {
+                anyhow::bail!("macOS security returned a truncated certificate listing");
+            }
+            block.clear();
+            block.push_str(line);
+            block.push('\n');
+            in_pem = true;
+        } else if trimmed == "-----END CERTIFICATE-----" {
+            if !in_pem {
+                anyhow::bail!("macOS security returned an invalid certificate listing");
+            }
+            block.push_str(line);
+            pairs.push((
+                std::mem::take(&mut pending_hash),
+                std::mem::take(&mut block),
+            ));
+            in_pem = false;
+        } else if in_pem {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    if in_pem {
+        anyhow::bail!("macOS security returned a truncated certificate listing");
+    }
+
+    let mut matches = Vec::new();
+    for (hash, pem_block) in pairs {
+        if pem_payload(&pem_block) == want {
+            if hash.is_empty() {
+                anyhow::bail!("macOS security omitted the matching certificate hash");
+            }
+            matches.push(hash);
+        }
+    }
+    Ok(matches)
 }
 
-/// Delete one login-keychain certificate by SHA-1 hash.
-///
-/// Best-effort with a short timeout: `security` can pop a GUI auth dialog
-/// (locked keychain) that never resolves headless — never let pruning hang
-/// a trust command. Failures are ignored; the subsequent `add-trusted-cert`
-/// succeeding is what matters.
 #[cfg(target_os = "macos")]
-fn delete_keychain_cert_by_hash(keychain_str: &str, hash: &str) {
+fn delete_keychain_cert_by_hash(keychain_str: &str, hash: &str) -> Result<()> {
     let cmd = {
         let mut c = std::process::Command::new("security");
         c.args(["delete-certificate", "-Z", hash, keychain_str]);
         c
     };
-    let _ = run_security_mutation(cmd, std::time::Duration::from_secs(15));
+    let status = run_security_mutation(cmd, std::time::Duration::from_secs(15))?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("security delete-certificate failed with exit code: {status}")
+    }
 }
 
 /// Run a mutating `security` command with a bounded wait.
@@ -189,95 +240,6 @@ fn run_security_mutation(
             None => std::thread::sleep(std::time::Duration::from_millis(100)),
         }
     }
-}
-
-/// Remove keychain certificates carrying our CA's Common Name.
-///
-/// Used before (re-)installing so `trust` stays idempotent: without this,
-/// every re-run appends a duplicate entry, and a regenerated CA leaves a
-/// stale entry that shadows nothing but confuses.
-///
-/// Deletes by SHA-1 hash, one entry at a time: `delete-certificate -c`
-/// refuses with "ambiguous, matches more than one certificate" as soon as
-/// duplicates exist — exactly when cleanup is needed most. Failures are
-/// ignored — the subsequent `add-trusted-cert` succeeding is what matters.
-#[cfg(target_os = "macos")]
-fn remove_stale_keychain_certs() {
-    let Some(keychain) = login_keychain_path() else {
-        return;
-    };
-    let keychain_str = keychain.to_str().unwrap_or_default();
-    for hash in keychain_ca_hashes() {
-        delete_keychain_cert_by_hash(keychain_str, &hash);
-    }
-}
-
-/// Remove same-name keychain entries that do NOT match the current CA,
-/// keeping the current one. Returns the number removed.
-///
-/// Called on the already-trusted path so re-running `trust` converges the
-/// keychain to exactly one entry instead of letting stale duplicates from
-/// past CA regenerations accumulate.
-#[cfg(target_os = "macos")]
-fn remove_other_keychain_certs(keep_pem: &str) -> usize {
-    let Some(keychain) = login_keychain_path() else {
-        return 0;
-    };
-    let keychain_str = keychain.to_str().unwrap_or_default();
-    let output = std::process::Command::new("security")
-        .args([
-            "find-certificate",
-            "-c",
-            CA_COMMON_NAME,
-            "-a",
-            "-Z",
-            "-p",
-            keychain_str,
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    let Ok(output) = output else {
-        return 0;
-    };
-    // Pair each PEM block with the SHA-1 hash printed just above it.
-    // Only lines between the BEGIN/END markers belong to the block —
-    // the SHA-256/SHA-1 header lines must not pollute the payload.
-    let keep = pem_payload(keep_pem);
-    let mut pairs: Vec<(String, String)> = Vec::new();
-    let mut pending_hash = String::new();
-    let mut block = String::new();
-    let mut in_pem = false;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let trimmed = line.trim();
-        if let Some(hash) = trimmed.strip_prefix("SHA-1 hash: ") {
-            pending_hash = hash.trim().to_string();
-        } else if trimmed == "-----BEGIN CERTIFICATE-----" {
-            block.clear();
-            block.push_str(line);
-            block.push('\n');
-            in_pem = true;
-        } else if trimmed == "-----END CERTIFICATE-----" {
-            block.push_str(line);
-            pairs.push((
-                std::mem::take(&mut pending_hash),
-                std::mem::take(&mut block),
-            ));
-            in_pem = false;
-        } else if in_pem {
-            block.push_str(line);
-            block.push('\n');
-        }
-    }
-    let mut removed = 0;
-    for (hash, pem_block) in &pairs {
-        if hash.is_empty() || pem_payload(pem_block) == keep {
-            continue;
-        }
-        delete_keychain_cert_by_hash(keychain_str, hash);
-        removed += 1;
-    }
-    removed
 }
 
 /// Install the Antra CA into the OS trust store.
@@ -450,7 +412,7 @@ pub fn install_ca_noninteractive() -> Result<()> {
     {
         let store = CertStore::new()?;
         let ca = store.get_or_create_ca()?;
-        if check_user_level_trust() {
+        if check_user_level_trust()? {
             return Ok(());
         }
         if install_ca_user_level_silent(&ca).is_ok() {
@@ -533,11 +495,33 @@ fn install_ca_windows_current_user(ca_pem: &str) -> Result<()> {
     anyhow::bail!("certutil CurrentUser install failed: {}", detail.trim())
 }
 
-/// Prompt, then install the Antra CA into the user's login keychain.
-/// macOS non-root entry point for interactive `antra trust`: no sudo, no
-/// elevation errors — just one question defaulting to yes. The CA is
-/// local-only and reversible (`antra trust --remove` does not yet cover
-/// the keychain; re-running is idempotent).
+#[cfg(target_os = "windows")]
+fn windows_current_user_contains(cert: &os_truststore::Cert) -> Result<bool> {
+    let store = schannel::cert_store::CertStore::open_current_user("Root")
+        .context("Failed to open the Windows CurrentUser Root store")?;
+    Ok(store.certs().any(|entry| entry.to_der() == cert.der()))
+}
+
+#[cfg(target_os = "windows")]
+fn remove_windows_current_user_ca(cert: &os_truststore::Cert) -> Result<()> {
+    let store = schannel::cert_store::CertStore::open_current_user("Root")
+        .context("Failed to open the Windows CurrentUser Root store")?;
+    let matching: Vec<_> = store
+        .certs()
+        .filter(|entry| entry.to_der() == cert.der())
+        .collect();
+    for entry in matching {
+        entry
+            .delete()
+            .context("Failed to remove the CA from the Windows CurrentUser Root store")?;
+    }
+    drop(store);
+    if windows_current_user_contains(cert)? {
+        anyhow::bail!("CA remains in the Windows CurrentUser Root store");
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn install_ca_user_level_prompted() -> Result<()> {
     println!("  Antra needs a local CA certificate so HTTPS works with no warnings.");
@@ -588,28 +572,14 @@ pub fn install_ca_user_level() -> Result<()> {
     // macOS: install to user login keychain
     #[cfg(target_os = "macos")]
     {
-        // Idempotent: the exact cert is already there — don't append a duplicate.
-        // Prune stale same-name entries so the keychain converges to one.
-        if keychain_contains_cert(&ca.cert_pem) {
-            let pruned = remove_other_keychain_certs(&ca.cert_pem);
+        if keychain_contains_cert(&os_cert)? {
             println!(
                 "{}",
                 "  Antra CA is already trusted via your login keychain (user-level, no sudo)."
                     .green()
             );
-            if pruned > 0 {
-                println!(
-                    "    {}",
-                    format!("Removed {pruned} stale duplicate(s) from the login keychain.")
-                        .dimmed()
-                );
-            }
             return Ok(());
         }
-        // Otherwise drop same-name entries first: a regenerated CA shares the
-        // Common Name, and leaving the stale cert behind both duplicates the
-        // entry and masks the trust state.
-        remove_stale_keychain_certs();
 
         let temp_cert = tempfile::NamedTempFile::new()?;
         std::fs::write(temp_cert.path(), &ca.cert_pem)?;
@@ -673,14 +643,11 @@ pub fn install_ca_user_level() -> Result<()> {
 /// Install CA into user login keychain without output (for noninteractive fallback).
 #[cfg(target_os = "macos")]
 fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
-    // Idempotent: skip when the exact cert is already trusted (pruning
-    // stale same-name entries); replace stale entries (e.g. after CA
-    // regeneration) otherwise.
-    if keychain_contains_cert(&ca.cert_pem) {
-        remove_other_keychain_certs(&ca.cert_pem);
+    let os_cert =
+        os_truststore::Cert::from_pem(&ca.cert_pem).context("Failed to parse CA certificate")?;
+    if keychain_contains_cert(&os_cert)? {
         return Ok(());
     }
-    remove_stale_keychain_certs();
 
     let temp_cert = tempfile::NamedTempFile::new()?;
     std::fs::write(temp_cert.path(), &ca.cert_pem)?;
@@ -711,23 +678,14 @@ fn install_ca_user_level_silent(ca: &crate::certs::ca::CaCert) -> Result<()> {
 /// Remove the Antra CA from the OS trust store (and macOS login keychain).
 /// Prompts the user before making system changes.
 pub fn remove_ca() -> Result<()> {
-    let store = CertStore::new()?;
-    let ca = store.get_or_create_ca()?;
-    let os_cert =
-        os_truststore::Cert::from_pem(&ca.cert_pem).context("Failed to parse CA certificate")?;
-
-    // Check if installed (system store and/or macOS login keychain — the
-    // default non-root install path).
-    let system_installed = os_truststore::is_installed(&os_cert)
-        .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
-    #[cfg(target_os = "macos")]
-    let keychain_hashes = keychain_ca_hashes();
-    #[cfg(target_os = "macos")]
-    let keychain_installed = !keychain_hashes.is_empty();
-    #[cfg(not(target_os = "macos"))]
-    let keychain_installed = false;
-
-    if !system_installed && !keychain_installed {
+    let Some(cert) = load_existing_ca()? else {
+        println!(
+            "{}",
+            "  ! ca.pem not found; trust cleanup skipped.".yellow()
+        );
+        return Ok(());
+    };
+    if !ca_is_installed(&cert)? {
         println!(
             "{}",
             "  Antra CA is not currently trusted by the system.".yellow()
@@ -735,20 +693,8 @@ pub fn remove_ca() -> Result<()> {
         return Ok(());
     }
 
-    // Prompt user before modifying trust store
     println!("  Antra will remove its local CA certificate from your system trust store.");
-    #[cfg(target_os = "macos")]
-    if keychain_installed {
-        println!(
-            "  This includes {} login-keychain entr{} (user-level trust).",
-            keychain_hashes.len(),
-            if keychain_hashes.len() == 1 {
-                "y"
-            } else {
-                "ies"
-            }
-        );
-    }
+    println!("  Applicable system and user-level trust entries will be removed.");
     println!("  HTTPS for custom domains will show cert warnings after removal.");
     println!();
     print!("  {} ", "Remove CA from system trust store? [y/N]".yellow());
@@ -764,56 +710,99 @@ pub fn remove_ca() -> Result<()> {
         return Ok(());
     }
 
-    // Attempt removal (system store first, then login keychain)
-    if system_installed {
-        match os_truststore::uninstall(&os_cert) {
-            Ok(()) => {
-                println!(
-                    "{}",
-                    "  ✓ CA certificate removed from system trust store.".green()
-                );
-            }
-            Err(os_truststore::TrustError::NeedsElevation { detail }) => {
-                eprintln!("{}", "  ✗ Elevated privileges required.".red());
-                eprintln!("    {detail}");
-                eprintln!();
-                eprintln!("    Try: {}", "sudo antra trust --remove".bold());
-                anyhow::bail!("Elevation required to remove CA")
-            }
-            Err(os_truststore::TrustError::InteractiveAuthRequired) => {
-                eprintln!(
-                    "{}",
-                    "  ✗ Interactive authentication required (macOS GUI prompt).".red()
-                );
-                eprintln!("    This command needs a terminal with GUI access.");
-                eprintln!("    Try: {}", "sudo antra trust --remove".bold());
-                anyhow::bail!("Interactive auth required")
-            }
-            Err(e) => {
-                eprintln!("{}", format!("  ✗ Failed to remove CA: {e}").red());
-                anyhow::bail!("Trust removal failed: {e}")
-            }
-        }
-    }
+    remove_ca_exact(&cert)
+}
 
+pub(crate) fn remove_ca_noninteractive() -> Result<()> {
+    let Some(cert) = load_existing_ca()? else {
+        println!(
+            "{}",
+            "  ! ca.pem not found; trust cleanup skipped.".yellow()
+        );
+        return Ok(());
+    };
+    remove_ca_exact(&cert)
+}
+
+fn ca_is_installed(cert: &os_truststore::Cert) -> Result<bool> {
+    let system_installed = os_truststore::is_installed(cert)
+        .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
     #[cfg(target_os = "macos")]
-    if keychain_installed {
-        remove_stale_keychain_certs();
-        if keychain_ca_hashes().is_empty() {
-            println!(
-                "{}",
-                "  ✓ CA certificate removed from login keychain.".green()
-            );
-        } else {
-            eprintln!(
-                "{}",
-                "  ✗ Some login-keychain entries could not be removed (Keychain may need GUI approval — unlock it and retry)."
-                    .red()
-            );
-            anyhow::bail!("Keychain removal incomplete")
-        }
+    let user_installed = keychain_contains_cert(cert)?;
+    #[cfg(target_os = "windows")]
+    let user_installed = windows_current_user_contains(cert)?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let user_installed = false;
+    Ok(system_installed || user_installed)
+}
+
+fn remove_ca_exact(cert: &os_truststore::Cert) -> Result<()> {
+    let mut failures = Vec::new();
+    if let Err(e) = remove_system_ca_exact(cert) {
+        failures.push(format!("system store: {e:#}"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(e) = remove_macos_login_keychain_ca_exact(cert) {
+        failures.push(format!("login keychain: {e:#}"));
+    }
+    #[cfg(target_os = "windows")]
+    if let Err(e) = remove_windows_current_user_ca(cert) {
+        failures.push(format!("CurrentUser Root: {e:#}"));
     }
 
+    if failures.is_empty() {
+        println!(
+            "{}",
+            "  ✓ Current Antra CA is absent from all applicable trust stores.".green()
+        );
+        Ok(())
+    } else {
+        anyhow::bail!("CA trust removal incomplete: {}", failures.join("; "))
+    }
+}
+
+fn remove_system_ca_exact(cert: &os_truststore::Cert) -> Result<()> {
+    let installed = os_truststore::is_installed(cert)
+        .map_err(|e| anyhow::anyhow!("Failed to verify the system trust store: {e}"))?;
+    if !installed {
+        return Ok(());
+    }
+    match os_truststore::uninstall(cert) {
+        Ok(()) => {}
+        Err(os_truststore::TrustError::NeedsElevation { detail }) => {
+            anyhow::bail!("elevated privileges required: {detail}")
+        }
+        Err(os_truststore::TrustError::InteractiveAuthRequired) => {
+            anyhow::bail!("interactive keychain authorization required")
+        }
+        Err(e) => return Err(anyhow::anyhow!("system trust removal failed: {e}")),
+    }
+    let still_installed = os_truststore::is_installed(cert)
+        .map_err(|e| anyhow::anyhow!("Failed to verify system trust removal: {e}"))?;
+    if still_installed {
+        anyhow::bail!("CA remains in the system trust store");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn remove_macos_login_keychain_ca_exact(cert: &os_truststore::Cert) -> Result<()> {
+    let hashes = matching_keychain_cert_hashes(cert)?;
+    if hashes.is_empty() {
+        return Ok(());
+    }
+    let keychain = login_keychain_path()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine macOS login keychain path"))?;
+    let keychain_str = keychain
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("macOS login keychain path is not valid UTF-8"))?;
+    for hash in hashes {
+        delete_keychain_cert_by_hash(keychain_str, &hash)?;
+    }
+    let remaining = matching_keychain_cert_hashes(cert)?;
+    if !remaining.is_empty() {
+        anyhow::bail!("CA remains in the macOS login keychain");
+    }
     Ok(())
 }
 
@@ -832,13 +821,45 @@ fn report_detail(report: &os_truststore::Report) -> Option<String> {
 }
 
 #[cfg(test)]
+mod ca_pem_tests {
+    use super::*;
+
+    #[test]
+    fn existing_ca_pem_requires_one_certificate() {
+        let ca = crate::certs::ca::generate_ca().unwrap();
+        validate_existing_ca_pem(&ca.cert_pem).unwrap();
+        assert!(validate_existing_ca_pem(&format!("{}{}", ca.cert_pem, ca.cert_pem)).is_err());
+        assert!(validate_existing_ca_pem(&format!("junk\n{}", ca.cert_pem)).is_err());
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_check_trust_status_runs() {
-        // This just verifies the function doesn't panic.
-        // Actual trust status depends on the environment.
-        let _ = check_trust_status();
+    fn keychain_match_ignores_same_name_certificate() {
+        let current = crate::certs::ca::generate_ca().unwrap();
+        let other = crate::certs::ca::generate_ca().unwrap();
+        let listing = format!(
+            "SHA-1 hash: current\n{}\nSHA-1 hash: other\n{}",
+            current.cert_pem, other.cert_pem
+        );
+
+        assert_eq!(
+            parse_matching_keychain_hashes(&listing, &pem_payload(&current.cert_pem)).unwrap(),
+            vec!["current".to_string()]
+        );
+    }
+
+    #[test]
+    fn keychain_match_rejects_truncated_listing() {
+        let current = crate::certs::ca::generate_ca().unwrap();
+        let listing = format!(
+            "SHA-1 hash: current\n{}",
+            current.cert_pem.replace("-----END CERTIFICATE-----\n", "")
+        );
+
+        assert!(parse_matching_keychain_hashes(&listing, &pem_payload(&current.cert_pem)).is_err());
     }
 }
