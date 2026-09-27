@@ -4,13 +4,13 @@
 
 ## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-27)
 
-**Current state: `v0.5.0` is PUBLISHED and the site is live.** The working tree is clean; everything shipped through `main`. `v0.5.0` fixed the defect that made HTTPS unusable on Apple's TLS stack (the root CA carried an invalid `subjectAltName`). The `landing/` assets for that release are **not yet redeployed** — the live site still serves the v0.4.0 installer copy, which only affects the version-pin example in a comment.
+**Current state: `v0.5.0` is PUBLISHED and the site is live with the matching installer copy.** The working tree is clean; everything shipped through `main`. `v0.5.0` fixed the defect that made HTTPS unusable on Apple's TLS stack (the root CA carried an invalid `subjectAltName`).
 
 **DONE & verified:**
 - Release ✅ `v0.5.0` published as Latest (5 targets + checksums verified by downloading the artifacts; the macOS binary was smoke-tested and mints a SAN-free CA). Homebrew Formula updated from that release's own `.sha256` assets.
 - Code ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12) (CA v2 + rotation + strict X.509 gates) and [#13](https://github.com/ifelse-codes/antra/pull/13) (formula) merged; all 7 CI jobs green.
 - Gates ✅ `tests/cert_strict.rs` (strict X.509 rules) and `tests/e2e_securetransport.rs` (macOS: `/usr/bin/curl --cacert` through a live daemon) are the regression gates for the CA work. Rationale and evidence: `fix-plan-2026-09-26-ca-trust.md`, `deep-dive-report-2026-09-26.md` §F.
-- Sites ✅ `antra.iifelse.com` deployed; `/install.sh` → `Content-Type: text/plain`; privacy/terms 200. **Redeploy pending** for the `v0.5.0` copy in `landing/`.
+- Sites ✅ `antra.iifelse.com` deployed for v0.5.0 (deployment `389916d4`): `/install.sh` → `Content-Type: text/plain` and serves the `v0.5.0` pin; index pin example updated; `/`, privacy, terms reachable.
 
 **LATEST VERIFICATION — 2026-09-27 (v0.5.0):**
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite green in a disposable HOME (216 executions, 0 failures); all 7 CI jobs green on both PRs.
@@ -70,7 +70,7 @@ Antra solves a real, painful problem: developers hate port-based URLs (`localhos
 | Security hardening | ✅ Shipped in v0.5.0 | — |
 | Browser certificate acceptance | ✅ Machine-checked on Apple's TLS stack (`tests/e2e_securetransport.rs`); Safari + Firefox browser pass still open | Human pass on `docs/mvp.md` |
 | Windows CI execution | ✅ Green on PRs #12 and #13 | — |
-| Landing redeploy | ⏳ `landing/` updated for v0.5.0, not yet deployed | `wrangler pages deploy . --project-name antra-landing` |
+| Landing redeploy | ✅ Done — v0.5.0 assets deployed (`389916d4`) | — |
 | Analytics / launch work | ⏳ Later scope | Follow Phase 2/3 plan |
 
 ---

@@ -87,7 +87,8 @@ rm -rf "$TEST_HOME"
 - **Deployed to:** Cloudflare Pages → `https://antra.iifelse.com`
 - **Project name:** `antra-landing`
 - **Design language:** Mudra (dark, surgical, violet accent)
-- **To update:** `wrangler pages deploy . --project-name antra-landing`
+- **To update:** run `wrangler pages deploy . --project-name antra-landing` **from `landing/`** — from the repo root it would publish the whole tree, source and `target/` included
+- **Last deployed:** 2026-09-27, deployment `389916d4` (v0.5.0 assets). Verified after the fact: `/install.sh` returns `Content-Type: text/plain` and serves the v0.5.0 pin, the index pin example reads v0.5.0
 
 ---
 
