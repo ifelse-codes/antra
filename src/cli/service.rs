@@ -138,6 +138,15 @@ fn install_launchd() -> Result<()> {
     // Create LaunchAgents directory if it doesn't exist
     std::fs::create_dir_all(&launch_agents_dir)?;
 
+    // Same file `antra proxy start` and `antra logs` use. It used to point at
+    // `~/.config/antra/daemon.log`, which on macOS is a *different* path from
+    // the one the CLI writes (data_local_dir → ~/Library/Application
+    // Support), so a service-managed daemon's output was unreachable.
+    let log_path = crate::util::logs::daemon_log_path();
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -160,15 +169,15 @@ fn install_launchd() -> Result<()> {
     <true/>
 
     <key>StandardOutPath</key>
-    <string>{}/.config/antra/daemon.log</string>
+    <string>{}</string>
 
     <key>StandardErrorPath</key>
-    <string>{}/.config/antra/daemon.log</string>
+    <string>{}</string>
 </dict>
 </plist>"#,
         antra_path.display(),
-        home_dir.display(),
-        home_dir.display()
+        log_path.display(),
+        log_path.display()
     );
 
     std::fs::write(&plist_path, &plist_content)?;

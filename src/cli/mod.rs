@@ -5,6 +5,7 @@ pub mod dev;
 pub mod doctor;
 pub mod hosts;
 pub mod list;
+pub mod logs;
 pub mod open;
 pub mod proxy;
 pub mod prune;
@@ -47,12 +48,18 @@ pub(crate) fn ensure_daemon() -> Result<bool> {
     output::print_warning("Daemon not running, starting it...");
 
     let exe = std::env::current_exe()?;
+    // Same log the explicit `antra proxy start` writes, so a daemon started
+    // implicitly — the path nearly everyone takes — is just as diagnosable as
+    // one started by hand. Both streams used to be `Stdio::null()`, which made
+    // "HTTPS server failed" a message with nowhere to go.
+    let log_file = crate::util::logs::open_for_append()
+        .map_err(|e| anyhow::anyhow!("Failed to open the daemon log: {e}"))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("proxy")
         .arg("start")
         .env("ANTRA_DAEMON", "1")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log_file.try_clone()?))
+        .stderr(std::process::Stdio::from(log_file))
         .stdin(std::process::Stdio::null());
 
     let child = cmd.spawn()?;
@@ -186,6 +193,17 @@ pub enum Commands {
         #[command(subcommand)]
         command: service::ServiceCommands,
     },
+
+    /// Show what the proxy daemon printed, instead of guessing
+    Logs {
+        /// Keep printing new lines as they arrive
+        #[arg(short, long)]
+        follow: bool,
+
+        /// How many past lines to show
+        #[arg(short, long, default_value_t = 50)]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -223,6 +241,7 @@ impl Cli {
             Commands::Add(args) => add::execute(args),
             Commands::List => list::execute(),
             Commands::Doctor => doctor::execute(),
+            Commands::Logs { follow, lines } => logs::execute(follow, lines),
             Commands::Trust {
                 status,
                 remove,

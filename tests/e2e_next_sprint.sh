@@ -20,13 +20,16 @@ pass_count=0
 fail_count=0
 
 log_pass() {
+    # `((x++))` exits 1 when x was 0 (it evaluates the *old* value), which
+    # under `set -e` kills the suite on its very first passing assertion.
+    # Assignment always succeeds, and the counter is the same.
     echo -e "${GREEN}✓ PASS${RESET}: $1" | tee -a "$RESULTS_FILE"
-    ((pass_count++))
+    pass_count=$((pass_count + 1))
 }
 
 log_fail() {
     echo -e "${RED}✗ FAIL${RESET}: $1" | tee -a "$RESULTS_FILE"
-    ((fail_count++))
+    fail_count=$((fail_count + 1))
 }
 
 log_section() {

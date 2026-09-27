@@ -13,7 +13,7 @@
   <a href="https://github.com/ifelse-codes/antra/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ifelse-codes/antra/ci.yml?branch=main&style=flat-square" alt="CI"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/rust-native-dea584?style=flat-square&logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/version-0.5.0-0ea5e9?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.0-0ea5e9?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-111827?style=flat-square" alt="Platforms">
 </p>
 
@@ -203,6 +203,7 @@ antra hosts    Manage /etc/hosts entries for Safari compatibility
 antra service  Manage Antra as a system service
 antra trust    Install / status / remove the local CA
 antra doctor   Diagnose CA, trust, daemon, ports 80 & 443
+antra logs     Read what the daemon printed (add -f to follow)
 antra proxy    start | stop | status
 antra clean    Wipe Antra state (with confirmation)
 ```
@@ -282,7 +283,20 @@ Installing a root CA is a trust-store change. Antra explains the change, asks `[
 
 ### `antra doctor`
 
-Checks CA presence, system trust, daemon health, route count, and whether `:80` / `:443` are bindable. Prints the fix, not a stack trace.
+Checks CA presence and strict X.509 validity, system trust, daemon health and whether its CA is current, route count, whether `:80` / `:443` are bindable, and the last few errors the daemon logged. Prints the fix, not a stack trace.
+
+### `antra logs`
+
+```bash
+antra logs              # last 50 lines of the daemon log
+antra logs --lines 200  # more history
+antra logs -f           # follow, like tail -f
+```
+
+The daemon logs everything it does here, including what used to vanish: a
+failed HTTPS bind, a TLS handshake error, a route it could not resolve. Both
+`antra proxy start` and the daemon Antra starts for you write to this one
+file, and `antra doctor` shows the last few error lines when it finds any.
 
 ---
 
@@ -461,7 +475,7 @@ If you are contributing, start with [`AGENT.md`](AGENT.md) — architecture, pha
 
 Phases 0–10 are complete. Antra is a working local proxy: HTTP, HTTPS, WebSockets, domain resolution, CA trust, daemon/IPC, DX commands, `antra.toml`, and cross-platform builds.
 
-This is `0.5.0`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
+This is `0.6.0`. APIs can still move. The promise will not: **one command, a real HTTPS URL, your process unchanged.**
 
 MVP definition: [`docs/mvp.md`](docs/mvp.md)
 

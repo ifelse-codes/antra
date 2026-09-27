@@ -18,7 +18,7 @@ body:
     id: version
     attributes:
       label: Antra version (if relevant)
-      placeholder: "0.5.0"
+      placeholder: "0.6.0"
   - type: dropdown
     id: os
     attributes:

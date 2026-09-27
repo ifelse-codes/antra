@@ -103,7 +103,7 @@ pub async fn start_server(
     registry: Arc<RouteRegistry>,
     cert_cache: Arc<CertCache>,
 ) -> Result<()> {
-    let state = Arc::new(ProxyState { registry });
+    let state = Arc::new(ProxyState::new(registry));
 
     let provider = rustls::crypto::ring::default_provider();
 

@@ -348,6 +348,24 @@ pub fn execute() -> Result<()> {
         }
     }
 
+    // 6. Recent daemon errors. `doctor` answers "is it healthy"; when it is
+    //    not, the reason is usually the last thing the daemon logged, and
+    //    until now that text went to /dev/null on the auto-start path.
+    if daemon_running {
+        let recent = crate::util::logs::recent_errors(5);
+        if !recent.is_empty() {
+            println!(
+                "  {} {}",
+                "⚠".yellow().bold(),
+                "The daemon logged errors — run `antra logs` for the full output".yellow()
+            );
+            for line in &recent {
+                println!("    {}", line.dimmed());
+            }
+            println!();
+        }
+    }
+
     println!();
     let error_count = issues.len();
     let warning_count = warnings.len();

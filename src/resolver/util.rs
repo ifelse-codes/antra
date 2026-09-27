@@ -64,12 +64,18 @@ pub fn select_resolver_for_registration(
 }
 
 /// Validate that a string is shaped like a DNS hostname: dot-separated
-/// labels of letters, digits, hyphens, and underscores.
+/// labels of letters, digits and hyphens.
 ///
 /// This is a *shape* check only (no policy about which suffixes are
 /// allowed). It runs before any resolver touches the system so garbage
 /// input fails with a clear error instead of a misleading privileged-write
 /// failure (e.g. "Permission denied writing /etc/hosts … try sudo").
+///
+/// Underscores are rejected, not tolerated. A leaf certificate puts the
+/// hostname in a `dNSName`, where RFC 1035 does not allow `_`; accepting it
+/// only moved the failure from a clear CLI error to a certificate that strict
+/// verifiers reject — the same class of bug as the `DNS:Antra Local CA` SAN
+/// that shipped in the root CA.
 pub fn validate_domain_shape(domain: &str) -> anyhow::Result<()> {
     const EXAMPLE: &str = "e.g. myapp.localhost";
     if domain.is_empty() {
@@ -81,12 +87,19 @@ pub fn validate_domain_shape(domain: &str) -> anyhow::Result<()> {
     if domain.contains(char::is_whitespace) {
         anyhow::bail!("Invalid domain '{domain}': must not contain spaces ({EXAMPLE})");
     }
+    if domain.contains('_') {
+        anyhow::bail!(
+            "Invalid domain '{domain}': underscores are not valid in a hostname. \
+             They cannot appear in a certificate's dNSName, so {domain} would never get a \
+             usable HTTPS certificate. Use a hyphen instead ({EXAMPLE})"
+        );
+    }
     if !domain
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
     {
         anyhow::bail!(
-            "Invalid domain '{domain}': only letters, digits, dots, hyphens, and underscores are allowed ({EXAMPLE})"
+            "Invalid domain '{domain}': only letters, digits, dots and hyphens are allowed ({EXAMPLE})"
         );
     }
     for label in domain.split('.') {
@@ -121,7 +134,6 @@ mod tests {
             "myapp.custom",
             "dev.local",
             "a",
-            "my_app.test",
             "my-app123.example",
         ] {
             assert!(validate_domain_shape(d).is_ok(), "{d} should be valid");
@@ -143,9 +155,27 @@ mod tests {
             "foo/bar.test",
             "foo:8080",
             "under_score!.test",
+            "my_app.test",
+            "_service._tcp.test",
         ] {
             assert!(validate_domain_shape(d).is_err(), "{d} should be invalid");
         }
+    }
+
+    /// The rejection has to say *why* an underscore is refused, or the fix
+    /// looks arbitrary: a user who has been running `my_app.test` locally has
+    /// no reason to guess that certificates, not Antra, are the constraint.
+    #[test]
+    fn test_shape_explains_why_underscores_are_refused() {
+        let err = validate_domain_shape("my_app.test")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("underscore"), "{err}");
+        assert!(
+            err.contains("dNSName") || err.contains("certificate"),
+            "{err}"
+        );
+        assert!(err.contains("hyphen"), "must offer the fix: {err}");
     }
 
     #[test]

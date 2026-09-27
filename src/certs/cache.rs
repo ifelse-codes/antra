@@ -30,7 +30,15 @@ impl fmt::Debug for CertCache {
 impl CertCache {
     /// Create a new cache, generating or loading the CA.
     pub fn new() -> Result<Self> {
-        let store = CertStore::new()?;
+        Self::with_store(CertStore::new()?)
+    }
+
+    /// Create a cache over a caller-supplied store.
+    ///
+    /// `new()` resolves the store from the environment, which in a test means
+    /// the developer's real `~/.config/antra` — so an end-to-end test that
+    /// starts the HTTPS server needs somewhere else to put the CA.
+    pub fn with_store(store: CertStore) -> Result<Self> {
         let ca = store.get_or_create_ca()?;
 
         tracing::info!("Certificate cache initialized");
@@ -91,10 +99,14 @@ impl CertCache {
         Some(key)
     }
 
-    /// Get the CA certificate PEM (for trust store installation).
+    /// The CA this cache signs with, in DER — what a client needs to trust it
+    /// without a PEM round-trip.
+    ///
+    /// Read by the proxy end-to-end test as a trust anchor; nothing in the
+    /// binary itself needs it.
     #[allow(dead_code)]
-    pub fn ca_cert_pem(&self) -> &str {
-        &self.ca.cert_pem
+    pub fn ca_cert_der(&self) -> &[u8] {
+        &self.ca.cert_der
     }
 
     /// Fingerprint of the CA this process is serving, reported over IPC so a

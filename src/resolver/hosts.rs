@@ -42,6 +42,21 @@ pub fn write_hosts_atomic(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// The command to suggest when a hosts write was denied.
+///
+/// Derived from the domain's suffix rather than passed in from each caller.
+/// It used to be hardcoded to `sudo antra alias <domain> <port>`, so a user
+/// running `antra run --domain myapp.internal -- …` was told to re-run a
+/// *different* command with a port they never chose — advice that cannot be
+/// followed.
+fn sudo_hint(domain: &str) -> String {
+    if domain.ends_with(".test") || domain.ends_with(".internal") || domain.ends_with(".local") {
+        format!("sudo antra run --domain {domain} -- <your command>")
+    } else {
+        format!("sudo antra hosts sync   # registers {domain}")
+    }
+}
+
 /// Write content to the hosts file, translating permission errors into an
 /// actionable hint (writing /etc/hosts needs sudo).
 pub fn write_hosts_with_hint(path: &Path, content: &str, domain: &str) -> Result<()> {
@@ -52,8 +67,9 @@ pub fn write_hosts_with_hint(path: &Path, content: &str, domain: &str) -> Result
         if denied {
             anyhow::anyhow!(
                 "Permission denied writing {} (needs sudo).\n\
-                 Re-run with: sudo antra alias {domain} <port>",
-                path.display()
+                 Re-run the same command with sudo, e.g.:\n  {}",
+                path.display(),
+                sudo_hint(domain)
             )
         } else {
             e

@@ -234,6 +234,64 @@ fn test_doctor_runs_without_panic() {
     assert!(stdout.contains("ANTRA DOCTOR") || stdout.contains("Checking") || code == 0);
 }
 
+/// `antra logs` is the answer to "the daemon said something and I never saw
+/// it". Both directions matter: the not-yet-created case must explain itself,
+/// and an existing log must actually be shown.
+#[test]
+fn test_logs_explains_itself_when_there_is_no_log() {
+    // A private home, not the shared one: other tests in this binary start a
+    // daemon, which now writes exactly the log this test is asserting is absent.
+    let home = TestHome::new();
+    let (stdout, stderr, code) = run_antra(&home, &["logs"]);
+    let out = format!("{stdout}{stderr}");
+    assert_eq!(code, 0, "no daemon yet is not a failure: {out}");
+    assert!(out.contains("No daemon log yet"), "{out}");
+    assert!(out.contains("daemon.log"), "must say where it goes: {out}");
+}
+
+#[test]
+fn test_logs_prints_the_daemon_log() {
+    let home = TestHome::new();
+    // Same layout the daemon writes into, under the disposable home.
+    let log_dir = home.config_dir().parent().unwrap().join("antra");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join("daemon.log"),
+        "INFO antra::proxy::https: HTTPS proxy listening\nERROR antra::daemon::server: HTTPS server failed\n",
+    )
+    .unwrap();
+
+    let (stdout, stderr, code) = run_antra(&home, &["logs"]);
+    let out = format!("{stdout}{stderr}");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("HTTPS server failed"),
+        "must show the failure: {out}"
+    );
+    assert!(out.contains("HTTPS proxy listening"), "{out}");
+}
+
+#[test]
+fn test_logs_line_limit_is_respected() {
+    let home = TestHome::new();
+    let log_dir = home.config_dir().parent().unwrap().join("antra");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(log_dir.join("daemon.log"), body).unwrap();
+
+    let (stdout, stderr, code) = run_antra(&home, &["logs", "--lines", "3"]);
+    let out = format!("{stdout}{stderr}");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("line 200"),
+        "newest lines must be shown: {out}"
+    );
+    assert!(
+        !out.contains("line 100\n"),
+        "older lines must be dropped: {out}"
+    );
+}
+
 #[test]
 fn test_doctor_checks_ports() {
     let home = TestHome::shared();
