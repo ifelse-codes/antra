@@ -2,16 +2,23 @@
 
 ---
 
-## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-25)
+## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-27)
 
-**Current state: `v0.4.0` is PUBLISHED and the site is deployed.** The release is technically live; security hardening and acceptance work is now in the working tree and has not been released yet.
+**Current state: `v0.5.0` is PUBLISHED and the site is live.** The working tree is clean; everything shipped through `main`. `v0.5.0` fixed the defect that made HTTPS unusable on Apple's TLS stack (the root CA carried an invalid `subjectAltName`). The `landing/` assets for that release are **not yet redeployed** — the live site still serves the v0.4.0 installer copy, which only affects the version-pin example in a comment.
 
-**DONE & verified (see Session Progress — 2026-09-23 below for detail/evidence):**
-- Sites ✅ `antra.iifelse.com` deployed; `/install.sh` → `Content-Type: text/plain`, v0.4.0; privacy/terms 200.
-- Release ✅ `v0.4.0` published as Latest (assets + checksums verified); Homebrew Formula updated.
-- Docs ✅ `GO-LIVE-PLAN.md` + `ROADMAP.md` updated; security hardening is documented below and remains uncommitted.
+**DONE & verified:**
+- Release ✅ `v0.5.0` published as Latest (5 targets + checksums verified by downloading the artifacts; the macOS binary was smoke-tested and mints a SAN-free CA). Homebrew Formula updated from that release's own `.sha256` assets.
+- Code ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12) (CA v2 + rotation + strict X.509 gates) and [#13](https://github.com/ifelse-codes/antra/pull/13) (formula) merged; all 7 CI jobs green.
+- Gates ✅ `tests/cert_strict.rs` (strict X.509 rules) and `tests/e2e_securetransport.rs` (macOS: `/usr/bin/curl --cacert` through a live daemon) are the regression gates for the CA work. Rationale and evidence: `fix-plan-2026-09-26-ca-trust.md`, `deep-dive-report-2026-09-26.md` §F.
+- Sites ✅ `antra.iifelse.com` deployed; `/install.sh` → `Content-Type: text/plain`; privacy/terms 200. **Redeploy pending** for the `v0.5.0` copy in `landing/`.
 
-**LATEST VERIFICATION — 2026-09-25:**
+**LATEST VERIFICATION — 2026-09-27 (v0.5.0):**
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite green in a disposable HOME (216 executions, 0 failures); all 7 CI jobs green on both PRs.
+- `/usr/bin/curl --cacert` (Apple's SecureTransport — the stack that rejected the old CA) returns 200 through a live `antra proxy start` + `antra alias`; an untrusted chain is still refused. Now runs in macOS CI as `tests/e2e_securetransport.rs`.
+- Migration rehearsed in a disposable HOME: a ≤0.4.0 install rotates once, prompts to re-trust, and has the superseded root removed byte-exactly; `doctor` reports the strict-CA result and a pending retired CA.
+- Safari and Firefox were **not** opened in a browser — the MVP checklist in `docs/mvp.md` leaves those boxes unchecked by design.
+
+**VERIFICATION — 2026-09-25 (v0.4.0 era, historical):**
 - `cargo fmt`, `cargo check --all-targets`, Clippy, release build, doc tests, and **299 test executions** passed.
 - Chrome 153 + Vite 8.2.1 passed through the proxy: HTTP 200, proxy-origin `wss://` HMR socket, Vite `update` frame, no direct backend WebSocket, and clean Ctrl+C route/process cleanup.
 - A real PTY verified both CA consent answers: `n` skips trust; Enter installs the disposable CA. The disposable CA was removed afterward and the pre-existing Keychain certificate stayed unchanged.
@@ -47,22 +54,23 @@
 
 Antra solves a real, painful problem: developers hate port-based URLs (`localhost:5173`), browser security warnings, and complex local dev setups. The product is **functionally complete** and ready for launch.
 
-### Engineering Status: HARDENING COMPLETE IN WORKING TREE; RELEASE PENDING
+### Engineering Status: v0.5.0 PUBLISHED
 
-- **Published version:** 0.4.0
-- **Local verification:** `cargo fmt`, `cargo check --all-targets`, Clippy, doc tests, and 299 test executions passed
-- **CI/CD:** macOS/Ubuntu full tests; Windows hermetic tests are configured but still need a GitHub Actions run
-- **Release workflow:** Automated cross-platform builds with checksums
-- **Security hardening:** CA consent, custom-domain approval, reversible cleanup, and Unix process-group isolation are implemented in the working tree
-- **Documentation:** Security behavior and acceptance evidence are recorded below
+- **Published version:** 0.5.0 (was 0.4.0)
+- **Local verification:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and 216 test executions passed in a disposable HOME
+- **CI/CD:** macOS + Ubuntu full tests, Windows hermetic tests, and a macOS SecureTransport certificate test — all green on PRs #12 and #13
+- **Release workflow:** Automated cross-platform builds with checksums; artifacts downloaded and verified
+- **Certificate correctness:** root CA no longer carries a SAN, validity bounded to 800 days, existing installs rotate once with byte-exact removal of the superseded root (`docs/security.md`)
+- **Documentation:** security behaviour, rotation policy, and acceptance evidence recorded below and in `fix-plan-2026-09-26-ca-trust.md`
 
 ### Gaps Before Release ⚠️
 
 | Category | Status | Priority |
 |----------|--------|----------|
-| Security hardening | ✅ Working tree; release pending | Review, tag, and publish |
-| Browser certificate acceptance | ⏳ Chrome transport/HMR passed; explicit trust refresh still required for no-warning proof | Complete after approval |
-| Windows CI execution | ⏳ Job configured; not run locally | Run on GitHub |
+| Security hardening | ✅ Shipped in v0.5.0 | — |
+| Browser certificate acceptance | ✅ Machine-checked on Apple's TLS stack (`tests/e2e_securetransport.rs`); Safari + Firefox browser pass still open | Human pass on `docs/mvp.md` |
+| Windows CI execution | ✅ Green on PRs #12 and #13 | — |
+| Landing redeploy | ⏳ `landing/` updated for v0.5.0, not yet deployed | `wrangler pages deploy . --project-name antra-landing` |
 | Analytics / launch work | ⏳ Later scope | Follow Phase 2/3 plan |
 
 ---
