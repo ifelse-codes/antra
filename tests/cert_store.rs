@@ -129,3 +129,111 @@ fn test_leaf_key_permissions_on_unix() {
         assert_eq!(mode & 0o777, 0o600);
     }
 }
+
+/// A CA on disk with no version marker is a pre-rotation CA (every install
+/// from Antra ≤ 0.4.0). `get_or_create_ca` must replace it, because the old
+/// root carried a `dNSName` that Apple's TLS stack refuses to parse.
+#[test]
+fn test_ca_without_version_marker_is_rotated() {
+    let (_dir, store) = temp_cert_store();
+    // Seed a "legacy" CA exactly as an old install would have left it:
+    // ca.pem + ca-key.pem, no marker file.
+    let legacy = ca::generate_ca().unwrap();
+    store.save_ca(&legacy).unwrap();
+    assert!(!store.config_dir.join(".ca-version").exists());
+
+    let current = store.get_or_create_ca().unwrap();
+
+    assert_ne!(
+        current.cert_pem, legacy.cert_pem,
+        "the defective CA must be replaced, not reused"
+    );
+    assert_eq!(
+        store.pending_retired_ca_pem().as_deref(),
+        Some(legacy.cert_pem.as_str()),
+        "the replaced CA must be kept for exact removal from trust stores"
+    );
+}
+
+/// A marker written by an older, different version also triggers a rotation —
+/// the marker records what is on disk, not what this build wishes were there.
+#[test]
+fn test_ca_with_stale_marker_version_is_rotated() {
+    let (_dir, store) = temp_cert_store();
+    let legacy = ca::generate_ca().unwrap();
+    store.save_ca(&legacy).unwrap();
+    std::fs::write(store.config_dir.join(".ca-version"), "1").unwrap();
+
+    let current = store.get_or_create_ca().unwrap();
+
+    assert_ne!(current.cert_pem, legacy.cert_pem);
+    assert!(store.pending_retired_ca_pem().is_some());
+}
+
+#[test]
+fn test_current_ca_is_loaded_without_rotation() {
+    let (_dir, store) = temp_cert_store();
+    let first = store.get_or_create_ca().unwrap();
+    let second = store.get_or_create_ca().unwrap();
+
+    assert_eq!(first.cert_pem, second.cert_pem);
+    assert!(
+        store.pending_retired_ca_pem().is_none(),
+        "a current CA must not leave a retired CA behind"
+    );
+}
+
+/// If a rotation was interrupted before the trust store was cleaned up, the
+/// retained certificate is the one the user may still have trusted. A second
+/// rotation must not overwrite it with a CA that was never installed anywhere.
+#[test]
+fn test_rotation_never_overwrites_a_pending_retired_ca() {
+    let (_dir, store) = temp_cert_store();
+    let first_install = ca::generate_ca().unwrap();
+    std::fs::write(
+        store.config_dir.join("retired-ca.pem"),
+        &first_install.cert_pem,
+    )
+    .unwrap();
+
+    // A CA on disk that nobody ever trusted, plus a stale marker.
+    let on_disk = ca::generate_ca().unwrap();
+    store.save_ca(&on_disk).unwrap();
+    std::fs::write(store.config_dir.join(".ca-version"), "1").unwrap();
+
+    let current = store.get_or_create_ca().unwrap();
+
+    assert_ne!(current.cert_pem, on_disk.cert_pem);
+    assert_eq!(
+        store.pending_retired_ca_pem().as_deref(),
+        Some(first_install.cert_pem.as_str())
+    );
+}
+
+#[test]
+fn test_clear_pending_retired_ca_removes_the_file() {
+    let (_dir, store) = temp_cert_store();
+    let legacy = ca::generate_ca().unwrap();
+    store.save_ca(&legacy).unwrap();
+    store.get_or_create_ca().unwrap();
+    assert!(store.pending_retired_ca_pem().is_some());
+
+    store.clear_pending_retired_ca();
+
+    assert!(store.pending_retired_ca_pem().is_none());
+}
+
+/// The retired root is a different certificate, so the fingerprint the daemon
+/// reports over IPC changes with it — that is how `doctor` notices a daemon
+/// still serving the old CA.
+#[test]
+fn test_rotation_changes_the_ca_fingerprint() {
+    let (_dir, store) = temp_cert_store();
+    let legacy = ca::generate_ca().unwrap();
+    store.save_ca(&legacy).unwrap();
+    let before = antra::certs::fingerprint(legacy.cert_der.as_ref());
+
+    let current = store.get_or_create_ca().unwrap();
+
+    assert_ne!(antra::certs::fingerprint(current.cert_der.as_ref()), before);
+}

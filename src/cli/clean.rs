@@ -13,7 +13,7 @@ pub fn execute(yes: bool) -> Result<()> {
     println!("{}", "ANTRA CLEAN".bold());
     println!();
     println!("  This will permanently remove:");
-    println!("    • System trust entries for the current Antra CA");
+    println!("    • System trust entries for the current (and any superseded) Antra CA");
     println!("    • The complete Antra-managed hosts block");
     println!("    • Root CA certificate and key");
     println!("    • All cached leaf certificates");

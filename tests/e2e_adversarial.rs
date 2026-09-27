@@ -1,111 +1,28 @@
-use std::process::{Command, Stdio};
+mod common;
+
+use common::*;
 use std::time::Duration;
+
 use tempfile::TempDir;
-
-fn antra_bin() -> String {
-    let mut path = std::env::current_exe().unwrap();
-    path.pop();
-    path.pop();
-    path.push("antra");
-    #[cfg(target_os = "windows")]
-    path.set_extension("exe");
-    path.to_string_lossy().to_string()
-}
-
-fn run_antra(args: &[&str]) -> (String, String, i32) {
-    run_antra_with_timeout(args, Duration::from_secs(10))
-}
-
-fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
-    let mut child = Command::new(antra_bin())
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute antra");
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().unwrap();
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                return (stdout, stderr, status.code().unwrap_or(-1));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    // Don't call child.wait() — on Windows it hangs when
-                    // the killed process has open pipe handles or children.
-                    return (String::new(), "timeout".to_string(), -1);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                return (String::new(), format!("{e}"), -1);
-            }
-        }
-    }
-}
-
-fn run_antra_with_dir(dir: &std::path::Path, args: &[&str]) -> (String, String, i32) {
-    run_antra_with_dir_timeout(dir, args, Duration::from_secs(10))
-}
-
-fn run_antra_with_dir_timeout(
-    dir: &std::path::Path,
-    args: &[&str],
-    timeout: Duration,
-) -> (String, String, i32) {
-    let mut child = Command::new(antra_bin())
-        .args(args)
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute antra");
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().unwrap();
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                return (stdout, stderr, status.code().unwrap_or(-1));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    return (String::new(), "timeout".to_string(), -1);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                return (String::new(), format!("{e}"), -1);
-            }
-        }
-    }
-}
-
 // ===================================================================
 // SECTION 1: Malformed CLI Arguments
 // ===================================================================
 
 #[test]
 fn test_extremely_long_domain() {
+    let home = TestHome::shared();
     let long_domain = "a".repeat(10000);
     let args = vec!["run", "--domain", &long_domain, "--", "echo", "test"];
-    let (_, stderr, code) = run_antra(&args);
+    let (_, stderr, code) = run_antra(home, &args);
     assert_ne!(code, 0);
     assert!(stderr.contains("error") || stderr.contains("too long") || code == 1);
 }
 
 #[test]
 fn test_domain_with_spaces() {
+    let home = TestHome::shared();
     let (_, _, code) = run_antra_with_timeout(
+        home,
         &["run", "--domain", "my app.localhost", "--", "echo"],
         Duration::from_secs(5),
     );
@@ -114,6 +31,7 @@ fn test_domain_with_spaces() {
 
 #[test]
 fn test_domain_with_null_bytes() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -121,26 +39,30 @@ fn test_domain_with_null_bytes() {
     )
     .unwrap();
 
-    let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, stderr, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert!(code != 0 || stderr.contains("error") || stderr.contains("parse"));
 }
 
 #[test]
 fn test_run_without_command() {
-    let (_, stderr, code) = run_antra(&["run", "--domain", "test.localhost"]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(home, &["run", "--domain", "test.localhost"]);
     assert_ne!(code, 0);
     assert!(stderr.contains("error") || stderr.contains("required") || stderr.contains("COMMAND"));
 }
 
 #[test]
 fn test_run_without_domain() {
-    let (_, _, code) = run_antra(&["run", "--", "echo", "test"]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(home, &["run", "--", "echo", "test"]);
     assert_ne!(code, 0);
 }
 
 #[test]
 fn test_port_zero_auto_assigns() {
+    let home = TestHome::shared();
     let (_, _, code) = run_antra_with_timeout(
+        home,
         &[
             "run",
             "--domain",
@@ -157,43 +79,55 @@ fn test_port_zero_auto_assigns() {
 
 #[test]
 fn test_port_out_of_range() {
-    let (_, _, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "99999",
-        "--",
-        "echo",
-    ]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "99999",
+            "--",
+            "echo",
+        ],
+    );
     assert_ne!(code, 0);
 }
 
 #[test]
 fn test_negative_port() {
-    let (_, _, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "-1",
-        "--",
-        "echo",
-    ]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "-1",
+            "--",
+            "echo",
+        ],
+    );
     assert_ne!(code, 0);
 }
 
 #[test]
 fn test_non_numeric_port() {
-    let (_, _, code) = run_antra(&[
-        "run",
-        "--domain",
-        "test.localhost",
-        "--port",
-        "abc",
-        "--",
-        "echo",
-    ]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "test.localhost",
+            "--port",
+            "abc",
+            "--",
+            "echo",
+        ],
+    );
     assert_ne!(code, 0);
 }
 
@@ -203,28 +137,38 @@ fn test_non_numeric_port() {
 
 #[test]
 fn test_public_domain_rejected() {
-    let (_, stderr, code) = run_antra(&["run", "--domain", "google.com", "--", "echo", "test"]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(
+        home,
+        &["run", "--domain", "google.com", "--", "echo", "test"],
+    );
     assert_ne!(code, 0);
     assert!(stderr.contains("--allow-custom-domain"));
 }
 
 #[test]
 fn test_custom_domain_rejected_without_approval() {
-    let (_, stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "api.customer.example",
-        "--",
-        "echo",
-        "test",
-    ]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "api.customer.example",
+            "--",
+            "echo",
+            "test",
+        ],
+    );
     assert_ne!(code, 0);
     assert!(stderr.contains("--allow-custom-domain"));
 }
 
 #[test]
 fn test_localhost_bare_accepted() {
+    let home = TestHome::shared();
     let (_, _, code) = run_antra_with_timeout(
+        home,
         &["run", "--domain", "localhost", "--", "echo", "test"],
         Duration::from_secs(5),
     );
@@ -233,7 +177,11 @@ fn test_localhost_bare_accepted() {
 
 #[test]
 fn test_github_rejected() {
-    let (_, _, code) = run_antra(&["run", "--domain", "github.com", "--", "echo", "test"]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(
+        home,
+        &["run", "--domain", "github.com", "--", "echo", "test"],
+    );
     assert_ne!(code, 0);
 }
 
@@ -247,6 +195,7 @@ fn test_github_rejected() {
 
 #[test]
 fn test_toml_injection_attempt() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -262,12 +211,13 @@ escalate = true
     )
     .unwrap();
 
-    let (stdout, _, _) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (stdout, _, _) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert!(stdout.contains("antra.toml") || stdout.contains("Loaded"));
 }
 
 #[test]
 fn test_extremely_large_config() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     let large_args: Vec<String> = (0..10000).map(|i| format!("\"arg{i}\"")).collect();
     let config = format!(
@@ -282,16 +232,17 @@ args = [{}]
     std::fs::write(dir.path().join("antra.toml"), &config).unwrap();
 
     let (_, stderr, code) =
-        run_antra_with_dir_timeout(dir.path(), &["dev"], Duration::from_secs(30));
+        run_antra_with_dir_timeout(home, dir.path(), &["dev"], Duration::from_secs(30));
     assert!(code >= 0 || stderr.contains("error") || stderr.contains("timeout"));
 }
 
 #[test]
 fn test_binary_config_file() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("antra.toml"), [0x00, 0xFF, 0xFE, 0xFD]).unwrap();
 
-    let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, stderr, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
     let output = stderr.to_string();
     assert!(output.contains("parse") || output.contains("error") || output.contains("Failed"));
@@ -299,15 +250,17 @@ fn test_binary_config_file() {
 
 #[test]
 fn test_empty_config_file() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("antra.toml"), "").unwrap();
 
-    let (_, _, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, _, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
 }
 
 #[test]
 fn test_config_with_only_comments() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -315,7 +268,7 @@ fn test_config_with_only_comments() {
     )
     .unwrap();
 
-    let (_, _, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, _, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
 }
 
@@ -325,21 +278,23 @@ fn test_config_with_only_comments() {
 
 #[test]
 fn test_rapid_help_calls() {
+    let home = TestHome::shared();
     for _ in 0..50 {
-        let (_, _, code) = run_antra(&["--help"]);
+        let (_, _, code) = run_antra(home, &["--help"]);
         assert_eq!(code, 0);
     }
 }
 
 #[test]
 fn test_concurrent_status_calls() {
+    let home = TestHome::shared();
     use std::thread;
 
     let handles: Vec<_> = (0..10)
         .map(|_| {
-            thread::spawn(|| {
+            thread::spawn(move || {
                 for _ in 0..5 {
-                    let (_, _, code) = run_antra(&["proxy", "status"]);
+                    let (_, _, code) = run_antra(home, &["proxy", "status"]);
                     assert!(code >= 0);
                 }
             })
@@ -357,7 +312,9 @@ fn test_concurrent_status_calls() {
 
 #[test]
 fn test_port_boundary_valid() {
+    let home = TestHome::shared();
     let (_, stderr, code) = run_antra_with_timeout(
+        home,
         &[
             "run",
             "--domain",
@@ -374,7 +331,9 @@ fn test_port_boundary_valid() {
 
 #[test]
 fn test_port_max_boundary() {
+    let home = TestHome::shared();
     let (_, stderr, code) = run_antra_with_timeout(
+        home,
         &[
             "run",
             "--domain",
@@ -391,22 +350,27 @@ fn test_port_max_boundary() {
 
 #[test]
 fn test_multiple_domain_flags_rejected() {
-    let (_, stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "first.localhost",
-        "--domain",
-        "second.localhost",
-        "--",
-        "echo",
-    ]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "first.localhost",
+            "--domain",
+            "second.localhost",
+            "--",
+            "echo",
+        ],
+    );
     assert_ne!(code, 0);
     assert!(stderr.contains("cannot be used multiple times") || stderr.contains("error"));
 }
 
 #[test]
 fn test_empty_command_args() {
-    let (_, stderr, code) = run_antra(&["run", "--domain", "test.localhost", "--"]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(home, &["run", "--domain", "test.localhost", "--"]);
     assert!(code != 0 || stderr.contains("error") || stderr.contains("required"));
 }
 
@@ -416,13 +380,15 @@ fn test_empty_command_args() {
 
 #[test]
 fn test_invalid_route_format() {
-    let (_, stderr, code) = run_antra(&["alias", "noport", "3000"]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(home, &["alias", "noport", "3000"]);
     assert!(code >= 0 || stderr.contains("error"));
 }
 
 #[test]
 fn test_alias_port_overflow() {
-    let (_, _, code) = run_antra(&["alias", "test.localhost", "99999"]);
+    let home = TestHome::shared();
+    let (_, _, code) = run_antra(home, &["alias", "test.localhost", "99999"]);
     assert_ne!(code, 0);
 }
 
@@ -436,7 +402,9 @@ fn test_alias_port_overflow() {
 
 #[test]
 fn test_error_messages_are_human_readable() {
+    let home = TestHome::shared();
     let (_, stderr, code) = run_antra_with_timeout(
+        home,
         &["run", "--domain", "google.com", "--", "echo"],
         Duration::from_secs(5),
     );
@@ -448,7 +416,9 @@ fn test_error_messages_are_human_readable() {
 
 #[test]
 fn test_missing_command_error_message() {
+    let home = TestHome::shared();
     let (_, stderr, code) = run_antra_with_timeout(
+        home,
         &["run", "--domain", "test.localhost"],
         Duration::from_secs(5),
     );

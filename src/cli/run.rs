@@ -113,33 +113,59 @@ fn maybe_prompt_trust(no_trust_prompt: bool, yes: bool) {
         return;
     }
 
-    if !yes {
-        if !std::io::stdin().is_terminal() {
-            println!();
-            println!(
-                "  {} Non-interactive session — skipping automatic CA install.",
-                "ℹ".cyan()
-            );
-            println!("  Run {} to enable warning-free HTTPS", trust_hint().bold());
-            println!();
-            return;
-        }
+    if !yes && !std::io::stdin().is_terminal() {
+        println!();
+        println!(
+            "  {} Non-interactive session — skipping automatic CA install.",
+            "ℹ".cyan()
+        );
+        println!("  Run {} to enable warning-free HTTPS", trust_hint().bold());
+        println!();
+        return;
+    }
 
-        if global::was_trust_prompted() {
-            return;
-        }
-
-        if crate::trust::is_trusted_for_https() {
+    // Trust state first, "have we asked before" second. Checking the flag
+    // first meant a CA rotation was invisible: the flag stayed true, the
+    // prompt was skipped, and the user got broken HTTPS behind a green
+    // terminal — the exact failure this rotation path exists to repair.
+    if crate::trust::is_trusted_for_https() {
+        if !yes && !global::was_trust_prompted() {
             println!(
                 "  {} CA is already trusted — HTTPS ready",
                 "✓".green().bold()
             );
             let _ = global::mark_trust_prompted();
+        }
+        return;
+    }
+
+    let rotated = crate::trust::retired_ca_pending();
+
+    if !yes {
+        if global::was_trust_prompted() {
+            // Asked once, still untrusted. Say why rather than staying quiet:
+            // silence here reads as "HTTPS is fine".
+            if rotated {
+                println!();
+                println!(
+                    "  {} Antra regenerated its local CA, so the trusted one is stale.",
+                    "⚠".yellow()
+                );
+                println!(
+                    "    HTTPS will show cert warnings until you run {}",
+                    trust_hint().bold()
+                );
+            }
             return;
         }
 
         println!();
-        println!("  Antra needs a local CA certificate for warning-free HTTPS.");
+        if rotated {
+            println!("  Antra regenerated its local CA certificate (a stricter one).");
+            println!("  The old certificate can no longer sign anything and is removed on trust.");
+        } else {
+            println!("  Antra needs a local CA certificate for warning-free HTTPS.");
+        }
         println!("  It is local-only and can be removed with `antra trust --remove`.");
         println!();
         match prompt_for_trust_consent() {

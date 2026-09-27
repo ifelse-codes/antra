@@ -211,7 +211,11 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     let cert_cache = Arc::new(
         CertCache::new().map_err(|e| anyhow::anyhow!("Failed to initialize cert cache: {e}"))?,
     );
-
+    // Publish the fingerprint before binding anything: a CLI that asks
+    // whether this daemon still holds the CA on disk needs an answer even
+    // while routes are being served, and a daemon that rotated the CA at
+    // startup must be identifiable as such.
+    crate::ipc::server::set_ca_fingerprint(cert_cache.ca_fingerprint());
     // Probe + bind the proxy ports BEFORE the IPC socket: a daemon that
     // cannot serve HTTPS must fail loudly instead of half-starting and
     // stealing the socket (all routes would 502 behind it).
@@ -541,6 +545,7 @@ pub fn daemon_status() -> Result<String> {
             uptime_secs: 0,
             route_count: 0,
             socket_path: String::new(),
+            ca_fingerprint: None,
         },
     ))
 }

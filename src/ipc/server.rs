@@ -30,6 +30,18 @@ pub fn set_startup_status(status: Arc<tokio::sync::Mutex<StartupStatus>>) {
     let _ = STARTUP_STATUS.set(status);
 }
 
+/// Fingerprint of the CA this daemon is serving, set once at startup.
+///
+/// Process-global for the same reason `STARTUP_STATUS` is: the handler that
+/// answers `Status` has no handle to the certificate cache, and threading one
+/// through every layer of the IPC path would buy nothing.
+static CA_FINGERPRINT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Publish the CA fingerprint reported by `Status` queries.
+pub fn set_ca_fingerprint(fingerprint: String) {
+    let _ = CA_FINGERPRINT.set(fingerprint);
+}
+
 /// Signal shutdown to the daemon
 pub fn signal_shutdown() {
     if let Some(tx) = SHUTDOWN_TX.get() {
@@ -406,6 +418,7 @@ fn handle_status(start_time: Instant, registry: &RouteRegistry) -> IpcMessage {
         uptime_secs: start_time.elapsed().as_secs(),
         route_count: registry.list().len(),
         socket_path: ipc_path,
+        ca_fingerprint: CA_FINGERPRINT.get().cloned(),
     }))
 }
 

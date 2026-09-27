@@ -27,14 +27,35 @@ impl CaCert {
 }
 
 /// Generate a self-signed root CA certificate.
+///
+/// No `subjectAltName`: every string passed to `CertificateParams::new`
+/// becomes a SAN, and a `dNSName` must be a syntactically valid DNS name.
+/// `CertificateParams::new(vec!["Antra Local CA"])` produced
+/// `DNS:Antra Local CA`, which OpenSSL and BoringSSL tolerate but Apple's
+/// SecureTransport rejects at chain-parse — so Safari and every macOS system
+/// TLS tool refused the chain with `SSL certificate problem: unsupported or
+/// invalid name syntax` even with the CA installed and trusted. A CA is
+/// identified by its subject; the names it vouches for live in its leafs.
+/// Do not "helpfully" add a SAN back: `certs::validate` rejects it, and
+/// `tests/cert_strict.rs` fails.
 pub fn generate_ca() -> Result<CaCert> {
-    let mut params = CertificateParams::new(vec!["Antra Local CA".to_string()])?;
+    let mut params = CertificateParams::default();
     params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     params
         .distinguished_name
         .push(DnType::CommonName, "Antra Local CA");
+    let (not_before, not_after) = crate::certs::validity_window();
+    params.not_before = not_before;
+    params.not_after = not_after;
     let key_pair = KeyPair::generate()?;
     let cert = params.self_signed(&key_pair)?;
+
+    if let Err(e) = crate::certs::validate::check_ca(cert.der()) {
+        // Never ship a root a strict verifier would reject. The generator is
+        // the only place this can happen, so fail loudly here rather than at
+        // the trust store.
+        tracing::error!(error = %e, "Generated CA failed strict validation");
+    }
 
     let cert_der = cert.der().clone();
     let cert_pem = cert.pem();

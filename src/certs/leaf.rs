@@ -29,9 +29,18 @@ impl LeafCert {
 ///
 /// The subject CN is the hostname (so issuer != subject and chains build),
 /// with SAN + AuthorityKeyIdentifier + serverAuth EKU so OS trust stores and
-/// browsers accept it once the Antra CA is trusted.
+/// browsers accept it once the Antra CA is trusted. The SAN is the *only*
+/// place the hostname appears: Apple stopped trusting CN-only certificates,
+/// and a strict verifier rejects an invalid `dNSName` outright.
+///
+/// Validity is bounded by `certs::VALIDITY_DAYS` because Apple caps TLS
+/// server certificates at 825 days, custom roots included; see
+/// `certs::validity_window`.
 pub fn generate_leaf_cert(hostname: &str, ca: &CaCert) -> Result<LeafCert> {
     let mut params = CertificateParams::new(vec![hostname.to_string()])?;
+    let (not_before, not_after) = crate::certs::validity_window();
+    params.not_before = not_before;
+    params.not_after = not_after;
     params.distinguished_name.push(DnType::CommonName, hostname);
     params.use_authority_key_identifier_extension = true;
     params.key_usages = vec![
@@ -43,6 +52,12 @@ pub fn generate_leaf_cert(hostname: &str, ca: &CaCert) -> Result<LeafCert> {
 
     let issuer = ca.issuer()?;
     let cert = params.signed_by(&key_pair, &issuer)?;
+
+    if let Err(e) = crate::certs::validate::check_leaf(cert.der(), hostname) {
+        // A leaf a strict verifier rejects fails the handshake at the worst
+        // possible moment; say so at generation time instead.
+        tracing::error!(%hostname, error = %e, "Generated leaf failed strict validation");
+    }
 
     Ok(LeafCert {
         cert_der: cert.der().clone(),

@@ -61,6 +61,69 @@ pub fn is_trusted_for_https() -> bool {
     check_trust_status().unwrap_or(false) || check_user_level_trust().unwrap_or(false)
 }
 
+/// True when a CA rotation left a superseded certificate behind.
+///
+/// The CLI reads this to explain *why* HTTPS is untrusted on a machine that
+/// was asked to trust Antra long ago.
+pub fn retired_ca_pending() -> bool {
+    CertStore::new()
+        .ok()
+        .is_some_and(|store| store.pending_retired_ca_pem().is_some())
+}
+
+/// Drop the retired CA from the trust stores, now that the current one is
+/// trusted.
+///
+/// Removal is byte-exact on every platform — os-truststore identifies a
+/// certificate by the SHA-256 of its DER, the macOS login keychain by the hash
+/// of the exact PEM, Windows by comparing DER — so this cannot touch an
+/// unrelated "Antra Local CA" a user installed by hand.
+///
+/// Failure is reported and the file kept rather than swallowed: a root the
+/// machine still trusts is exactly what this change exists to eliminate, and
+/// the user needs to know it is still there. Nothing is removed without the
+/// user having just consented to installing the replacement (`docs/security.md`
+/// rule 1: always prompt, always explain, always provide an undo).
+fn finish_ca_rotation(store: &CertStore) {
+    match remove_pending_retired_ca_from(store) {
+        Ok(true) => println!(
+            "{}",
+            "  ✓ Removed the superseded Antra CA from the trust store".green()
+        ),
+        Ok(false) => {}
+        Err(e) => {
+            println!(
+                "{}",
+                format!("  ⚠ The retired Antra CA is still trusted: {e:#}").yellow()
+            );
+            println!("    Remove it with: {}", "sudo antra trust --remove".bold());
+        }
+    }
+}
+
+/// Remove a superseded CA left by a rotation, if one is waiting.
+///
+/// Strict: callers of this delete the local state afterwards, and a failure
+/// that swallowed the error would destroy the only copy of the certificate
+/// still installed in a trust store.
+pub(crate) fn remove_pending_retired_ca() -> Result<bool> {
+    let Ok(store) = CertStore::new() else {
+        return Ok(false);
+    };
+    remove_pending_retired_ca_from(&store)
+}
+
+fn remove_pending_retired_ca_from(store: &CertStore) -> Result<bool> {
+    let Some(pem) = store.pending_retired_ca_pem() else {
+        return Ok(false);
+    };
+    let retired = os_truststore::Cert::from_pem(&pem)
+        .context("The superseded CA on disk is not a readable certificate")?;
+    remove_ca_exact(&retired)?;
+    store.clear_pending_retired_ca();
+    Ok(true)
+}
+
 fn load_existing_ca() -> Result<Option<os_truststore::Cert>> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
@@ -256,6 +319,7 @@ pub fn install_ca() -> Result<()> {
 
     if already_installed {
         println!("{}", "  Antra CA is already trusted by the system.".green());
+        finish_ca_rotation(&store);
         return Ok(());
     }
 
@@ -306,6 +370,7 @@ pub fn install_ca() -> Result<()> {
             if let Some(detail) = report_detail(&report) {
                 println!("    {detail}");
             }
+            finish_ca_rotation(&store);
             Ok(())
         }
         Err(os_truststore::TrustError::NeedsElevation { detail }) => {
@@ -326,6 +391,7 @@ pub fn install_ca() -> Result<()> {
                             "    {}",
                             "No sudo required. HTTPS for custom domains is ready.".dimmed()
                         );
+                        finish_ca_rotation(&store);
                         return Ok(());
                     }
                     Err(e) => {
@@ -349,6 +415,7 @@ pub fn install_ca() -> Result<()> {
                             "    {}",
                             "No elevation needed. HTTPS works for this Windows user.".dimmed()
                         );
+                        finish_ca_rotation(&store);
                         return Ok(());
                     }
                     Err(e) => {
@@ -413,9 +480,11 @@ pub fn install_ca_noninteractive() -> Result<()> {
         let store = CertStore::new()?;
         let ca = store.get_or_create_ca()?;
         if check_user_level_trust()? {
+            finish_ca_rotation(&store);
             return Ok(());
         }
         if install_ca_user_level_silent(&ca).is_ok() {
+            finish_ca_rotation(&store);
             return Ok(());
         }
         anyhow::bail!(
@@ -444,11 +513,13 @@ fn install_ca_noninteractive_system() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to check trust store: {e}"))?;
 
     if already_installed {
+        finish_ca_rotation(&store);
         return Ok(());
     }
 
     // Try default install (may work without elevation on some systems)
     if os_truststore::install(&os_cert).is_ok() {
+        finish_ca_rotation(&store);
         return Ok(());
     }
 
@@ -458,6 +529,7 @@ fn install_ca_noninteractive_system() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         if install_ca_windows_current_user(&ca.cert_pem).is_ok() {
+            finish_ca_rotation(&store);
             return Ok(());
         }
     }
@@ -566,6 +638,7 @@ pub fn install_ca_user_level() -> Result<()> {
 
     if already_installed {
         println!("{}", "  Antra CA is already trusted by the system.".green());
+        finish_ca_rotation(&store);
         return Ok(());
     }
 
@@ -578,6 +651,7 @@ pub fn install_ca_user_level() -> Result<()> {
                 "  Antra CA is already trusted via your login keychain (user-level, no sudo)."
                     .green()
             );
+            finish_ca_rotation(&store);
             return Ok(());
         }
 
@@ -612,6 +686,7 @@ pub fn install_ca_user_level() -> Result<()> {
                     "    {}",
                     "No sudo required. HTTPS for custom domains is ready.".dimmed()
                 );
+                finish_ca_rotation(&store);
                 Ok(())
             }
             Ok(s) => {
@@ -710,7 +785,16 @@ pub fn remove_ca() -> Result<()> {
         return Ok(());
     }
 
-    remove_ca_exact(&cert)
+    remove_ca_exact(&cert)?;
+    // A CA superseded by a rotation is still installed in whatever store the
+    // user trusted it into; removing "the" CA must not leave it behind.
+    if remove_pending_retired_ca()? {
+        println!(
+            "{}",
+            "  ✓ Removed the superseded Antra CA from the trust store".green()
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn remove_ca_noninteractive() -> Result<()> {
@@ -721,7 +805,9 @@ pub(crate) fn remove_ca_noninteractive() -> Result<()> {
         );
         return Ok(());
     };
-    remove_ca_exact(&cert)
+    remove_ca_exact(&cert)?;
+    remove_pending_retired_ca()?;
+    Ok(())
 }
 
 fn ca_is_installed(cert: &os_truststore::Cert) -> Result<bool> {

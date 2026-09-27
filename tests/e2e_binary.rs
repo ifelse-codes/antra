@@ -1,93 +1,9 @@
-use std::process::{Command, Stdio};
-use std::time::Duration;
+mod common;
 
+use std::process::Stdio;
+
+use common::*;
 use tempfile::TempDir;
-
-fn antra_bin() -> String {
-    let mut path = std::env::current_exe().unwrap();
-    path.pop();
-    path.pop();
-    path.push("antra");
-    #[cfg(target_os = "windows")]
-    path.set_extension("exe");
-    path.to_string_lossy().to_string()
-}
-
-fn run_antra(args: &[&str]) -> (String, String, i32) {
-    run_antra_with_timeout(args, Duration::from_secs(10))
-}
-
-fn run_antra_with_timeout(args: &[&str], timeout: Duration) -> (String, String, i32) {
-    let mut child = Command::new(antra_bin())
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute antra");
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().unwrap();
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                return (stdout, stderr, status.code().unwrap_or(-1));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    return (String::new(), "timeout".to_string(), -1);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                return (String::new(), format!("{e}"), -1);
-            }
-        }
-    }
-}
-
-fn run_antra_with_dir(dir: &std::path::Path, args: &[&str]) -> (String, String, i32) {
-    run_antra_with_dir_timeout(dir, args, Duration::from_secs(10))
-}
-
-fn run_antra_with_dir_timeout(
-    dir: &std::path::Path,
-    args: &[&str],
-    timeout: Duration,
-) -> (String, String, i32) {
-    let mut child = Command::new(antra_bin())
-        .args(args)
-        .current_dir(dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute antra");
-
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().unwrap();
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                return (stdout, stderr, status.code().unwrap_or(-1));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    return (String::new(), "timeout".to_string(), -1);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => {
-                return (String::new(), format!("{e}"), -1);
-            }
-        }
-    }
-}
 
 // ===================================================================
 // SECTION 1: CLI Help & Version
@@ -95,7 +11,8 @@ fn run_antra_with_dir_timeout(
 
 #[test]
 fn test_help_shows_all_commands() {
-    let (stdout, _, code) = run_antra(&["--help"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("run"));
     assert!(stdout.contains("dev"));
@@ -111,7 +28,8 @@ fn test_help_shows_all_commands() {
 
 #[test]
 fn test_version_flag() {
-    let (stdout, _, code) = run_antra(&["--version"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["--version"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("antra"));
     assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
@@ -119,7 +37,8 @@ fn test_version_flag() {
 
 #[test]
 fn test_run_help() {
-    let (stdout, _, code) = run_antra(&["run", "--help"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["run", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--domain"));
     assert!(stdout.contains("--port"));
@@ -129,7 +48,8 @@ fn test_run_help() {
 
 #[test]
 fn test_dev_help() {
-    let (stdout, _, code) = run_antra(&["dev", "--help"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["dev", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--domain"));
     assert!(stdout.contains("--port"));
@@ -139,22 +59,24 @@ fn test_dev_help() {
 
 #[test]
 fn test_add_help() {
-    let (stdout, _, code) = run_antra(&["add", "--help"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["add", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--allow-custom-domain"));
-    let (stdout, _, code) = run_antra(&["add", "route", "--help"]);
+    let (stdout, _, code) = run_antra(home, &["add", "route", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--allow-custom-domain"));
 }
 
 #[test]
 fn test_proxy_help() {
-    let (stdout, _, code) = run_antra(&["proxy", "--help"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["proxy", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("start"));
     assert!(stdout.contains("stop"));
     assert!(stdout.contains("status"));
-    let (stdout, _, code) = run_antra(&["proxy", "start", "--help"]);
+    let (stdout, _, code) = run_antra(home, &["proxy", "start", "--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("--route"));
     assert!(stdout.contains("--allow-custom-domain"));
@@ -162,7 +84,8 @@ fn test_proxy_help() {
 
 #[test]
 fn test_unknown_subcommand() {
-    let (_, stderr, code) = run_antra(&["nonexistent"]);
+    let home = TestHome::shared();
+    let (_, stderr, code) = run_antra(home, &["nonexistent"]);
     assert_ne!(code, 0);
     assert!(stderr.contains("error") || stderr.contains("unknown"));
 }
@@ -173,7 +96,8 @@ fn test_unknown_subcommand() {
 
 #[test]
 fn test_proxy_status_when_not_running() {
-    let (stdout, _, _) = run_antra(&["proxy", "status"]);
+    let home = TestHome::shared();
+    let (stdout, _, _) = run_antra(home, &["proxy", "status"]);
     assert!(
         stdout.contains("not running")
             || stdout.contains("Daemon")
@@ -184,7 +108,8 @@ fn test_proxy_status_when_not_running() {
 
 #[test]
 fn test_proxy_stop_when_not_running() {
-    let (stdout, stderr, _) = run_antra(&["proxy", "stop"]);
+    let home = TestHome::shared();
+    let (stdout, stderr, _) = run_antra(home, &["proxy", "stop"]);
     let combined = format!("{stdout}{stderr}");
     assert!(
         combined.contains("not running")
@@ -200,8 +125,9 @@ fn test_proxy_stop_when_not_running() {
 
 #[test]
 fn test_dev_without_config_fails() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
-    let (stdout, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (stdout, stderr, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
     let output = format!("{stdout}{stderr}");
     assert!(output.contains("antra.toml") || output.contains("No"));
@@ -209,6 +135,7 @@ fn test_dev_without_config_fails() {
 
 #[test]
 fn test_dev_with_valid_config() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -222,13 +149,14 @@ port = 3456
     )
     .unwrap();
 
-    let (stdout, _, _code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (stdout, _, _code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     let output = stdout;
     assert!(output.contains("antra.toml") || output.contains("Loaded"));
 }
 
 #[test]
 fn test_dev_with_override_flags() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -242,17 +170,19 @@ port = 3456
     )
     .unwrap();
 
-    let (stdout, _, _) = run_antra_with_dir(dir.path(), &["dev", "--domain", "override.localhost"]);
+    let (stdout, _, _) =
+        run_antra_with_dir(home, dir.path(), &["dev", "--domain", "override.localhost"]);
     let output = stdout;
     assert!(output.contains("override.localhost") || output.contains("antra.toml"));
 }
 
 #[test]
 fn test_dev_with_invalid_toml() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join("antra.toml"), "not valid {{{ toml").unwrap();
 
-    let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, stderr, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
     let output = stderr.to_string();
     assert!(output.contains("parse") || output.contains("error") || output.contains("Failed"));
@@ -260,6 +190,7 @@ fn test_dev_with_invalid_toml() {
 
 #[test]
 fn test_dev_with_missing_required_fields() {
+    let home = TestHome::shared();
     let dir = TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("antra.toml"),
@@ -270,7 +201,7 @@ command = "echo"
     )
     .unwrap();
 
-    let (_, stderr, code) = run_antra_with_dir(dir.path(), &["dev"]);
+    let (_, stderr, code) = run_antra_with_dir(home, dir.path(), &["dev"]);
     assert_ne!(code, 0);
     let output = stderr.to_string();
     assert!(output.contains("domain") || output.contains("error"));
@@ -282,7 +213,8 @@ command = "echo"
 
 #[test]
 fn test_list_when_daemon_not_running() {
-    let (stdout, _, _) = run_antra(&["list"]);
+    let home = TestHome::shared();
+    let (stdout, _, _) = run_antra(home, &["list"]);
     assert!(
         stdout.contains("not running")
             || stdout.contains("ACTIVE ROUTES")
@@ -297,13 +229,15 @@ fn test_list_when_daemon_not_running() {
 
 #[test]
 fn test_doctor_runs_without_panic() {
-    let (stdout, _stderr, code) = run_antra(&["doctor"]);
+    let home = TestHome::shared();
+    let (stdout, _stderr, code) = run_antra(home, &["doctor"]);
     assert!(stdout.contains("ANTRA DOCTOR") || stdout.contains("Checking") || code == 0);
 }
 
 #[test]
 fn test_doctor_checks_ports() {
-    let (stdout, _, _) = run_antra(&["doctor"]);
+    let home = TestHome::shared();
+    let (stdout, _, _) = run_antra(home, &["doctor"]);
     assert!(
         stdout.contains("Port")
             || stdout.contains("443")
@@ -319,9 +253,12 @@ fn test_doctor_checks_ports() {
 
 #[test]
 fn test_clean_cancels_on_no() {
+    let home = TestHome::shared();
+    // Hermetic like every other spawn: `antra clean` is the one command that
+    // would otherwise reach the developer's real trust store and hosts block.
     let dir = TempDir::new().unwrap();
-    let mut child = Command::new(antra_bin())
-        .args(["clean"])
+    let mut child = home
+        .command(&["clean"])
         .current_dir(dir.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -329,7 +266,7 @@ fn test_clean_cancels_on_no() {
         .spawn()
         .unwrap();
 
-    if let Some(ref mut stdin) = child.stdin {
+    if let Some(stdin) = child.stdin.as_mut() {
         use std::io::Write;
         writeln!(stdin, "n").unwrap();
     }
@@ -346,7 +283,8 @@ fn test_clean_cancels_on_no() {
 
 #[test]
 fn test_alias_requires_daemon() {
-    let (stdout, _, _) = run_antra(&["alias", "test.localhost", "3000"]);
+    let home = TestHome::shared();
+    let (stdout, _, _) = run_antra(home, &["alias", "test.localhost", "3000"]);
     assert!(
         stdout.contains("daemon")
             || stdout.contains("running")
@@ -362,7 +300,8 @@ fn test_alias_requires_daemon() {
 
 #[test]
 fn test_remove_requires_daemon() {
-    let (stdout, _, _) = run_antra(&["remove", "test.localhost"]);
+    let home = TestHome::shared();
+    let (stdout, _, _) = run_antra(home, &["remove", "test.localhost"]);
     assert!(
         stdout.contains("daemon")
             || stdout.contains("running")
@@ -377,7 +316,8 @@ fn test_remove_requires_daemon() {
 
 #[test]
 fn test_open_doesnt_panic() {
-    let (stdout, _, code) = run_antra(&["open", "test.localhost"]);
+    let home = TestHome::shared();
+    let (stdout, _, code) = run_antra(home, &["open", "test.localhost"]);
     assert!(code == 0 || stdout.contains("error") || code != -1);
 }
 
@@ -387,22 +327,26 @@ fn test_open_doesnt_panic() {
 
 #[test]
 fn test_run_with_busy_explicit_port_fails_instead_of_remapping() {
+    let home = TestHome::shared();
     // Hold a port, then demand it via --port: must error, never silently
     // route somewhere else (that mismatch born 503s for $PORT-ignoring
     // frameworks like Vite behind `npm run`).
     let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = held.local_addr().unwrap().port();
 
-    let (stdout, stderr, code) = run_antra(&[
-        "run",
-        "--domain",
-        "busy-port-test.localhost",
-        "--port",
-        &port.to_string(),
-        "--",
-        "echo",
-        "hi",
-    ]);
+    let (stdout, stderr, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "busy-port-test.localhost",
+            "--port",
+            &port.to_string(),
+            "--",
+            "echo",
+            "hi",
+        ],
+    );
     let combined = format!("{stdout}\n{stderr}");
     assert_ne!(code, 0, "busy --port must fail, got: {combined}");
     assert!(

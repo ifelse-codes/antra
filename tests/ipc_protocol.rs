@@ -8,17 +8,15 @@ fn test_ipc_message_new_sets_version() {
 }
 
 #[test]
-fn test_protocol_version_is_two() {
-    assert_eq!(PROTOCOL_VERSION, 2);
-}
-
-#[test]
 fn test_ping_pong_roundtrip() {
     let msg = IpcMessage::new(IpcPayload::Ping);
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: IpcMessage = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(decoded.version, 2);
+    // Against the constant, not a literal: the daemon refuses any other
+    // version at runtime (`ipc/server.rs`), and a test that pins the number
+    // just has to be edited on every legitimate bump.
+    assert_eq!(decoded.version, PROTOCOL_VERSION);
     assert!(matches!(decoded.payload, IpcPayload::Ping));
 }
 
@@ -160,6 +158,7 @@ fn test_status_response_roundtrip() {
         uptime_secs: 3600,
         route_count: 5,
         socket_path: "/tmp/antra/daemon.sock".to_string(),
+        ca_fingerprint: Some("0123456789abcdef".to_string()),
     }));
     let json = serde_json::to_string(&msg).unwrap();
     let decoded: IpcMessage = serde_json::from_str(&json).unwrap();
@@ -170,6 +169,22 @@ fn test_status_response_roundtrip() {
             assert_eq!(status.uptime_secs, 3600);
             assert_eq!(status.route_count, 5);
             assert_eq!(status.socket_path, "/tmp/antra/daemon.sock");
+            assert_eq!(status.ca_fingerprint.as_deref(), Some("0123456789abcdef"));
+        }
+        _ => panic!("Expected Status"),
+    }
+}
+
+/// A daemon built before the fingerprint existed must still parse: the CLI
+/// has to read its status in order to tell the user to restart it.
+#[test]
+fn test_status_response_from_pre_fingerprint_daemon() {
+    let json = r#"{"version":3,"payload":{"type":"Status","pid":7,"uptime_secs":1,"route_count":0,"socket_path":"/tmp/antra/daemon.sock"}}"#;
+    let decoded: IpcMessage = serde_json::from_str(json).unwrap();
+    match decoded.payload {
+        IpcPayload::Status(status) => {
+            assert_eq!(status.pid, 7);
+            assert!(status.ca_fingerprint.is_none());
         }
         _ => panic!("Expected Status"),
     }

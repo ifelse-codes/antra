@@ -79,6 +79,7 @@ ANTRA
 
 - [ ] `https://myapp.localhost` loads in Chrome with no cert warning
 - [ ] `https://myapp.localhost` loads in Firefox with no cert warning
+- [ ] `https://myapp.localhost` loads in Safari with no cert warning (run `antra hosts sync` first — Safari does not resolve `*.localhost`). `antra doctor` must first report "CA passes strict X.509 validation"
 - [ ] Vite HMR works (edit file → browser updates)
 - [ ] WebSocket connection established (check DevTools Network tab)
 - [ ] Ctrl+C terminates app and removes route

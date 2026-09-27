@@ -171,7 +171,7 @@ Deep dive: [`docs/architecture.md`](docs/architecture.md)
 | `*.test` | Managed hosts block | Yes | IANA reserved. Needs `antra trust` for HTTPS. |
 | `*.internal` / `*.local` | Managed hosts block | Yes | Allowed, with a warning. |
 | Custom | Managed hosts block | Yes | Requires `--allow-custom-domain`. |
-| Known public names (`google.com`, `github.com`, …) | — | — | **Rejected.** |
+| Known public names (`google.com`, `github.com`, …) | Managed hosts block | Yes | Requires `--allow-custom-domain` and prints a warning. Approval is a warning boundary, not an allowlist — see [`docs/security.md`](docs/security.md). |
 
 Hosts writes are atomic, scoped to a `# BEGIN ANTRA MANAGED HOSTS` block, and never clobber the rest of the file.
 

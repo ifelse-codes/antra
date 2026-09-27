@@ -1,6 +1,6 @@
 [package]
 name = "antra"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Native local development proxy — stable domains for localhost servers"
@@ -28,6 +28,15 @@ rustls-pki-types = "1"
 
 # Certificate generation
 rcgen = { version = "0.14", features = ["x509-parser"] }
+
+# Strict X.509 validation of what we mint (see `certs::validate`).
+# Pinned to the same major/minor rcgen pulls in, so there is exactly one
+# copy of the parser in the tree.
+x509-parser = "0.16"
+
+# Certificate validity windows ("now ± 2 years 3 months"). Already in the
+# tree via rcgen; direct because we construct the dates ourselves.
+time = "0.3"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -76,3 +85,7 @@ schannel = "0.1.29"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }
+base64 = "0.22"
+# Only to re-mint the pre-0.5 CA shape in the SecureTransport sensitivity
+# test, so the regression gate can be shown to still fail on the old bug.
+rcgen = "0.14"

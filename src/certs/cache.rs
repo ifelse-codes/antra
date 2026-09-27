@@ -44,16 +44,24 @@ impl CertCache {
 
     /// Resolve or generate a certificate for the given hostname.
     fn resolve_cert(&self, hostname: &str) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        // 1. Check memory cache
+        // 1. Check memory cache. A long-lived daemon holds these for the
+        //    process lifetime, so a leaf that entered its renewal window
+        //    while cached has to be dropped here — otherwise the disk-side
+        //    renewal in `CertStore::get_or_create_leaf` would never run.
         match self.certs.read() {
             Ok(certs) => {
                 if let Some(cert) = certs.get(hostname) {
-                    return Some(Arc::clone(cert));
+                    if !is_expiring(cert) {
+                        return Some(Arc::clone(cert));
+                    }
                 }
             }
             Err(e) => {
                 tracing::error!(%hostname, error = %e, "Failed to read cert cache");
             }
+        }
+        if let Ok(mut cache) = self.certs.write() {
+            cache.remove(hostname);
         }
 
         // 2. Check disk cache / generate new
@@ -88,6 +96,12 @@ impl CertCache {
     pub fn ca_cert_pem(&self) -> &str {
         &self.ca.cert_pem
     }
+
+    /// Fingerprint of the CA this process is serving, reported over IPC so a
+    /// CLI can spot a daemon that predates a CA rotation.
+    pub fn ca_fingerprint(&self) -> String {
+        crate::certs::fingerprint(self.ca.cert_der.as_ref())
+    }
 }
 
 impl ResolvesServerCert for CertCache {
@@ -103,6 +117,13 @@ impl ResolvesServerCert for CertCache {
         tracing::debug!(%hostname, "SNI resolution request");
         self.resolve_cert(&hostname)
     }
+}
+
+/// True when the leaf behind a cached key is inside its renewal window.
+fn is_expiring(key: &rustls::sign::CertifiedKey) -> bool {
+    key.cert
+        .first()
+        .is_some_and(|der| crate::certs::validate::needs_renewal(der.as_ref()))
 }
 
 #[cfg(test)]
