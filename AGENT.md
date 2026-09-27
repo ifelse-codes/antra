@@ -281,7 +281,7 @@ tokio::spawn(async move {
 ## Phase 4 — HTTPS / TLS ✅ DONE
 
 ### Verified
-- CA generation with `rcgen` (self-signed root CA)
+- CA generation with `rcgen` (self-signed root CA) — **no `subjectAltName`**, since v0.5.0
 - CA stored in `~/.config/antra/ca.pem` and `ca-key.pem` (key permissions 0o600)
 - Leaf certificate generation on-demand via SNI
 - In-memory cert cache with disk persistence (`~/.config/antra/certs/`)
@@ -294,15 +294,15 @@ tokio::spawn(async move {
 
 ### Implementation Notes
 - Used `rustls` with `ring` crypto provider (matches rcgen's default)
-- Added `x509-parser` feature to rcgen for CA reconstruction from disk
+- `x509-parser` is a **direct** dependency since v0.5.0 (`certs::validate`); the rcgen feature remains for CA reconstruction from disk
 - SNI resolver implements `ResolvesServerCert` trait
-- Certs are cached in memory after first generation
-- Leaf certs are stored on disk for persistence across restarts
+- Certs are cached in memory after first generation; a cached leaf inside its 45-day renewal window is dropped and re-minted
+- Leaf certs are stored on disk for persistence across restarts, under a `LEAF_VERSION` marker that purges them when the format or the signing CA changes
 
 ### Exclusions (DO NOT BUILD)
 - ❌ No trust store modification (Phase 6)
-- ❌ No certificate renewal
-- ❌ No HTTP/2 ALPN
+- ❌ No remote/ACME renewal — leafs are re-minted locally (superseded by v0.5.0, which renews inside a 45-day window)
+- ❌ No HTTP/2 ALPN (superseded by v0.4.0, which negotiates H2 to the client)
 
 ---
 
@@ -385,7 +385,7 @@ antra/
 └── src/
     ├── main.rs           ← Entry point, tracing setup
     ├── cli/              ← All subcommands (Clap)
-    ├── certs/            ← CA + leaf cert generation
+    ├── certs/            ← CA + leaf generation, strict validation, versioned rotation
     ├── config/           ← antra.toml + global state
     ├── daemon/           ← Background proxy process
     ├── ipc/              ← CLI ↔ daemon communication
@@ -396,6 +396,10 @@ antra/
     ├── routing/          ← Route registry + types
     ├── trust/            ← OS trust store (install/remove/check CA)
     └── util/             ← Port allocation, terminal output
+tests/
+    ├── cert_strict.rs       ← Strict X.509 rules (no CA SAN, validity, EKU)
+    ├── e2e_securetransport.rs ← macOS: Apple's TLS stack vs a live daemon
+    └── common/              ← Disposable HOME harness shared by the e2e suites
 ```
 
 ---
@@ -409,6 +413,10 @@ antra/
 | `docs/security.md` | When touching hosts, trust store, or domains |
 | `docs/mvp.md` | When unsure about scope — what's in/out |
 | `docs/research/*.md` | When you need background on a specific area |
+| `fix-plan-2026-09-26-ca-trust.md` | Before touching `certs/` — why the CA is versioned, rotated and bounded |
+| `deep-dive-report-2026-09-26.md` | For the finding behind that work, and what is still open (§F) |
+| `GO-LIVE-PLAN.md` | For release/site state and what ships next |
+| `PLAN.md`, `FIX-PLAN.md`, `fix-plan-v2.md`, `UX-TEST-PLAN-*.md` | **Historical.** Specs and session records from earlier phases — do not treat their status lines as current |
 
 ---
 

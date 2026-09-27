@@ -48,7 +48,7 @@
 ❌ Docker integration
 ❌ LAN mode / mDNS
 ❌ HTTP/2 to upstream (only to client)
-❌ Certificate renewal (dev certs are long-lived)
+❌ Remote certificate renewal (leafs are re-minted locally inside a 45-day window; nothing phones home)
 ❌ FreeBSD support
 ❌ Custom port ranges
 ❌ Config inheritance
@@ -87,6 +87,16 @@ ANTRA
 - [ ] No orphan processes after Ctrl+C
 - [ ] No stale entries in `/etc/hosts`
 - [ ] Same workflow works with `cargo run` and `python app.py`
+
+**All boxes are unchecked on purpose.** This checklist is a human DoD: each row needs a real browser or a real session, which no automated gate can stand in for. What *is* machine-checked today, and by what:
+
+| Claim | Gate |
+|---|---|
+| The chain is valid under Apple's TLS stack — the one that rejected the pre-0.5 root | `tests/e2e_securetransport.rs`: `/usr/bin/curl --cacert` through a live `antra proxy start` + `antra alias`, macOS CI |
+| The minted CA and leafs satisfy strict X.509 rules (no CA SAN, valid `dNSName`, `serverAuth` EKU, validity window) | `tests/cert_strict.rs` |
+| Upgrades migrate: old CA rotated, leafs purged, re-trust prompted, superseded root removed byte-exactly | `tests/cert_store.rs` + the manual walkthrough in `fix-plan-2026-09-26-ca-trust.md` §9 |
+
+Still to be ticked by hand: Chrome, Firefox and Safari in a real browser (Safari needs `antra hosts sync` first), a real Vite HMR session, and the Ctrl+C cleanup rows.
 
 ### Terminal UX
 

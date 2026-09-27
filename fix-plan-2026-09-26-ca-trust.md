@@ -223,8 +223,12 @@ Rollback: the marker file is the switch. Deleting `~/.config/antra/.ca-version` 
 >
 > Also in this release: the test suite runs against a disposable HOME instead of yours; `antra doctor` checks the CA against strict X.509 rules; the ROADMAP and README now match the code.
 
-### Still yours
+### Closed since this list was written
 
-- Tag and publish `v0.5.0`, then update `Formula/antra.rb` with the new version and artifact sha256s.
-- The manual Safari/Firefox pass on `docs/mvp.md` — no GUI here.
+- ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12) and [#13](https://github.com/ifelse-codes/antra/pull/13) merged; `v0.5.0` tagged and published; `Formula/antra.rb` updated from that release's own `.sha256` assets; the `landing/` site redeployed (deployment `389916d4`) so the served installer matches the repo copy.
+- ✅ The Windows CI job now runs `cert_strict` instead of only compiling it.
+
+### Still open
+
+- The manual Safari + Firefox pass on `docs/mvp.md` — no GUI here. The Safari-critical half is machine-checked by `tests/e2e_securetransport.rs` in macOS CI; the browser pass is still a human step.
 - Phase 6, unchanged and unstarted: `antra logs` (ROADMAP #32, `NOW`), the `sudo antra alias` hint, underscore domains, landing headers/404, wiring the shell e2e suites into CI, and the shared upstream client (#33).

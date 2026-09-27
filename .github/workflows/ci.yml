@@ -66,5 +66,5 @@ jobs:
         run: cargo test --no-run
         timeout-minutes: 20
       - name: Run hermetic tests
-        run: cargo test --lib --bin antra --test cert_store --test cli_utils --test config_project --test ipc_handlers --test ipc_protocol --test proxy_headers --test proxy_websocket --test routing_registry --test upstream_dual_stack --test util_port -- --test-threads=1 --skip test_cert_cache_resolve
+        run: cargo test --lib --bin antra --test cert_store --test cert_strict --test cli_utils --test config_project --test ipc_handlers --test ipc_protocol --test proxy_headers --test proxy_websocket --test routing_registry --test upstream_dual_stack --test util_port -- --test-threads=1 --skip test_cert_cache_resolve
         timeout-minutes: 10
