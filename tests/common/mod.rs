@@ -146,6 +146,23 @@ impl TestHome {
         }
     }
 
+    /// Where the daemon writes its log, mirroring what
+    /// `util::logs::daemon_log_path()` resolves through `data_local_dir()`.
+    ///
+    /// Deliberately *not* derived from [`Self::config_dir`]: on Linux config
+    /// is `$XDG_CONFIG_HOME` and data-local is `$XDG_DATA_HOME`, so a test that
+    /// guessed from the config dir passed on macOS (where both land under
+    /// `Library/Application Support`) and failed on Ubuntu.
+    pub fn log_dir(&self) -> PathBuf {
+        if cfg!(target_os = "windows") {
+            self.path.join("AppData/Local/antra")
+        } else if cfg!(target_os = "macos") {
+            self.path.join("Library/Application Support/antra")
+        } else {
+            self.path.join(".local/share/antra")
+        }
+    }
+
     /// Where the daemon will put its IPC socket (unix only).
     ///
     /// macOS has no XDG runtime dir, so the daemon falls back to its config

@@ -252,8 +252,7 @@ fn test_logs_explains_itself_when_there_is_no_log() {
 #[test]
 fn test_logs_prints_the_daemon_log() {
     let home = TestHome::new();
-    // Same layout the daemon writes into, under the disposable home.
-    let log_dir = home.config_dir().parent().unwrap().join("antra");
+    let log_dir = home.log_dir();
     std::fs::create_dir_all(&log_dir).unwrap();
     std::fs::write(
         log_dir.join("daemon.log"),
@@ -274,7 +273,7 @@ fn test_logs_prints_the_daemon_log() {
 #[test]
 fn test_logs_line_limit_is_respected() {
     let home = TestHome::new();
-    let log_dir = home.config_dir().parent().unwrap().join("antra");
+    let log_dir = home.log_dir();
     std::fs::create_dir_all(&log_dir).unwrap();
     let body: String = (1..=200).map(|i| format!("line {i}\n")).collect();
     std::fs::write(log_dir.join("daemon.log"), body).unwrap();
