@@ -82,7 +82,7 @@ rm -rf "$TEST_HOME"
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.5.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack. The working tree is clean. Still open: the formal browser checklist (Safari, Firefox) and the ROADMAP follow-ups #32 (`antra logs`) and #33 (shared upstream client).
+**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. The working tree is clean. Still open: the formal browser checklist (Safari, Firefox) and wiring the shell e2e suites (blocked on ROADMAP #21 — the auto-started daemon has no port override).
 
 ### Landing Page
 
@@ -91,7 +91,7 @@ rm -rf "$TEST_HOME"
 - **Project name:** `antra-landing`
 - **Design language:** Mudra (dark, surgical, violet accent)
 - **To update:** run `wrangler pages deploy . --project-name antra-landing` **from `landing/`** — from the repo root it would publish the whole tree, source and `target/` included
-- **Last deployed:** 2026-09-27, deployment `389916d4` (v0.5.0 assets). Verified after the fact: `/install.sh` returns `Content-Type: text/plain` and serves the v0.5.0 pin, the index pin example reads v0.5.0
+- **Last deployed:** 2026-09-27, deployment `a6908b4f` (v0.6.0 assets). Verified after the fact against the live domain: `/install.sh` returns `Content-Type: text/plain` and serves the v0.6.0 pin, the index pin example reads v0.6.0, unknown paths return 404, and the security headers are present
 
 ---
 
@@ -389,6 +389,7 @@ antra/
     ├── main.rs           ← Entry point, tracing setup
     ├── cli/              ← All subcommands (Clap)
     ├── certs/            ← CA + leaf generation, strict validation, versioned rotation
+    ├── util/             ← Daemon log (one path, writer, tail/follow), ports, output
     ├── config/           ← antra.toml + global state
     ├── daemon/           ← Background proxy process
     ├── ipc/              ← CLI ↔ daemon communication

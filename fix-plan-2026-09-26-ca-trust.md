@@ -227,8 +227,9 @@ Rollback: the marker file is the switch. Deleting `~/.config/antra/.ca-version` 
 
 - ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12) and [#13](https://github.com/ifelse-codes/antra/pull/13) merged; `v0.5.0` tagged and published; `Formula/antra.rb` updated from that release's own `.sha256` assets; the `landing/` site redeployed (deployment `389916d4`) so the served installer matches the repo copy.
 - ✅ The Windows CI job now runs `cert_strict` instead of only compiling it.
+- ✅ Phase 6 shipped in **v0.6.0** (PR #14): `antra logs` (ROADMAP #32), the shared upstream client (ROADMAP #33), the `sudo antra alias` hint, underscore domains, and the landing security headers + 404. Two follow-ups to that PR also landed: a Linux-portability fix for the new logs tests (#16) and a flaky port race in `errors_when_nothing_listens` (#17).
 
 ### Still open
 
 - The manual Safari + Firefox pass on `docs/mvp.md` — no GUI here. The Safari-critical half is machine-checked by `tests/e2e_securetransport.rs` in macOS CI; the browser pass is still a human step.
-- Phase 6, unchanged and unstarted: `antra logs` (ROADMAP #32, `NOW`), the `sudo antra alias` hint, underscore domains, landing headers/404, wiring the shell e2e suites into CI, and the shared upstream client (#33).
+- Wiring the shell e2e suites into CI. They had never run at all — `log_pass` used `((pass_count++))`, which exits 1 when the counter is 0, so `set -e` aborted every suite after its first passing assertion. Fixed; with that fixed the suite completes and fails 46 tests on a machine where 8443/8080 are taken, because the auto-started daemon has no port override (ROADMAP #21).

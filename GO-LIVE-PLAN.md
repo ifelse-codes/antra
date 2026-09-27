@@ -4,13 +4,13 @@
 
 ## ▶ RESUME HERE — next session starts from this block (last updated 2026-09-27)
 
-**Current state: `v0.5.0` is PUBLISHED and the site is live with the matching installer copy.** The working tree is clean; everything shipped through `main`. `v0.5.0` fixed the defect that made HTTPS unusable on Apple's TLS stack (the root CA carried an invalid `subjectAltName`).
+**Current state: `v0.6.0` is PUBLISHED and the site is live with the matching installer copy.** The working tree is clean; everything shipped through `main`. `v0.5.0` fixed the defect that made HTTPS unusable on Apple's TLS stack (the root CA carried an invalid `subjectAltName`); `v0.6.0` added `antra logs`, pooled upstream connections, two resolver fixes, and the landing security headers + 404.
 
 **DONE & verified:**
-- Release ✅ `v0.5.0` published as Latest (5 targets + checksums verified by downloading the artifacts; the macOS binary was smoke-tested and mints a SAN-free CA). Homebrew Formula updated from that release's own `.sha256` assets.
-- Code ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12) (CA v2 + rotation + strict X.509 gates) and [#13](https://github.com/ifelse-codes/antra/pull/13) (formula) merged; all 7 CI jobs green.
+- Releases ✅ `v0.5.0` (CA v2) and `v0.6.0` (`antra logs`, pooled upstream client, correctness fixes) both published as Latest, 5 targets each, checksums verified by downloading the artifacts, Homebrew Formula updated from each release's own `.sha256` assets.
+- Code ✅ PRs [#12](https://github.com/ifelse-codes/antra/pull/12)–[#17](https://github.com/ifelse-codes/antra/pull/17) merged; all 7 CI jobs green on each. #16 fixed a Linux-only path bug in the new logs tests (caught by the Ubuntu job); #17 de-flaked a pre-existing port race in a websocket test.
 - Gates ✅ `tests/cert_strict.rs` (strict X.509 rules) and `tests/e2e_securetransport.rs` (macOS: `/usr/bin/curl --cacert` through a live daemon) are the regression gates for the CA work. Rationale and evidence: `fix-plan-2026-09-26-ca-trust.md`, `deep-dive-report-2026-09-26.md` §F.
-- Sites ✅ `antra.iifelse.com` deployed for v0.5.0 (deployment `389916d4`): `/install.sh` → `Content-Type: text/plain` and serves the `v0.5.0` pin; index pin example updated; `/`, privacy, terms reachable.
+- Sites ✅ `antra.iifelse.com` deployed for v0.6.0 (deployment `a6908b4f`): `/install.sh` → `Content-Type: text/plain` serving the `v0.6.0` pin; security headers present; unknown paths return 404. Note for whoever deploys next: run `wrangler pages deploy .` from `main` (or pass `--branch main`), or it creates a *branch* deployment and production silently keeps the old copy.
 
 **LATEST VERIFICATION — 2026-09-27 (v0.5.0):**
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite green in a disposable HOME (216 executions, 0 failures); all 7 CI jobs green on both PRs.
@@ -54,11 +54,11 @@
 
 Antra solves a real, painful problem: developers hate port-based URLs (`localhost:5173`), browser security warnings, and complex local dev setups. The product is **functionally complete** and ready for launch.
 
-### Engineering Status: v0.5.0 PUBLISHED
+### Engineering Status: v0.6.0 PUBLISHED
 
-- **Published version:** 0.5.0 (was 0.4.0)
-- **Local verification:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and 216 test executions passed in a disposable HOME
-- **CI/CD:** macOS + Ubuntu full tests, Windows hermetic tests, and a macOS SecureTransport certificate test — all green on PRs #12 and #13
+- **Published version:** 0.6.0 (was 0.5.0)
+- **Local verification:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite passed in a disposable HOME
+- **CI/CD:** macOS + Ubuntu full tests, Windows hermetic tests (now running `cert_strict`), and a macOS SecureTransport certificate test — all green on PRs #12–#17
 - **Release workflow:** Automated cross-platform builds with checksums; artifacts downloaded and verified
 - **Certificate correctness:** root CA no longer carries a SAN, validity bounded to 800 days, existing installs rotate once with byte-exact removal of the superseded root (`docs/security.md`)
 - **Documentation:** security behaviour, rotation policy, and acceptance evidence recorded below and in `fix-plan-2026-09-26-ca-trust.md`
@@ -67,10 +67,11 @@ Antra solves a real, painful problem: developers hate port-based URLs (`localhos
 
 | Category | Status | Priority |
 |----------|--------|----------|
-| Security hardening | ✅ Shipped in v0.5.0 | — |
+| Security hardening | ✅ Shipped in v0.5.0 and v0.6.0 | — |
 | Browser certificate acceptance | ✅ Machine-checked on Apple's TLS stack (`tests/e2e_securetransport.rs`); Safari + Firefox browser pass still open | Human pass on `docs/mvp.md` |
-| Windows CI execution | ✅ Green on PRs #12 and #13 | — |
-| Landing redeploy | ✅ Done — v0.5.0 assets deployed (`389916d4`) | — |
+| Windows CI execution | ✅ Green on PRs #12–#17 | — |
+| Landing redeploy | ✅ Done — v0.6.0 assets deployed (`a6908b4f`) | — |
+| Shell e2e suites in CI | ⏳ Harness bug fixed (they had never run); wiring blocked on the auto-started daemon having no port override | ROADMAP #21, then wire them |
 | Analytics / launch work | ⏳ Later scope | Follow Phase 2/3 plan |
 
 ---

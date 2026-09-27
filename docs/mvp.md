@@ -20,6 +20,7 @@
 ✅ Colored terminal output
 ✅ Structured logging (tracing)
 ✅ antra doctor diagnostics
+✅ antra logs (daemon log, -f to follow)
 ✅ antra list routes
 ✅ antra trust (CA installation)
 ✅ antra clean (state removal)

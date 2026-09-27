@@ -185,6 +185,8 @@ Decisions taken: bound validity in this release; CA and leaf at mkcert parity (2
 | 5 | `tests/e2e_securetransport.rs`: macOS-gated, in-process rustls server + `/usr/bin/curl --cacert` → 200, plus a variant through a live `antra proxy start` + `antra alias` under the Phase-0 home | the exact command that returns `curl: (60)` today returns 200; promoted to macOS CI |
 
 Follow-ups stay separate PRs, in order: daemon log file + `antra logs` (C-3), the `sudo antra alias` hint (C-7), underscore domains (C-9), landing headers/404 (C-4), wiring the shell e2e suites into CI, then the shared upstream client (C-5). `antra logs` and the shared client are the two that need design decisions of their own; everything else is mechanical once the CA work lands.
+>
+> **Update (2026-09-27, v0.6.0):** C-3, C-7, C-9, C-4 and C-5 all shipped in [PR #14](https://github.com/ifelse-codes/antra/pull/14). `antra logs` also fixed a path mismatch that had made the launchd service's log unreachable from the CLI, and the shared client is proved by a test that counts upstream TCP connections (4 requests → 1 connection, where the old per-request build gave 4). Still open: the manual Safari/Firefox pass, and wiring the shell e2e suites into CI — blocked on the auto-started daemon having no port override (ROADMAP #21), since those suites need 8443 free.
 
 Not verifiable here and left on the checklist: real Safari and Firefox passes, and whether Apple's 825-day limit is enforced against a *user-keychain* anchor (my SecureTransport probe accepted a 10-year leaf under a `--cacert` anchor, so it is weak evidence either way — mkcert parity is the safe default).
 
@@ -202,4 +204,4 @@ Phases 0–5 shipped. The evidence that each gate actually ran:
 
 Two things the plan did not anticipate, both now fixed and covered by tests: the disposable home has to live under a short root (macOS has no XDG runtime dir, so the daemon's socket lands under `$HOME/Library/Application Support/antra/` and blew the 104-byte `sun_path` limit from a deep temp root), and the suite has to stop its daemon on exit or the leftover process holds 8443 and the developer's next `antra run` cannot bind.
 
-Not fixed here, deliberately: the follow-up queue in `fix-plan-2026-09-26-ca-trust.md` §Phase 6, now tracked as ROADMAP #32 (`antra logs`) and #33 (shared upstream client).
+Not fixed here, deliberately: the follow-up queue in `fix-plan-2026-09-26-ca-trust.md` §Phase 6. ROADMAP #32 (`antra logs`) and #33 (shared upstream client) shipped in **v0.6.0**; the sudo hint, underscore domains and landing headers/404 went with them.

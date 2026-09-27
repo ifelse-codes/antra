@@ -51,6 +51,7 @@ src/
 │   ├── list.rs          # `antra list`
 │   ├── doctor.rs        # `antra doctor`
 │   ├── trust.rs         # `antra trust`
+│   ├── logs.rs          # `antra logs` — reads the daemon log
 │   ├── proxy.rs         # `antra proxy start|stop|status`
 │   ├── clean.rs         # `antra clean`
 │   └── alias.rs         # `antra alias`
@@ -64,7 +65,7 @@ src/
 │   └── shutdown.rs      # Graceful shutdown
 ├── proxy/
 │   ├── mod.rs
-│   ├── http.rs          # HTTP handler + HTTPS redirect
+│   ├── http.rs          # HTTP handler + shared upstream client
 │   ├── https.rs         # TLS termination, SNI dispatch
 │   ├── websocket.rs     # WebSocket upgrade + tunnel
 │   ├── forward.rs       # Reverse proxy logic
@@ -104,6 +105,7 @@ src/
 └── util/
     ├── mod.rs
     ├── port.rs          # Port allocation
+    ├── logs.rs          # Daemon log: one path, writer, tail/follow
     └── output.rs        # Terminal formatting
 ```
 
@@ -137,16 +139,31 @@ pub struct RouteRegistry {
 // certs/cache.rs
 
 pub struct CertCache {
-    certs: RwLock<HashMap<String, CertifiedKey>>,
-    path: PathBuf,  // ~/.config/antra/certs/
+    certs: RwLock<HashMap<String, Arc<CertifiedKey>>>,
+    store: CertStore,
+    ca: CaCert,
 }
 
 // certs/ca.rs
 
-pub struct CaManager {
-    cert: CertificateDer<'static>,
-    key: SigningKeyDer<'static>,
-    path: PathBuf,
+pub struct CaCert {
+    cert_der: CertificateDer<'static>,
+    cert_pem: String,
+    key_pem: String,   // PKCS#8, 0600 on disk
+}
+
+// certs/store.rs — the version marker is what drives rotation
+
+pub struct CertStore {
+    config_dir: PathBuf,   // ~/.config/antra/  (.ca-version, retired-ca.pem)
+    certs_dir: PathBuf,    // ~/.config/antra/certs/  (.leaf-version)
+}
+
+// proxy/http.rs — one pooled client for the daemon's lifetime
+
+pub struct ProxyState {
+    pub registry: Arc<RouteRegistry>,
+    pub client: UpstreamClient,   // hyper legacy client, pool_idle_timeout 60s
 }
 ```
 
