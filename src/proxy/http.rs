@@ -7,9 +7,48 @@ use hyper::{Request, Response};
 use crate::proxy::{forward, websocket};
 use crate::routing::registry::RouteRegistry;
 
+/// The upstream HTTP client, shared by every request the daemon serves.
+pub type UpstreamClient = hyper_util::client::legacy::Client<
+    hyper_util::client::legacy::connect::HttpConnector,
+    Incoming,
+>;
+
 /// Shared state passed to the proxy service.
 pub struct ProxyState {
     pub registry: std::sync::Arc<RouteRegistry>,
+    /// One client for the daemon's lifetime, not one per request.
+    ///
+    /// Building a client per request threw away the connection pool, so every
+    /// proxied request paid a fresh TCP handshake to the dev server — hundreds
+    /// of them on an unbundled Vite reload. The pool dies with this value:
+    /// the daemon holds `Arc<ProxyState>` until it exits, so there is no idle
+    /// pool outliving the process and nothing extra to clean up on shutdown.
+    pub client: UpstreamClient,
+}
+
+impl ProxyState {
+    pub fn new(registry: std::sync::Arc<RouteRegistry>) -> Self {
+        Self {
+            registry,
+            client: build_upstream_client(),
+        }
+    }
+}
+
+/// Build the pooled upstream client.
+///
+/// `pool_idle_timeout` is what stops the pool from holding a dead dev server
+/// open forever: an idle connection that outlives its backend would hand the
+/// next request a reset socket, which surfaces as a 502 the user cannot
+/// explain.
+fn build_upstream_client() -> UpstreamClient {
+    let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+    connector.set_nodelay(true);
+    connector.set_connect_timeout(Some(std::time::Duration::from_secs(10)));
+    hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .pool_idle_timeout(std::time::Duration::from_secs(60))
+        .pool_max_idle_per_host(8)
+        .build(connector)
 }
 
 /// Handle an incoming HTTP request: look up route, forward to upstream.
@@ -121,7 +160,7 @@ pub async fn handle_request(
         }
     } else {
         // Regular HTTP forwarding (streamed, not buffered)
-        match forward::forward_request(req, &route, hops).await {
+        match forward::forward_request(req, &route, hops, &state.client).await {
             Ok(response) => Ok(response.map(Either::Left)),
             Err(e) => {
                 tracing::error!(%domain, error = %e, "Upstream request failed");

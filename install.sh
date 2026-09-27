@@ -5,8 +5,8 @@ set -euo pipefail
 # Usage: curl -fsSL https://antra.iifelse.com/install.sh | bash
 #
 # Pin a version for reproducible installs (teams, CI):
-#   curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.5.0 bash
-#   (accepts "v0.5.0" or "0.5.0"; defaults to the latest release)
+#   curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION=v0.6.0 bash
+#   (accepts "v0.6.0" or "0.6.0"; defaults to the latest release)
 #
 # This script:
 #   1. Detects your OS and architecture
@@ -105,7 +105,7 @@ get_latest_version() {
 # ── Resolve version (pin or latest) ───────────────────────────────────────────
 
 resolve_version() {
-    # Teams/CI can pin: ANTRA_VERSION=v0.5.0 (or "0.5.0") — otherwise latest.
+    # Teams/CI can pin: ANTRA_VERSION=v0.6.0 (or "0.6.0") — otherwise latest.
     local pinned="${ANTRA_VERSION:-}"
     if [ -n "$pinned" ]; then
         # Normalize: allow "0.3.1" as well as "v0.3.1"
@@ -114,7 +114,7 @@ resolve_version() {
             *) pinned="v${pinned}";;
         esac
         if [[ ! "$pinned" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            err "Invalid ANTRA_VERSION='${ANTRA_VERSION}'. Expected like v0.5.0 (or 0.5.0)."
+            err "Invalid ANTRA_VERSION='${ANTRA_VERSION}'. Expected like v0.6.0 (or 0.6.0)."
             exit 1
         fi
         echo "$pinned"

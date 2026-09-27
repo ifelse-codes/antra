@@ -19,10 +19,15 @@ fn upstream_dial_host(route: &Route) -> String {
 ///
 /// Streams the upstream body verbatim (no buffering) so SSE / chunked /
 /// infinite streams arrive on time. Headers + status pass through untouched.
+///
+/// `client` is the daemon's shared, pooled client (see `http::ProxyState`).
+/// It used to be built here, per request, which discarded the pool and made
+/// every proxied request pay a fresh TCP handshake.
 pub async fn forward_request(
     req: Request<Incoming>,
     route: &Route,
     hops: u32,
+    client: &crate::proxy::http::UpstreamClient,
 ) -> Result<Response<Incoming>> {
     let original_host = req
         .headers()
@@ -81,12 +86,10 @@ pub async fn forward_request(
 
     let upstream_req = Request::from_parts(parts, body);
 
-    // Send to upstream using hyper-util client. Time out waiting for
-    // response HEADERS (time-to-first-byte) so a wedged upstream fails
-    // fast instead of hanging the browser forever. The body stream itself
-    // is unbounded by design (SSE / infinite streams).
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http();
+    // Send to upstream using the daemon's shared pooled client. Time out
+    // waiting for response HEADERS (time-to-first-byte) so a wedged upstream
+    // fails fast instead of hanging the browser forever. The body stream
+    // itself is unbounded by design (SSE / infinite streams).
 
     let upstream_response = tokio::time::timeout(
         std::time::Duration::from_secs(30),

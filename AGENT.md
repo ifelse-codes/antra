@@ -29,26 +29,27 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
-## Session Handoff — 2026-09-27
+## Session Handoff — 2026-09-27 (afternoon)
 
-**The published product is `v0.5.0`** (tag `v0.5.0`, released from `af58ecb`). The working tree is clean; there is no uncommitted work. Later GTM work remains in `GO-LIVE-PLAN.md`.
+**`v0.6.0` is cut**: ROADMAP #32 (`antra logs`) and #33 (shared upstream client), plus the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is described in `fix-plan-2026-09-26-ca-trust.md`.
 
-**What changed in v0.5.0:** the root CA no longer carries `subjectAltName: DNS:Antra Local CA`. A `dNSName` must be a valid DNS name, so Apple's TLS stack (Safari, every macOS system tool) rejected the chain at parse time with `SSL certificate problem: unsupported or invalid name syntax` even when the CA was installed and trusted — OpenSSL and BoringSSL accepted it, which is why it survived every earlier check. Validity is now bounded at 800 days (inside Apple's 825-day ceiling for TLS server certs, custom roots included), and existing installs rotate the CA once, are asked to re-trust, then have the superseded root removed byte-exactly. Full rationale: `fix-plan-2026-09-26-ca-trust.md`; findings and verification: `deep-dive-report-2026-09-26.md` §F.
+**What changed in v0.6.0:**
+- `antra logs [-f] [--lines N]`. The daemon's output used to go to `/dev/null` on the auto-start path, so "HTTPS server failed" existed only in the code that printed it; several user-test sessions had asked for this command. One log path now serves every writer — `util::logs` — including the launchd plist, which pointed at `~/.config/antra/daemon.log` while the CLI wrote `data_local_dir()/antra/daemon.log`: two different files on macOS. Log is truncated past 5 MiB rather than rotated. `doctor` tails the last errors.
+- One pooled upstream client in `ProxyState` instead of one per request. `tests/upstream_pool.rs` counts TCP connections through the real TLS server: 4 sequential requests → 1 upstream connection, and the old per-request build → 4 (verified by temporarily reverting).
+- A denied `/etc/hosts` write no longer suggests `sudo antra alias <domain> <port>` regardless of what you ran; the suggestion follows the domain suffix.
+- Underscores are rejected in domain names. They were accepted, which is the same class of bug as the CA SAN: a `_` cannot appear in a `dNSName`, so the failure moved from a clear CLI error to a certificate no strict verifier accepts.
+- Landing site: CSP, HSTS, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, and a real 404 (unknown paths returned the homepage with a 200).
 
 **Verified this session:**
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite green in a disposable HOME (216 executions, 0 failures). All 7 CI jobs green on PRs #12 and #13.
-- `tests/e2e_securetransport.rs` (macOS, now in CI): `/usr/bin/curl --cacert` returns 200 through a real `antra proxy start` + `antra alias`, refuses an untrusted chain, and a sensitivity test asserts the pre-0.5 certificate shape is *still* rejected — the gate cannot pass vacuously.
-- `tests/cert_strict.rs` was red before the fix and green after; the before-state is recorded in the commit message.
-- Migration walkthrough in a disposable HOME: deleting `.ca-version` (what a ≤0.4.0 install looks like) makes the next command rotate the CA, write `retired-ca.pem` holding the old certificate byte-for-byte, purge the leaf cache; `doctor` then reports "CA passes strict X.509 validation (expires in 800d)" and "A superseded CA is still present in a trust store"; `trust --status` names the fix.
-- The published release artifact was downloaded and smoke-tested: `antra 0.5.0`, generated CA has no SAN, `.ca-version` = 2. `Formula/antra.rb` carries the sha256s from that release's own `.sha256` assets.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, full suite green in a disposable HOME (233 executions, 0 failures).
+- `antra logs` against a live daemon prints its real output; the empty case explains itself and exits 0.
+- The landing site was re-checked in a real browser after the CSP landed: Inter and JetBrains Mono still load, the Plausible tag is present, zero page errors, `/nonexistent` → 404.
 
 **Do not redo blindly:**
-- **Existing installs rotate their CA on first run of ≥0.5.0 and prompt to re-trust.** That is intended, not a bug to "fix" by deleting state. If a rotation is interrupted, `retired-ca.pem` keeps the superseded certificate so the next run converges; `sudo antra trust --remove` finishes the cleanup.
-- **Never add a SAN back to the CA.** `certs/validate` rejects it and `tests/cert_strict.rs` fails. A CA is identified by its subject; the names it vouches for live in its leafs.
-- **The e2e suites spawn against a disposable HOME** (`tests/common`). A `cargo test` once regenerated a real local CA mid-session; with rotation that became destructive, so hermeticity now lives in code, not in a README. Two constraints the harness encodes: the home must sit under a short path (macOS has no XDG runtime dir, so the daemon socket falls back to `$HOME/Library/Application Support/antra/` and the 104-byte `sun_path` limit bites), and the suite stops its daemon on exit (otherwise the leftover process holds 8443 and the next real `antra run` cannot bind).
-- Do not run `antra clean` against the real `/etc/hosts`; it contains active Antra-managed entries.
-- Run Rust tests with a disposable `HOME`, preserving `CARGO_HOME` and `RUSTUP_HOME`.
-- Firefox and Safari were not tested in a real browser. Windows hermetic CI is configured, but local cross-compilation lacks `x86_64-w64-mingw32-gcc`.
+- **`tests/e2e_next_sprint.sh` was never running.** `log_pass` used `((pass_count++))`, which exits 1 when the counter is 0, so under `set -e` the suite aborted after its first passing assertion — in every one of the four shell suites. Fixed in three of them (`e2e_portless_simple.sh` has no `set -e`). With that fixed the suite runs to completion and reports **9 passed / 46 failed on this machine**, all from one cause: the auto-started daemon cannot bind 443 (no root) or 8443/8080 (an unrelated `ssh` holds both here), so every daemon-dependent test fails. It is deliberately **not** wired into CI yet — the blocker is that the auto-start path has no port override (ROADMAP #21, `ANTRA_HTTPS_PORT` et al). Wire it after that lands, on a runner where 8443 is free.
+- Do not kill unrelated processes to make a test pass; 8443/8080 are held by someone else's `ssh` on this machine.
+- If a test daemon lingers on 8443 after a run, it is an orphan from a temp HOME — check its open files (`lsof -p <pid> | grep antra`) before stopping it, so you do not kill the user's real daemon.
+- The CA rules from the previous handoff still hold: existing installs rotate once and re-prompt; never add a SAN back to the CA.
 
 **Reproduce the local gate:**
 ```bash
@@ -59,7 +60,7 @@ HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustu
 rm -rf "$TEST_HOME"
 ```
 
-**Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (the Safari-critical half is machine-checked; the browser pass is a human step), then ROADMAP #32 (`antra logs` — the auto-started daemon still discards its output, unlike `antra proxy start`) and #33 (shared upstream HTTP client).
+**Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (still a human step; the Safari-critical half is machine-checked in CI), wiring the shell e2e suites once the daemon's ports are configurable, and ROADMAP #21 (env vars).
 
 ---
 

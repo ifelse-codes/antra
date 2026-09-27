@@ -6,15 +6,6 @@ use crate::daemon::server::{daemon_status, start_daemon, stop_daemon, DaemonConf
 use crate::ipc::client::send_command_sync;
 use crate::ipc::protocol::IpcPayload;
 
-/// Returns the path to the daemon log file.
-fn daemon_log_path() -> std::path::PathBuf {
-    let dir = dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("antra");
-    std::fs::create_dir_all(&dir).ok();
-    dir.join("daemon.log")
-}
-
 /// Check if a PID is alive on Unix.
 #[cfg(unix)]
 fn is_pid_alive(pid: u32) -> bool {
@@ -91,11 +82,8 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 println!("  Starting daemon...");
 
                 let exe = std::env::current_exe()?;
-                let log_path = daemon_log_path();
-                let log_file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)?;
+                let log_path = crate::util::logs::daemon_log_path();
+                let log_file = crate::util::logs::open_for_append()?;
                 // sudo-root start writes into the user's data dir: hand the
                 // log back so later unprivileged starts can append to it.
                 #[cfg(unix)]

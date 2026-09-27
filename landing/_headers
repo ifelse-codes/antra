@@ -1,2 +1,23 @@
+# Cloudflare Pages header rules.
+# Syntax: `#` comments, a path, then indented `Name: value` lines.
+
 /install.sh
   Content-Type: text/plain
+
+# The site of a tool whose whole pitch is "HTTPS that just works" serving
+# itself without these is the screenshot a security-minded visitor takes on
+# the way to the repo.
+#
+# `script-src` keeps 'unsafe-inline' because index.html carries two inline
+# <script> blocks (the mandala animation and the year stamp). Locking those
+# down properly means CSP hashes, which have to be recomputed on every edit to
+# the page — a footgun for a file that changes often. Tightening it means
+# moving both blocks into external files, which is the real fix.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://plausible.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://plausible.io; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
