@@ -323,12 +323,14 @@ mod tests {
 
     #[tokio::test]
     async fn errors_when_nothing_listens() {
-        // Ephemeral port with (almost surely) nothing on either family.
-        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
+        // Port 0 rather than a bound-then-dropped ephemeral port. Dropping a
+        // listener and racing another binder for the number is how this test
+        // used to fail: on a CI runner something else claimed the port between
+        // the drop and the connect, the connection succeeded, and the test
+        // died on `unwrap_err`. Nothing can ever listen on port 0, so the
+        // outcome is the same on every machine.
         let mut r = route();
-        r.port = port;
+        r.port = 0;
         let err = connect_upstream(&r).await.unwrap_err().to_string();
         assert!(err.contains("is your server running"), "got: {err}");
     }
