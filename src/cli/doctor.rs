@@ -15,11 +15,62 @@ pub fn execute() -> Result<()> {
     let mut issues: Vec<(String, String)> = Vec::new(); // (issue, fix_command)
     let mut warnings: Vec<String> = Vec::new(); // warning messages
 
-    // 1. Check CA generation
+    // 1. Check CA generation, and that the CA on disk is one a strict X.509
+    //    verifier accepts. The second check exists because the malformed root
+    //    that shipped (a `dNSName` of "Antra Local CA") passed every
+    //    OpenSSL-based check and was rejected only by Apple's stack.
     match CertStore::new() {
         Ok(store) => {
             if store.ca_exists() {
                 println!("  {} {}", "✓".green().bold(), "Root CA generated".green());
+                match store.load_ca() {
+                    Ok(ca) => match crate::certs::validate::check_ca(ca.cert_der.as_ref()) {
+                        Ok(()) => {
+                            let days = crate::certs::validate::remaining_days(ca.cert_der.as_ref())
+                                .unwrap_or_default();
+                            println!(
+                                "  {} {}",
+                                "✓".green().bold(),
+                                format!("CA passes strict X.509 validation (expires in {days}d)")
+                                    .green()
+                            );
+                            if store.pending_retired_ca_pem().is_some() {
+                                println!(
+                                    "  {} {}",
+                                    "⚠".yellow().bold(),
+                                    "A superseded CA is still present in a trust store".yellow()
+                                );
+                                warnings.push(
+                                    "The previous CA certificate has not been removed from the \
+                                     trust store yet"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            println!(
+                                "  {} {}",
+                                "✗".red().bold(),
+                                format!("CA fails strict X.509 validation: {e}").red()
+                            );
+                            issues.push((
+                                format!("CA certificate is invalid: {e}"),
+                                "antra trust --remove && antra trust".to_string(),
+                            ));
+                        }
+                    },
+                    Err(e) => {
+                        println!(
+                            "  {} {}",
+                            "✗".red().bold(),
+                            format!("Could not read the CA: {e}").red()
+                        );
+                        issues.push((
+                            format!("Could not read the CA: {e}"),
+                            "antra clean && antra trust".to_string(),
+                        ));
+                    }
+                }
             } else {
                 println!("  {} {}", "✗".red().bold(), "Root CA not generated".red());
                 issues.push((
@@ -133,6 +184,7 @@ pub fn execute() -> Result<()> {
                 uptime_secs: 0,
                 route_count: 0,
                 socket_path: String::new(),
+                ca_fingerprint: None,
             }))
         {
             if let IpcPayload::Status(status) = resp.payload {
@@ -141,6 +193,37 @@ pub fn execute() -> Result<()> {
                     "    {}",
                     format!("Uptime: {}s", status.uptime_secs).dimmed()
                 );
+
+                // A daemon holds its CA for its whole lifetime, so one started
+                // before a CA rotation keeps serving a root the machine no
+                // longer trusts. Nothing about the traffic looks wrong; the
+                // handshake simply fails in the browser.
+                match (&status.ca_fingerprint, CertStore::new()) {
+                    (Some(daemon_fp), Ok(store)) => {
+                        if let Ok(ca) = store.load_ca() {
+                            let disk_fp = crate::certs::fingerprint(ca.cert_der.as_ref());
+                            if *daemon_fp != disk_fp {
+                                println!(
+                                    "    {}",
+                                    "Daemon is serving a retired CA — restart it".yellow()
+                                );
+                                warnings.push(
+                                    "The running daemon predates the current CA certificate, so \
+                                     HTTPS will fail until it is restarted"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                    (None, _) => {
+                        println!(
+                            "    {}",
+                            "Daemon too old to report its CA — restart it to pick up the current one"
+                                .dimmed()
+                        );
+                    }
+                    _ => {}
+                }
             }
         }
 

@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// IPC protocol version
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// v3 adds the daemon's CA fingerprint to `StatusResponse` so a CLI can tell
+/// whether a running daemon still holds the CA on disk. After a CA rotation a
+/// daemon started by the previous binary keeps serving the retired root for
+/// its whole lifetime, and the only honest answer is "restart the daemon".
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// A message sent between CLI and daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +99,11 @@ pub struct StatusResponse {
     pub uptime_secs: u64,
     pub route_count: usize,
     pub socket_path: String,
+    /// Fingerprint of the CA this daemon is serving, so the CLI can spot a
+    /// daemon that predates a CA rotation. `None` from a daemon too old to
+    /// report one — the CLI says so instead of guessing.
+    #[serde(default)]
+    pub ca_fingerprint: Option<String>,
 }
 
 /// Startup status of the daemon (which ports actually bound)

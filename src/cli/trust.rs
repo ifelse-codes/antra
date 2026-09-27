@@ -61,6 +61,17 @@ fn show_status() -> Result<()> {
         );
         #[cfg(not(target_os = "macos"))]
         println!("  Run {} to install the CA.", "antra trust".cyan());
+        if trust::retired_ca_pending() {
+            println!();
+            println!(
+                "  {}",
+                "A CA Antra replaced is still installed in a trust store.".yellow()
+            );
+            println!(
+                "  Run {} to trust the current one and remove the old.",
+                "antra trust".bold()
+            );
+        }
     }
 
     Ok(())

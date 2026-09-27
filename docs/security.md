@@ -29,6 +29,22 @@ A custom-domain approval is a warning boundary, not a public-domain allowlist. A
 - Never transmitted over IPC
 - `antra clean` removes the local key after trust and hosts cleanup succeeds
 
+### CA Versioning and Rotation
+
+The root certificate is versioned by a marker file (`~/.config/antra/.ca-version`) and rotated when the on-disk CA predates the current version. Rotation is what let v0.5.0 replace a root that every Apple-stack client refused to parse; it will also fire when the CA's own validity window ends.
+
+| Rule | Why |
+|------|-----|
+| A CA carries no `subjectAltName` | A `dNSName` must be a valid DNS name. `DNS:Antra Local CA` made Safari and every macOS system TLS tool reject the chain at parse time, even when it was installed and trusted. |
+| Validity is bounded (800 days) | Apple caps TLS server certificates at 825 days, custom roots included. rcgen's 1975→4096 default is outside that window. |
+| The replaced CA is kept in `retired-ca.pem` | Trust-store removal must be byte-exact, and an interrupted rotation has to converge on the next run. |
+| The retired CA is removed only after the new one is trusted | Same order as a user-driven change: never leave the machine trusting a root that signs nothing. |
+| Removal is never silent | The system store may need elevation; when removal fails the file is kept and the exact retry command is printed (`sudo antra trust --remove`). |
+
+Leaf certificates are cached per hostname and regenerated inside a 45-day renewal window, so the bounded validity window does not turn into an expiry surprise.
+
+`antra doctor` reports whether the CA passes strict X.509 validation, whether a superseded CA is still present in a trust store, and whether the running daemon is serving a CA other than the one on disk (a daemon holds its CA for its whole lifetime, so it must be restarted after a rotation).
+
 ### Hosts File Safety
 
 - Only modify entries within `# BEGIN ANTRA MANAGED HOSTS` block

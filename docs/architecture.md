@@ -79,11 +79,12 @@ src/
 │   ├── monitor.rs       # Health check, port detection
 │   └── signals.rs       # Signal forwarding
 ├── certs/
-│   ├── mod.rs
-│   ├── ca.rs            # Root CA generation (rcgen)
-│   ├── leaf.rs          # Leaf cert generation
-│   ├── cache.rs         # In-memory + disk cert cache
-│   └── store.rs         # ~/.config/antra/ cert storage
+│   ├── mod.rs            # Validity window + CA fingerprint
+│   ├── ca.rs             # Root CA generation (rcgen, no SAN)
+│   ├── leaf.rs           # Leaf cert generation (SAN, serverAuth, 800d)
+│   ├── cache.rs          # In-memory + disk cert cache (renews expiring leafs)
+│   ├── store.rs          # ~/.config/antra/ cert storage, CA version marker
+│   └── validate.rs       # Strict X.509 rules a strict verifier enforces
 ├── resolver/
 │   ├── mod.rs
 │   ├── traits.rs        # DomainResolver trait
@@ -181,6 +182,8 @@ Browser                    Antra                    Upstream
 | rustls | 0.23.43 | TLS |
 | tokio-rustls | 0.26.4 | Async TLS |
 | rcgen | 0.14.9 | Cert generation |
+| x509-parser | 0.16 | Strict validation of what we mint (`certs::validate`) |
+| time | 0.3 | Certificate validity windows |
 | clap | 4.6.6 | CLI parsing |
 | tower | 0.5.2 | Middleware |
 | tower-http | 0.7.0 | HTTP middleware |
