@@ -31,7 +31,7 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ## Session Handoff — 2026-09-27 (afternoon)
 
-**`v0.6.0` is cut**: ROADMAP #32 (`antra logs`) and #33 (shared upstream client), plus the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is described in `fix-plan-2026-09-26-ca-trust.md`.
+**`v0.6.0` is published** (tag `v0.6.0`, PRs #14–#16, formula updated from the release's own sha256s, landing redeployed as a *production* deployment). ROADMAP #32 (`antra logs`) and #33 (shared upstream client) are done, along with the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is described in `fix-plan-2026-09-26-ca-trust.md`.
 
 **What changed in v0.6.0:**
 - `antra logs [-f] [--lines N]`. The daemon's output used to go to `/dev/null` on the auto-start path, so "HTTPS server failed" existed only in the code that printed it; several user-test sessions had asked for this command. One log path now serves every writer — `util::logs` — including the launchd plist, which pointed at `~/.config/antra/daemon.log` while the CLI wrote `data_local_dir()/antra/daemon.log`: two different files on macOS. Log is truncated past 5 MiB rather than rotated. `doctor` tails the last errors.
@@ -59,6 +59,8 @@ TEST_HOME=$(mktemp -d /tmp/antra-test.XXXXXX)
 HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustup cargo test -- --test-threads=4
 rm -rf "$TEST_HOME"
 ```
+
+**One trap this session cost time:** `wrangler pages deploy .` infers the branch from git. Deployed from a feature branch it creates a *branch* deployment and prints an alias URL — production does not move, and the site silently keeps serving the old installer. Deploy from `main`, or pass `--branch main`, and check the live domain afterwards rather than the deployment URL.
 
 **Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (still a human step; the Safari-critical half is machine-checked in CI), wiring the shell e2e suites once the daemon's ports are configurable, and ROADMAP #21 (env vars).
 
