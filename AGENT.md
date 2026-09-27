@@ -29,34 +29,37 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
-## Session Handoff — 2026-09-25
+## Session Handoff — 2026-09-27
 
-**Resume from `GO-LIVE-PLAN.md` first.** The published product is `v0.4.0`; security hardening and acceptance changes are currently an **uncommitted working-tree change**.
+**The published product is `v0.5.0`** (tag `v0.5.0`, released from `af58ecb`). The working tree is clean; there is no uncommitted work. Later GTM work remains in `GO-LIVE-PLAN.md`.
 
-**Verified in the latest session:**
-- `cargo fmt`, `cargo check --all-targets`, Clippy, release build, doc tests, and 299 test executions passed.
-- Real Chrome + Vite HMR passed through the proxy, including proxy-origin WebSocket, Vite update, and Ctrl+C route/process cleanup.
-- CA consent was tested with a real PTY: `n` skips trust; Enter accepts and installs the disposable CA.
-- Disposable macOS trust install/removal passed; the pre-existing Keychain certificate was unchanged.
-- Unapproved custom domains are rejected by `run`, `add route`, `alias`, and `proxy start --route` before daemon/hosts mutation.
+**What changed in v0.5.0:** the root CA no longer carries `subjectAltName: DNS:Antra Local CA`. A `dNSName` must be a valid DNS name, so Apple's TLS stack (Safari, every macOS system tool) rejected the chain at parse time with `SSL certificate problem: unsupported or invalid name syntax` even when the CA was installed and trusted — OpenSSL and BoringSSL accepted it, which is why it survived every earlier check. Validity is now bounded at 800 days (inside Apple's 825-day ceiling for TLS server certs, custom roots included), and existing installs rotate the CA once, are asked to re-trust, then have the superseded root removed byte-exactly. Full rationale: `fix-plan-2026-09-26-ca-trust.md`; findings and verification: `deep-dive-report-2026-09-26.md` §F.
+
+**Verified this session:**
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the full suite green in a disposable HOME (216 executions, 0 failures). All 7 CI jobs green on PRs #12 and #13.
+- `tests/e2e_securetransport.rs` (macOS, now in CI): `/usr/bin/curl --cacert` returns 200 through a real `antra proxy start` + `antra alias`, refuses an untrusted chain, and a sensitivity test asserts the pre-0.5 certificate shape is *still* rejected — the gate cannot pass vacuously.
+- `tests/cert_strict.rs` was red before the fix and green after; the before-state is recorded in the commit message.
+- Migration walkthrough in a disposable HOME: deleting `.ca-version` (what a ≤0.4.0 install looks like) makes the next command rotate the CA, write `retired-ca.pem` holding the old certificate byte-for-byte, purge the leaf cache; `doctor` then reports "CA passes strict X.509 validation (expires in 800d)" and "A superseded CA is still present in a trust store"; `trust --status` names the fix.
+- The published release artifact was downloaded and smoke-tested: `antra 0.5.0`, generated CA has no SAN, `.ca-version` = 2. `Formula/antra.rb` carries the sha256s from that release's own `.sha256` assets.
 
 **Do not redo blindly:**
+- **Existing installs rotate their CA on first run of ≥0.5.0 and prompt to re-trust.** That is intended, not a bug to "fix" by deleting state. If a rotation is interrupted, `retired-ca.pem` keeps the superseded certificate so the next run converges; `sudo antra trust --remove` finishes the cleanup.
+- **Never add a SAN back to the CA.** `certs/validate` rejects it and `tests/cert_strict.rs` fails. A CA is identified by its subject; the names it vouches for live in its leafs.
+- **The e2e suites spawn against a disposable HOME** (`tests/common`). A `cargo test` once regenerated a real local CA mid-session; with rotation that became destructive, so hermeticity now lives in code, not in a README. Two constraints the harness encodes: the home must sit under a short path (macOS has no XDG runtime dir, so the daemon socket falls back to `$HOME/Library/Application Support/antra/` and the 104-byte `sun_path` limit bites), and the suite stops its daemon on exit (otherwise the leftover process holds 8443 and the next real `antra run` cannot bind).
 - Do not run `antra clean` against the real `/etc/hosts`; it contains active Antra-managed entries.
-- Run Rust tests with a disposable `HOME`, while preserving `CARGO_HOME` and `RUSTUP_HOME`.
-- Firefox was not tested. Windows hermetic CI is configured, but local cross-compilation lacks `x86_64-w64-mingw32-gcc`.
-- No commit, tag, release, or deployment has been made for the hardening changes.
+- Run Rust tests with a disposable `HOME`, preserving `CARGO_HOME` and `RUSTUP_HOME`.
+- Firefox and Safari were not tested in a real browser. Windows hermetic CI is configured, but local cross-compilation lacks `x86_64-w64-mingw32-gcc`.
 
 **Reproduce the local gate:**
 ```bash
 cargo fmt --all -- --check
-cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
 TEST_HOME=$(mktemp -d /tmp/antra-test.XXXXXX)
-HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustup cargo test --all-targets -- --test-threads=4
+HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustup cargo test -- --test-threads=4
 rm -rf "$TEST_HOME"
 ```
 
-**Next actions:** run Windows CI on GitHub, complete the formal Chrome/Firefox MVP checklist after explicit CA trust approval, then review/tag/release the hardening changes. Later GTM work remains in `GO-LIVE-PLAN.md`.
+**Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (the Safari-critical half is machine-checked; the browser pass is a human step), then ROADMAP #32 (`antra logs` — the auto-started daemon still discards its output, unlike `antra proxy start`) and #33 (shared upstream HTTP client).
 
 ---
 
@@ -76,7 +79,7 @@ rm -rf "$TEST_HOME"
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.4.0` is published. The latest security hardening and acceptance changes are verified locally but remain uncommitted; Windows runtime CI and the formal browser checklist are still open.
+**Current state:** Phases (0-10) are implemented and `v0.5.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack. The working tree is clean. Still open: the formal browser checklist (Safari, Firefox) and the ROADMAP follow-ups #32 (`antra logs`) and #33 (shared upstream client).
 
 ### Landing Page
 
