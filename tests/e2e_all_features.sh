@@ -1123,17 +1123,19 @@ EOF
         log_fail "Explicit --port honored on the command line"
     fi
     
-    # A `--port` *inside the package.json dev script* is NOT read. The
-    # detector sees only the argv it will exec — `npm run dev` — and the
-    # script body stays inside package.json, so the Vite default (5173) wins.
-    # Asserted as current behaviour on purpose: this is a real gap filed as
-    # ROADMAP C9, and when it is fixed this assertion fails and gets updated
-    # to expect 3001. That is the point — it makes the fix visible.
+    # A `--port` *inside the package.json dev script* is read and wins over
+    # the framework default. The argv Antra execs is only `npm run dev`, so
+    # the pin has to come out of the script body itself (ROADMAP C9).
+    # Asserted as a port choice, not a successful bind: 3001 may be held by
+    # an unrelated process, and the run then stops with a
+    # port-already-in-use error that still proves 3001 was selected. The
+    # 5173 half is the regression guard — if the pin is ever missed again,
+    # Vite's default shows up in the output and this fails.
     output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
-    if echo "$output" | grep -q "5173"; then
-        log_pass "Framework default wins over a --port inside the dev script (known gap, ROADMAP C9)"
+    if echo "$output" | grep -q "3001" && ! echo "$output" | grep -q "5173"; then
+        log_pass "Port pinned in the dev script beats the framework default"
     else
-        log_fail "Framework default wins over a --port inside the dev script (known gap, ROADMAP C9)"
+        log_fail "Port pinned in the dev script beats the framework default"
     fi
 }
 

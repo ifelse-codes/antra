@@ -239,7 +239,9 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     // 1. Determine port
     let port = match args.port {
         Some(p) => {
-            // User specified a port — honor it verbatim or fail loudly.
+            // A port was resolved before spawn — explicitly by the user, or
+            // from a pin in the project's own dev script. Honor it
+            // verbatim or fail loudly, and treat both the same way.
             // Silently remapping to a random free port born the classic
             // 503: frameworks that ignore $PORT (Vite behind `npm run`,
             // static servers with pinned args) keep listening on `p`

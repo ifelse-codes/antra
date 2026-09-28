@@ -14,6 +14,10 @@ pub struct DetectedProject {
     pub args: Vec<String>,
     /// Default port for this framework (if known)
     pub default_port: Option<u16>,
+    /// Port pinned by the project's own dev script (e.g. `vite --port
+    /// 3001` inside package.json). The project stated it, so it outranks
+    /// the framework default; `None` when the script pins nothing.
+    pub script_port: Option<u16>,
     /// Language/framework type for logging
     pub framework: String,
 }
@@ -104,11 +108,22 @@ fn try_package_json(dir: &Path) -> Result<Option<DetectedProject>> {
     // Determine the dev command based on what's available
     let (command, args, default_port) = detect_node_command(dir, &pkg);
 
+    // A `--port` inside the dev script is the project's own stated
+    // intent. The argv Antra will exec is only `npm run dev`, so the pin
+    // is invisible to `detect_port_from_command` — read it here instead,
+    // out of the script that will actually run.
+    let script_port = pkg
+        .scripts
+        .as_ref()
+        .filter(|scripts| scripts.contains_key("dev"))
+        .and_then(|scripts| crate::util::port::detect_port_from_script(&scripts["dev"]));
+
     Ok(Some(DetectedProject {
         name,
         command,
         args,
         default_port,
+        script_port,
         framework: "Node.js".to_string(),
     }))
 }
@@ -244,6 +259,7 @@ fn try_cargo_toml(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "cargo".to_string(),
             args: vec!["run".to_string()],
             default_port: Some(8080),
+            script_port: None,
             framework: "Rust".to_string(),
         }))
     } else {
@@ -253,6 +269,7 @@ fn try_cargo_toml(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "cargo".to_string(),
             args: vec!["run".to_string()],
             default_port: None,
+            script_port: None,
             framework: "Rust".to_string(),
         }))
     }
@@ -289,6 +306,7 @@ fn try_go_mod(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "go".to_string(),
             args: vec!["run".to_string(), ".".to_string()],
             default_port: Some(8080),
+            script_port: None,
             framework: "Go".to_string(),
         }))
     } else {
@@ -297,6 +315,7 @@ fn try_go_mod(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "go".to_string(),
             args: vec!["run".to_string(), ".".to_string()],
             default_port: None,
+            script_port: None,
             framework: "Go".to_string(),
         }))
     }
@@ -351,6 +370,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
                 command: "uvicorn".to_string(),
                 args: vec!["main:app".to_string(), "--reload".to_string()],
                 default_port: Some(8000),
+                script_port: None,
                 framework: "Python".to_string(),
             }));
         }
@@ -366,6 +386,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
                 command: "python".to_string(),
                 args: vec!["manage.py".to_string(), "runserver".to_string()],
                 default_port: Some(8000),
+                script_port: None,
                 framework: "Python".to_string(),
             }));
         }
@@ -381,6 +402,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
                 command: "flask".to_string(),
                 args: vec!["run".to_string()],
                 default_port: Some(5000),
+                script_port: None,
                 framework: "Python".to_string(),
             }));
         }
@@ -392,6 +414,7 @@ fn try_pyproject_toml(dir: &Path) -> Result<Option<DetectedProject>> {
         command: "python".to_string(),
         args: vec!["-m".to_string(), "http.server".to_string()],
         default_port: Some(8000),
+        script_port: None,
         framework: "Python".to_string(),
     }))
 }
@@ -417,6 +440,7 @@ fn try_gemfile(dir: &Path) -> Result<Option<DetectedProject>> {
                 "server".to_string(),
             ],
             default_port: Some(3000),
+            script_port: None,
             framework: "Ruby on Rails".to_string(),
         }));
     }
@@ -428,6 +452,7 @@ fn try_gemfile(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "bundle".to_string(),
             args: vec!["exec".to_string(), "ruby".to_string(), "app.rb".to_string()],
             default_port: Some(4567),
+            script_port: None,
             framework: "Ruby (Sinatra)".to_string(),
         }));
     }
@@ -438,6 +463,7 @@ fn try_gemfile(dir: &Path) -> Result<Option<DetectedProject>> {
         command: "bundle".to_string(),
         args: vec!["exec".to_string(), "rackup".to_string()],
         default_port: Some(9292),
+        script_port: None,
         framework: "Ruby".to_string(),
     }))
 }
@@ -459,6 +485,7 @@ fn try_mix_exs(dir: &Path) -> Result<Option<DetectedProject>> {
             command: "mix".to_string(),
             args: vec!["phx.server".to_string()],
             default_port: Some(4000),
+            script_port: None,
             framework: "Elixir (Phoenix)".to_string(),
         }));
     }
@@ -469,6 +496,7 @@ fn try_mix_exs(dir: &Path) -> Result<Option<DetectedProject>> {
         command: "mix".to_string(),
         args: vec!["run".to_string()],
         default_port: None,
+        script_port: None,
         framework: "Elixir".to_string(),
     }))
 }
@@ -497,6 +525,7 @@ fn try_composer_json(dir: &Path) -> Result<Option<DetectedProject>> {
                 command: "php".to_string(),
                 args: vec!["artisan".to_string(), "serve".to_string()],
                 default_port: Some(8000),
+                script_port: None,
                 framework: "PHP (Laravel)".to_string(),
             }));
         }
@@ -513,6 +542,7 @@ fn try_composer_json(dir: &Path) -> Result<Option<DetectedProject>> {
             "public".to_string(),
         ],
         default_port: Some(8000),
+        script_port: None,
         framework: "PHP".to_string(),
     }))
 }
@@ -579,5 +609,67 @@ mod tests {
     fn plain_names_untouched() {
         assert_eq!(sanitize_project_name("myapp"), "myapp");
         assert_eq!(sanitize_project_name("my-app-2"), "my-app-2");
+    }
+
+    /// Write a `package.json` with the given `dev` script body into a
+    /// fresh temp dir and return the detected project.
+    fn detect_node_with_dev_script(script: &str) -> DetectedProject {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            format!(r#"{{"name":"t","scripts":{{"dev":{script}}}}}"#),
+        )
+        .unwrap();
+        detect_project(dir.path()).unwrap().unwrap()
+    }
+
+    #[test]
+    fn dev_script_port_is_detected_alongside_framework_default() {
+        let p = detect_node_with_dev_script(r#""vite --port 3001""#);
+        assert_eq!(p.script_port, Some(3001));
+        // The framework default is still reported, unchanged: it is the
+        // fallback when the project pins nothing, not something the pin
+        // overwrites.
+        assert_eq!(p.default_port, Some(5173));
+    }
+
+    #[test]
+    fn dev_script_without_port_leaves_script_port_none() {
+        assert_eq!(detect_node_with_dev_script(r#""vite""#).script_port, None);
+    }
+
+    #[test]
+    fn unparseable_dev_script_port_leaves_script_port_none() {
+        assert_eq!(
+            detect_node_with_dev_script(r#""vite --port $PORT""#).script_port,
+            None
+        );
+    }
+
+    #[test]
+    fn start_script_port_does_not_leak_into_dev_script_port() {
+        // Only the `dev` script is what `antra dev` runs. A port pinned in
+        // `start` describes a different command and must not be applied.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"t","scripts":{"start":"node server.js -p 4000"}}"#,
+        )
+        .unwrap();
+        let p = detect_project(dir.path()).unwrap().unwrap();
+        assert_eq!(p.script_port, None);
+    }
+
+    #[test]
+    fn non_node_projects_never_report_a_script_port() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"t\"\n\n[dependencies]\naxum = \"0.7\"\n",
+        )
+        .unwrap();
+        let p = detect_project(dir.path()).unwrap().unwrap();
+        assert_eq!(p.script_port, None);
+        assert_eq!(p.default_port, Some(8080));
     }
 }
