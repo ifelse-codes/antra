@@ -4,7 +4,12 @@ set -e
 # Antra Comprehensive E2E Test Script
 # Tests all supported languages/frameworks and features
 
-ANTRA_BIN="./target/debug/antra"
+# Every test below `cd`s into a scratch directory under $TEST_DIR, so
+# anything resolved against the working directory breaks after the first
+# one. Both paths are anchored to the repo instead: $ANTRA_BIN to reach the
+# binary, $REPO_ROOT for the source-level assertions near the end.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
 TEST_DIR="/tmp/antra-e2e-tests"
 RESULTS_FILE="/tmp/antra-test-results.txt"
 
@@ -40,11 +45,12 @@ log_section() {
 
 cleanup() {
     rm -rf "$TEST_DIR"
-    rm -f "$RESULTS_FILE"
+    # $RESULTS_FILE is the record of this run — it is the artifact the caller
+    # reads. Only the previous run's file is cleared, by setup().
 }
 
 setup() {
-    cleanup
+    rm -rf "$TEST_DIR"
     mkdir -p "$TEST_DIR"
     echo "Antra E2E Test Results - $(date)" > "$RESULTS_FILE"
 }
@@ -1072,35 +1078,35 @@ test_cleanup_tasks() {
     log_section "Cleanup Tasks Verification"
     
     # C1: Commands2 enum removed
-    if ! grep -q "enum Commands2" src/cli/mod.rs; then
+    if ! grep -q "enum Commands2" "$REPO_ROOT/src/cli/mod.rs"; then
         log_pass "C1: Commands2 enum removed"
     else
         log_fail "C1: Commands2 enum removed"
     fi
     
     # C2: #![allow(dead_code)] removed
-    if ! grep -q '#!\[allow(dead_code)\]' src/main.rs; then
+    if ! grep -q '#!\[allow(dead_code)\]' "$REPO_ROOT/src/main.rs"; then
         log_pass "C2: #![allow(dead_code)] removed"
     else
         log_fail "C2: #![allow(dead_code)] removed"
     fi
     
     # C3: Socket permissions fixed (0o600)
-    if grep -q "0o600" src/daemon/server.rs; then
+    if grep -q "0o600" "$REPO_ROOT/src/daemon/server.rs"; then
         log_pass "C3: Socket permissions fixed to 0o600"
     else
         log_fail "C3: Socket permissions fixed to 0o600"
     fi
     
     # C4: proxy/server.rs removed
-    if [ ! -f src/proxy/server.rs ]; then
+    if [ ! -f "$REPO_ROOT/src/proxy/server.rs" ]; then
         log_pass "C4: proxy/server.rs removed"
     else
         log_fail "C4: proxy/server.rs removed"
     fi
     
     # C5: TTY check added in doctor
-    if grep -q "isatty" src/cli/doctor.rs; then
+    if grep -q "isatty" "$REPO_ROOT/src/cli/doctor.rs"; then
         log_pass "C5: TTY check added in doctor"
     else
         log_fail "C5: TTY check added in doctor"
@@ -1114,8 +1120,14 @@ test_cleanup_tasks() {
 test_select_resolver() {
     log_section "select_resolver Consolidation"
     
-    # Check that select_resolver is only defined once in resolver/util.rs
-    count=$(grep -r "fn select_resolver" src/ | wc -l)
+    # The trailing "(" is load-bearing. `select_resolver_for_registration` is
+    # a second, intended function (ROADMAP #5: the only difference is the
+    # custom-domain approval check), so a bare `fn select_resolver` matches
+    # both, counts 2, and this assertion could never pass. ROADMAP #5 is about
+    # the three copy-pasted duplicates in cli/ being gone — which the four
+    # `use crate::resolver::util::...` checks below verify — not about the
+    # helper existing exactly once.
+    count=$(grep -r "fn select_resolver(" "$REPO_ROOT/src/" | wc -l)
     
     if [ "$count" -eq 1 ]; then
         log_pass "select_resolver defined only once"
@@ -1123,24 +1135,18 @@ test_select_resolver() {
         log_fail "select_resolver defined only once (found $count)"
     fi
     
-    # Check that all CLI files use the shared resolver
-    if grep -q "use crate::resolver::util::select_resolver" src/cli/run.rs; then
-        log_pass "run.rs uses shared select_resolver"
-    else
-        log_fail "run.rs uses shared select_resolver"
-    fi
-    
-    if grep -q "use crate::resolver::util::select_resolver" src/cli/alias.rs; then
-        log_pass "alias.rs uses shared select_resolver"
-    else
-        log_fail "alias.rs uses shared select_resolver"
-    fi
-    
-    if grep -q "use crate::resolver::util::select_resolver" src/cli/mod.rs; then
-        log_pass "mod.rs uses shared select_resolver"
-    else
-        log_fail "mod.rs uses shared select_resolver"
-    fi
+    # Check that all CLI files use the shared resolver. `run` and `alias` are
+    # registration paths, so they call `select_resolver_for_registration` (the
+    # variant that also runs the custom-domain approval check — ROADMAP #5).
+    # Matching either name keeps this a test of "the shared helper is used"
+    # rather than of which of the two helpers a given call site needs.
+    for f in run alias mod; do
+        if grep -q "resolver::util::select_resolver" "$REPO_ROOT/src/cli/$f.rs"; then
+            log_pass "$f.rs uses shared select_resolver"
+        else
+            log_fail "$f.rs uses shared select_resolver"
+        fi
+    done
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1155,7 +1161,12 @@ main() {
     echo -e "${YELLOW}Building antra...${RESET}"
     cargo build --quiet 2>&1 | grep -v "^warning" || true
     echo ""
-    
+
+    # Creates $TEST_DIR and the results header. Without this the scratch
+    # dirs were created only as a side effect of the first test's `mkdir -p`
+    # and every result was `tee -a`'d onto a file that did not exist.
+    setup
+
     # Node.js tests
     test_node_npm
     test_node_yarn

@@ -4,7 +4,11 @@ set -e
 # Antra Portless-Parity Features E2E Test Script
 # Tests all 5 new features implemented to close gap with Vercel's portless
 
-ANTRA_BIN="./target/debug/antra"
+# Tests `cd` into scratch dirs under $TEST_DIR, so resolve both paths against
+# the repo up front: $ANTRA_BIN to reach the binary, $REPO_ROOT for the
+# source-level assertions.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
 TEST_DIR="/tmp/antra-portless-tests"
 RESULTS_FILE="/tmp/antra-portless-test-results.txt"
 
@@ -41,13 +45,17 @@ log_section() {
 cleanup() {
     # Kill any background processes
     pkill -f "antra proxy start" 2>/dev/null || true
-    pkill -f "node.*test" 2>/dev/null || true
+    # Was `pkill -f "node.*test"`, which matches any node process whose
+    # command line contains "test" — a developer's Jest/Vitest/watch run, not
+    # just this suite's. Scope it to processes rooted in $TEST_DIR.
+    pkill -f "$TEST_DIR" 2>/dev/null || true
     rm -rf "$TEST_DIR"
-    rm -f "$RESULTS_FILE"
+    # $RESULTS_FILE is this run's record and the artifact the caller reads;
+    # setup() clears the previous one instead.
 }
 
 setup() {
-    cleanup
+    rm -rf "$TEST_DIR"
     mkdir -p "$TEST_DIR"
     echo "Antra Portless-Parity E2E Test Results - $(date)" > "$RESULTS_FILE"
 }
@@ -81,13 +89,13 @@ test_port_conflict_help() {
 test_port_conflict_code() {
     log_section "Feature #29: Port Conflict - explicit port honored verbatim"
 
-    if grep -q "pub fn is_port_available" src/util/port.rs; then
+    if grep -q "pub fn is_port_available" "$REPO_ROOT/src/util/port.rs"; then
         log_pass "is_port_available function exists"
     else
         log_fail "is_port_available function exists"
     fi
 
-    if grep -q "Using port" src/cli/run.rs; then
+    if grep -q "Using port" "$REPO_ROOT/src/cli/run.rs"; then
         log_pass "run reports verbatim port use"
     else
         log_fail "run reports verbatim port use"
@@ -97,7 +105,7 @@ test_port_conflict_code() {
 test_port_conflict_used_in_run() {
     log_section "Feature #29: Port Conflict - Used in run.rs"
 
-    if grep -q "is_port_available" src/cli/run.rs; then
+    if grep -q "is_port_available" "$REPO_ROOT/src/cli/run.rs"; then
         log_pass "is_port_available used in run.rs"
     else
         log_fail "is_port_available used in run.rs"
@@ -111,7 +119,7 @@ test_port_conflict_used_in_run() {
 test_smart_daemon_code() {
     log_section "Feature #27: Smart Daemon Auto-Start"
 
-    if grep -q "fn ensure_daemon" src/cli/mod.rs; then
+    if grep -q "fn ensure_daemon" "$REPO_ROOT/src/cli/mod.rs"; then
         log_pass "ensure_daemon function exists in mod.rs"
     else
         log_fail "ensure_daemon function exists in mod.rs"
@@ -121,7 +129,7 @@ test_smart_daemon_code() {
 test_smart_daemon_in_list() {
     log_section "Feature #27: Read-only list never auto-starts daemon"
 
-    if grep -B2 "list::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
+    if grep -B2 "list::execute" "$REPO_ROOT/src/cli/mod.rs" | grep -q "ensure_daemon"; then
         log_fail "list must not auto-start daemon"
     else
         log_pass "list does not auto-start daemon"
@@ -131,7 +139,7 @@ test_smart_daemon_in_list() {
 test_smart_daemon_in_alias() {
     log_section "Feature #27: Smart Daemon - auto-start in alias"
 
-    if grep -B2 "alias::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
+    if grep -B2 "alias::execute" "$REPO_ROOT/src/cli/mod.rs" | grep -q "ensure_daemon"; then
         log_pass "ensure_daemon called for alias command"
     else
         log_fail "ensure_daemon called for alias command"
@@ -141,7 +149,7 @@ test_smart_daemon_in_alias() {
 test_smart_daemon_in_open() {
     log_section "Feature #27: open never auto-starts daemon"
 
-    if grep -B2 "open::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
+    if grep -B2 "open::execute" "$REPO_ROOT/src/cli/mod.rs" | grep -q "ensure_daemon"; then
         log_fail "open must not auto-start daemon"
     else
         log_pass "open does not auto-start daemon"
@@ -151,7 +159,7 @@ test_smart_daemon_in_open() {
 test_smart_daemon_in_remove() {
     log_section "Feature #27: remove never auto-starts daemon"
 
-    if grep -B2 "println.*Removing route" src/cli/mod.rs | grep -q "ensure_daemon"; then
+    if grep -B2 "println.*Removing route" "$REPO_ROOT/src/cli/mod.rs" | grep -q "ensure_daemon"; then
         log_fail "remove must not auto-start daemon"
     else
         log_pass "remove does not auto-start daemon"
@@ -161,7 +169,7 @@ test_smart_daemon_in_remove() {
 test_smart_daemon_in_prune() {
     log_section "Feature #27: prune never auto-starts daemon"
 
-    if grep -B2 "prune::execute" src/cli/mod.rs | grep -q "ensure_daemon"; then
+    if grep -B2 "prune::execute" "$REPO_ROOT/src/cli/mod.rs" | grep -q "ensure_daemon"; then
         log_fail "prune must not auto-start daemon"
     else
         log_pass "prune does not auto-start daemon"
@@ -261,7 +269,7 @@ test_add_route_no_daemon() {
 test_add_code_exists() {
     log_section "Feature #28: add.rs exists"
 
-    if [ -f src/cli/add.rs ]; then
+    if [ -f "$REPO_ROOT/src/cli/add.rs" ]; then
         log_pass "src/cli/add.rs exists"
     else
         log_fail "src/cli/add.rs exists"
@@ -271,7 +279,7 @@ test_add_code_exists() {
 test_add_module_registered() {
     log_section "Feature #28: add module registered"
 
-    if grep -q "pub mod add" src/cli/mod.rs; then
+    if grep -q "pub mod add" "$REPO_ROOT/src/cli/mod.rs"; then
         log_pass "add module registered in mod.rs"
     else
         log_fail "add module registered in mod.rs"
@@ -281,7 +289,7 @@ test_add_module_registered() {
 test_add_command_variant() {
     log_section "Feature #28: Add variant in Commands enum"
 
-    if grep -q "Add(add::AddArgs)" src/cli/mod.rs; then
+    if grep -q "Add(add::AddArgs)" "$REPO_ROOT/src/cli/mod.rs"; then
         log_pass "Add variant in Commands enum"
     else
         log_fail "Add variant in Commands enum"
@@ -295,7 +303,7 @@ test_add_command_variant() {
 test_port_watcher_exists() {
     log_section "Feature #25: Continuous Port Sync"
 
-    if [ -f src/util/port_watcher.rs ]; then
+    if [ -f "$REPO_ROOT/src/util/port_watcher.rs" ]; then
         log_pass "src/util/port_watcher.rs exists"
     else
         log_fail "src/util/port_watcher.rs exists"
@@ -305,7 +313,7 @@ test_port_watcher_exists() {
 test_port_watcher_module() {
     log_section "Feature #25: port_watcher module registered"
 
-    if grep -q "pub mod port_watcher" src/util/mod.rs; then
+    if grep -q "pub mod port_watcher" "$REPO_ROOT/src/util/mod.rs"; then
         log_pass "port_watcher module registered"
     else
         log_fail "port_watcher module registered"
@@ -315,7 +323,7 @@ test_port_watcher_module() {
 test_port_watcher_function() {
     log_section "Feature #25: watch_port_changes function"
 
-    if grep -q "fn watch_port_changes" src/util/port_watcher.rs; then
+    if grep -q "fn watch_port_changes" "$REPO_ROOT/src/util/port_watcher.rs"; then
         log_pass "watch_port_changes function exists"
     else
         log_fail "watch_port_changes function exists"
@@ -325,13 +333,13 @@ test_port_watcher_function() {
 test_port_watcher_patterns() {
     log_section "Feature #25: Port detection patterns"
 
-    if grep -q "PORT_PATTERNS" src/util/port_watcher.rs; then
+    if grep -q "PORT_PATTERNS" "$REPO_ROOT/src/util/port_watcher.rs"; then
         log_pass "PORT_PATTERNS constant exists"
     else
         log_fail "PORT_PATTERNS constant exists"
     fi
 
-    if grep -q "listening on" src/util/port_watcher.rs; then
+    if grep -q "listening on" "$REPO_ROOT/src/util/port_watcher.rs"; then
         log_pass "Has 'listening on' pattern"
     else
         log_fail "Has 'listening on' pattern"
@@ -341,7 +349,7 @@ test_port_watcher_patterns() {
 test_port_watcher_used_in_run() {
     log_section "Feature #25: port_watcher used in run.rs"
 
-    if grep -q "port_watcher::watch_port_changes" src/cli/run.rs; then
+    if grep -q "port_watcher::watch_port_changes" "$REPO_ROOT/src/cli/run.rs"; then
         log_pass "port_watcher used in run.rs"
     else
         log_fail "port_watcher used in run.rs"
@@ -351,7 +359,7 @@ test_port_watcher_used_in_run() {
 test_port_watcher_stdout_capture() {
     log_section "Feature #25: stdout captured for port watching"
 
-    if grep -q "stdout(std::process::Stdio::piped())" src/cli/run.rs; then
+    if grep -q "stdout(std::process::Stdio::piped())" "$REPO_ROOT/src/cli/run.rs"; then
         log_pass "stdout is piped for port watching"
     else
         log_fail "stdout is piped for port watching"
@@ -548,19 +556,29 @@ test_all_new_commands_help() {
 test_roadmap_updated() {
     log_section "Integration: Roadmap updated"
 
-    if grep -q "**DONE**" roadmap.md; then
+    # ROADMAP.md, not roadmap.md: the repo file is upper-case, and macOS's
+    # case-insensitive filesystem was the only reason the lower-case name
+    # ever resolved. On a Linux CI runner it found nothing.
+    local roadmap="$REPO_ROOT/ROADMAP.md"
+
+    if grep -q "DONE" "$roadmap"; then
         log_pass "Roadmap has DONE status"
     else
         log_fail "Roadmap has DONE status"
     fi
 
-    if grep -q "Continuous Port Sync" roadmap.md | grep -q "DONE"; then
+    # Was `grep -q "Continuous Port Sync" roadmap.md | grep -q "DONE"`. The
+    # first grep is `-q`, so it emits nothing and the second always fails —
+    # and the `else` branch called `log_pass` anyway, making this assertion
+    # incapable of failing. Match the feature and its DONE marker on the same
+    # line, and fail properly when it is missing.
+    if grep "Continuous Port Sync" "$roadmap" | grep -q "DONE"; then
         log_pass "Continuous Port Sync marked DONE"
     else
-        log_pass "Continuous Port Sync in roadmap"
+        log_fail "Continuous Port Sync marked DONE"
     fi
 
-    if grep -q "Port Conflict Auto-Resolution" roadmap.md; then
+    if grep -q "Port Conflict Auto-Resolution" "$roadmap"; then
         log_pass "Port Conflict Auto-Resolution in roadmap"
     else
         log_fail "Port Conflict Auto-Resolution in roadmap"
@@ -573,7 +591,7 @@ test_portless_parity_complete() {
     local features=("Continuous Port Sync" "Package Script Wrapping" "Smart Daemon Auto-Start" "Zero-Config" "Port Conflict Auto-Resolution")
 
     for feature in "${features[@]}"; do
-        if grep -q "$feature" roadmap.md; then
+        if grep -q "$feature" "$REPO_ROOT/ROADMAP.md"; then
             log_pass "Feature '$feature' documented"
         else
             log_fail "Feature '$feature' documented"
@@ -676,6 +694,11 @@ main() {
     echo -e "${YELLOW}Building antra...${RESET}"
     cargo build --quiet 2>&1 | grep -v "^warning" || true
     echo ""
+
+    # Creates $TEST_DIR and the results header. Without it the scratch dirs
+    # existed only as a side effect of the first test's `mkdir -p`, and every
+    # result was `tee -a`'d onto a file that was never created.
+    setup
 
     # Feature 1: Port Conflict Auto-Resolution
     test_port_conflict_help
