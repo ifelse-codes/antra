@@ -39,7 +39,7 @@ x509-parser = "0.16"
 time = "0.3"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Middleware
 tower = "0.5"

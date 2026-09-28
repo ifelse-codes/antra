@@ -95,7 +95,7 @@ ANTRA
 |---|---|
 | The chain is valid under Apple's TLS stack — the one that rejected the pre-0.5 root | `tests/e2e_securetransport.rs`: `/usr/bin/curl --cacert` through a live `antra proxy start` + `antra alias`, macOS CI |
 | The minted CA and leafs satisfy strict X.509 rules (no CA SAN, valid `dNSName`, `serverAuth` EKU, validity window) | `tests/cert_strict.rs` |
-| Upgrades migrate: old CA rotated, leafs purged, re-trust prompted, superseded root removed byte-exactly | `tests/cert_store.rs` + the manual walkthrough in `fix-plan-2026-09-26-ca-trust.md` §9 |
+| Upgrades migrate: old CA rotated, leafs purged, re-trust prompted, superseded root removed byte-exactly | `tests/cert_store.rs` + the CA versioning/rotation rules in `docs/security.md` |
 
 Still to be ticked by hand: Chrome, Firefox and Safari in a real browser (Safari needs `antra hosts sync` first), a real Vite HMR session, and the Ctrl+C cleanup rows.
 

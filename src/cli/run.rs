@@ -23,7 +23,7 @@ pub struct RunArgs {
     pub port: Option<u16>,
 
     /// Custom TLD (e.g., dev.example.com for myapp.dev.example.com)
-    #[arg(long)]
+    #[arg(long, env = "ANTRA_TLD")]
     pub tld: Option<String>,
 
     #[arg(long, help = "Approve a custom domain before registration")]

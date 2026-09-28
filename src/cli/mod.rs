@@ -210,12 +210,12 @@ pub enum Commands {
 pub enum ProxyCommands {
     /// Start the proxy daemon
     Start {
-        /// Port for HTTPS (default: 443)
-        #[arg(long, default_value = "443")]
+        /// Port for HTTPS (default: 443, or $ANTRA_PORT)
+        #[arg(long, default_value = "443", env = "ANTRA_PORT")]
         port: u16,
 
-        /// Port for HTTP redirect (default: 80)
-        #[arg(long, default_value = "80")]
+        /// Port for HTTP redirect (default: 80, or $ANTRA_HTTP_PORT)
+        #[arg(long, default_value = "80", env = "ANTRA_HTTP_PORT")]
         http_port: u16,
 
         /// Static route in domain:port format (can be repeated)
@@ -335,6 +335,127 @@ impl Cli {
             Commands::Prune => prune::execute(),
             Commands::Hosts { command } => hosts::execute(command),
             Commands::Service { command } => service::execute(command),
+        }
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+    use clap::Parser;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// clap reads $ANTRA_* at parse time from the process env, so every test
+    /// that touches them must be serialized against the others in this process.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Lock the env, apply `env` overrides, parse `args`, restore the env, and
+    /// return the parsed CLI (which owns its data and no longer depends on env).
+    fn parse_with(env: &[(&str, Option<&str>)], args: &[&str]) -> Cli {
+        let _g: MutexGuard<'_, ()> = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut original = Vec::with_capacity(env.len());
+        for (key, _) in env {
+            original.push((*key, std::env::var_os(key)));
+        }
+        for (key, value) in env {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        let cli = Cli::try_parse_from(args).expect("args should parse");
+        for (key, value) in original {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        cli
+    }
+
+    fn start_port(cli: Cli) -> (u16, u16) {
+        match cli.command {
+            Commands::Proxy { command } => match command {
+                ProxyCommands::Start {
+                    port, http_port, ..
+                } => (port, http_port),
+                _ => panic!("expected Start"),
+            },
+            _ => panic!("expected proxy command"),
+        }
+    }
+
+    #[test]
+    fn daemon_https_port_reads_antra_port() {
+        let cli = parse_with(
+            &[("ANTRA_PORT", Some("8443"))],
+            &["antra", "proxy", "start"],
+        );
+        assert_eq!(start_port(cli), (8443, 80));
+    }
+
+    #[test]
+    fn daemon_http_port_reads_antra_http_port() {
+        let cli = parse_with(
+            &[("ANTRA_HTTP_PORT", Some("8080"))],
+            &["antra", "proxy", "start"],
+        );
+        assert_eq!(start_port(cli), (443, 8080));
+    }
+
+    #[test]
+    fn daemon_defaults_when_env_unset() {
+        let cli = parse_with(
+            &[("ANTRA_PORT", None), ("ANTRA_HTTP_PORT", None)],
+            &["antra", "proxy", "start"],
+        );
+        assert_eq!(start_port(cli), (443, 80));
+    }
+
+    #[test]
+    fn explicit_flag_beats_env_for_daemon() {
+        let cli = parse_with(
+            &[("ANTRA_PORT", Some("8443"))],
+            &["antra", "proxy", "start", "--port", "9443"],
+        );
+        assert_eq!(start_port(cli), (9443, 80));
+    }
+
+    #[test]
+    fn run_tld_reads_antra_tld() {
+        let cli = parse_with(
+            &[("ANTRA_TLD", Some("dev.example.com"))],
+            &["antra", "run", "--domain", "myapp", "--", "echo", "hi"],
+        );
+        match cli.command {
+            Commands::Run(args) => {
+                assert_eq!(args.tld.as_deref(), Some("dev.example.com"));
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn explicit_tld_beats_env() {
+        let cli = parse_with(
+            &[("ANTRA_TLD", Some("dev.example.com"))],
+            &[
+                "antra",
+                "run",
+                "--domain",
+                "myapp",
+                "--tld",
+                "localhost",
+                "--",
+                "echo",
+                "hi",
+            ],
+        );
+        match cli.command {
+            Commands::Run(args) => {
+                assert_eq!(args.tld.as_deref(), Some("localhost"));
+            }
+            _ => panic!("expected run command"),
         }
     }
 }

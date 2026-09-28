@@ -31,7 +31,7 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ## Session Handoff — 2026-09-27 (afternoon)
 
-**`v0.6.0` is published** (tag `v0.6.0`, PRs #14–#16, formula updated from the release's own sha256s, landing redeployed as a *production* deployment). ROADMAP #32 (`antra logs`) and #33 (shared upstream client) are done, along with the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is described in `fix-plan-2026-09-26-ca-trust.md`.
+**`v0.6.0` is published** (tag `v0.6.0`, PRs #14–#16, formula updated from the release's own sha256s, landing redeployed as a *production* deployment). ROADMAP #32 (`antra logs`) and #33 (shared upstream client) are done, along with the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is documented in `docs/security.md` (CA versioning and rotation).
 
 **What changed in v0.6.0:**
 - `antra logs [-f] [--lines N]`. The daemon's output used to go to `/dev/null` on the auto-start path, so "HTTPS server failed" existed only in the code that printed it; several user-test sessions had asked for this command. One log path now serves every writer — `util::logs` — including the launchd plist, which pointed at `~/.config/antra/daemon.log` while the CLI wrote `data_local_dir()/antra/daemon.log`: two different files on macOS. Log is truncated past 5 MiB rather than rotated. `doctor` tails the last errors.
@@ -46,7 +46,7 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 - The landing site was re-checked in a real browser after the CSP landed: Inter and JetBrains Mono still load, the Plausible tag is present, zero page errors, `/nonexistent` → 404.
 
 **Do not redo blindly:**
-- **`tests/e2e_next_sprint.sh` was never running.** `log_pass` used `((pass_count++))`, which exits 1 when the counter is 0, so under `set -e` the suite aborted after its first passing assertion — in every one of the four shell suites. Fixed in three of them (`e2e_portless_simple.sh` has no `set -e`). With that fixed the suite runs to completion and reports **9 passed / 46 failed on this machine**, all from one cause: the auto-started daemon cannot bind 443 (no root) or 8443/8080 (an unrelated `ssh` holds both here), so every daemon-dependent test fails. It is deliberately **not** wired into CI yet — the blocker is that the auto-start path has no port override (ROADMAP #21, `ANTRA_HTTPS_PORT` et al). Wire it after that lands, on a runner where 8443 is free.
+- **`tests/e2e_next_sprint.sh` was never running.** `log_pass` used `((pass_count++))`, which exits 1 when the counter is 0, so under `set -e` the suite aborted after its first passing assertion — in every one of the four shell suites. Fixed in three of them (`e2e_portless_simple.sh` has no `set -e`). With that fixed the suite runs to completion and reports **9 passed / 46 failed on this machine**, all from one cause: the auto-started daemon cannot bind 443 (no root) or 8443/8080 (an unrelated `ssh` holds both here), so every daemon-dependent test fails. The blocker — the auto-start path having no port override (ROADMAP #21) — is **shipped** as of this change: set `ANTRA_PORT`/`ANTRA_HTTP_PORT` and the auto-started daemon inherits them. The suites still need wiring into CI on a runner where the chosen ports are free.
 - Do not kill unrelated processes to make a test pass; 8443/8080 are held by someone else's `ssh` on this machine.
 - If a test daemon lingers on 8443 after a run, it is an orphan from a temp HOME — check its open files (`lsof -p <pid> | grep antra`) before stopping it, so you do not kill the user's real daemon.
 - The CA rules from the previous handoff still hold: existing installs rotate once and re-prompt; never add a SAN back to the CA.
@@ -62,7 +62,7 @@ rm -rf "$TEST_HOME"
 
 **One trap this session cost time:** `wrangler pages deploy .` infers the branch from git. Deployed from a feature branch it creates a *branch* deployment and prints an alias URL — production does not move, and the site silently keeps serving the old installer. Deploy from `main`, or pass `--branch main`, and check the live domain afterwards rather than the deployment URL.
 
-**Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (still a human step; the Safari-critical half is machine-checked in CI), wiring the shell e2e suites once the daemon's ports are configurable, and ROADMAP #21 (env vars).
+**Next actions:** the manual Safari + Firefox pass on `docs/mvp.md` (still a human step; the Safari-critical half is machine-checked in CI), and wiring the shell e2e suites into CI — now unblocked by ROADMAP #21 (env vars, shipped): run them with `ANTRA_PORT`/`ANTRA_HTTP_PORT` pointing at a free port.
 
 ---
 
@@ -82,7 +82,7 @@ rm -rf "$TEST_HOME"
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. The working tree is clean. Still open: the formal browser checklist (Safari, Firefox) and wiring the shell e2e suites (blocked on ROADMAP #21 — the auto-started daemon has no port override).
+**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. The working tree was clean, then gained ROADMAP #21 (env vars: `ANTRA_PORT`, `ANTRA_HTTP_PORT`, `ANTRA_TLD`, shipped with `cli::env_tests`). Still open: the formal browser checklist (Safari, Firefox) and wiring the shell e2e suites into CI (no longer blocked — the daemon's ports are now configurable via env).
 
 ### Landing Page
 
@@ -122,7 +122,7 @@ rm -rf "$TEST_HOME"
 
 ### Scope
 - Read `docs/mvp.md` for in-scope / out-of-scope items
-- Each phase in `PLAN.md` has explicit **Exclusions (DO NOT BUILD)** — follow them
+- Each phase in this file has explicit **Exclusions (DO NOT BUILD)** — follow them
 - Do not add features not in the current phase
 
 ### Process
@@ -233,7 +233,6 @@ WebSocket connections (including Vite HMR) tunnel through the proxy transparentl
 ### Code to Reference
 
 ```
-PLAN.md Phase 3              — Full spec with code patterns
 docs/research/https.md       — WebSocket upgrade flow
 Cargo.toml                   — Already has hyper with "full" features
 ```
@@ -373,7 +372,8 @@ tokio::spawn(async move {
 ```
 antra/
 ├── AGENT.md              ← YOU ARE HERE
-├── PLAN.md               ← Full plan with all phases
+├── README.md             ← User docs (install, commands, env vars, security)
+├── ROADMAP.md            ← Feature status (done / now / next / later)
 ├── Cargo.toml            ← Dependencies
 ├── docs/
 │   ├── architecture.md   ← Module design, data types, flows
@@ -412,15 +412,12 @@ tests/
 
 | File | When to Read |
 |------|-------------|
-| `PLAN.md` | Before starting any phase — full spec + code patterns |
+| `README.md` | User-facing: install, commands, env vars, security policy |
+| `ROADMAP.md` | What is done / approved next / future — status column is current |
 | `docs/architecture.md` | When implementing modules — data types, flows |
-| `docs/security.md` | When touching hosts, trust store, or domains |
+| `docs/security.md` | When touching hosts, trust store, or domains (includes CA versioning/rotation) |
 | `docs/mvp.md` | When unsure about scope — what's in/out |
 | `docs/research/*.md` | When you need background on a specific area |
-| `fix-plan-2026-09-26-ca-trust.md` | Before touching `certs/` — why the CA is versioned, rotated and bounded |
-| `deep-dive-report-2026-09-26.md` | For the finding behind that work, and what is still open (§F) |
-| `GO-LIVE-PLAN.md` | For release/site state and what ships next |
-| `PLAN.md`, `FIX-PLAN.md`, `fix-plan-v2.md`, `UX-TEST-PLAN-*.md` | **Historical.** Specs and session records from earlier phases — do not treat their status lines as current |
 
 ---
 
@@ -430,8 +427,7 @@ tests/
 2. Manual test — verify the feature works end-to-end
 3. Update status table in this file
 4. Mark phase as ✅ DONE
-5. Read the next phase's spec in PLAN.md
-6. Update the "Current state" line at the top
+5. Update the "Current state" line at the top
 
 ---
 
