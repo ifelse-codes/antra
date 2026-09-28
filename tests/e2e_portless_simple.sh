@@ -57,7 +57,11 @@ echo "$OUTPUT" | head -8
 
 echo "$OUTPUT" | grep -q "Domain resolved" && pass "Domain resolved" || fail "Domain resolved"
 echo "$OUTPUT" | grep -q "Route registered" && pass "Route registered" || fail "Route registered"
-echo "$OUTPUT" | grep -q "Added route" && pass "Route added" || fail "Route added"
+# Was `grep -q "Added route"`, for a line that no longer exists: a previous
+# session removed it as redundant (it repeated what "Route registered" and the
+# URL line already said — see the comment at src/cli/add.rs). The URL is now
+# the only thing the command adds on top of the confirmation.
+echo "$OUTPUT" | grep -q "https://myapp.localhost" && pass "Route URL printed" || fail "Route URL printed"
 
 LIST=$($ANTRA_BIN list 2>&1)
 echo "$LIST" | grep -q "myapp.localhost" && pass "Route in list" || fail "Route in list"

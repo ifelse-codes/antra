@@ -1,8 +1,8 @@
 # NEXT-SESSION.md — Instructions for the next session
 
 > The user says **"start next session"** → read this file and execute the plan below.
-> One phase remains: (A) decide the `e2e_all_features.sh` residuals, (B) wire the
-> shell e2e suites into CI.
+> One phase remains: wire the shell e2e suites into CI. They are green and ready
+> (195 pass / 0 fail / 11 skip, all exiting 0).
 
 Repo: `main` is the default branch; work in a feature branch. Root docs are
 `AGENT.md` / `README.md` / `ROADMAP.md` / this file.
@@ -10,8 +10,8 @@ Repo: `main` is the default branch; work in a feature branch. Root docs are
 ## What already landed (do not redo)
 
 **Phase A is done.** ROADMAP cleanup rows C4, C5, C6 are `DONE`, each with the
-evidence cited. C7 (the `sun_path` socket-path guard) and the shell-suite repair
-landed with them.
+evidence cited. C7 (the `sun_path` socket-path guard), the shell-suite repair,
+and the SKIP/port guards all landed. C9 and C10 remain filed and unfixed.
 
 **The suites are repaired.** All four had the same structural defect, plus
 several independent ones. Fixed:
@@ -46,38 +46,52 @@ several independent ones. Fixed:
 
 | Suite | Before | After |
 |-------|--------|-------|
-| `e2e_all_features.sh` | 3 pass / 67 fail | 52 pass / 18 fail |
-| `e2e_next_sprint.sh` | 9 pass / 46 fail | 55 pass / 0 fail |
-| `e2e_portless_parity.sh` | 40 pass / 14 fail | 54 pass / 0 fail |
-| `e2e_portless_simple.sh` | 34 pass / 1 fail | 34 pass / 1 fail |
-| **total** | **86 / 128** | **195 / 19** |
+| `e2e_all_features.sh` | 3 pass / 67 fail | 49 pass / 0 fail / 11 skip |
+| `e2e_next_sprint.sh` | 9 pass / 46 fail | 55 / 0 / 0 |
+| `e2e_portless_parity.sh` | 40 pass / 14 fail | 56 / 0 / 0 |
+| `e2e_portless_simple.sh` | 34 pass / 1 fail | 35 / 0 / 0 |
+| **total** | **86 / 128** | **195 / 0 / 11** |
 
-## Phase A — Triage the 19 residual failures
+All four exit 0.
 
-Two suites are green. `e2e_all_features.sh` (18) and `e2e_portless_simple.sh`
-(1) are not. Every one of the 19 is itemised below, and **none of them is a
-product bug in the fix** — they are environment or stale-expectation problems:
+## Phase A — DONE. The suites are green.
 
-- **Toolchain missing (12).** `yarn`, `bun`, `python` (only `python3` exists),
-  `mix`, `elixir`, `php` are all absent here, so every suite that spawns one
-  fails on `Failed to spawn`. Either install them on the runner or guard the
-  assertions with `command -v` and report SKIP, not FAIL. SKIP is the better
-  default: a missing interpreter is not a failed feature.
-- **Port 8080 held (4).** An unrelated `ssh` listens on 8080 and 8443. Do not
-  kill it. `cargo run command used` / `Default port 8080 for axum` /
-  `go run command used` / `Default port 8080 for Go` fail because the run
-  aborts at the port check before it ever prints the command it chose.
-  `detect.rs:246` really does set `default_port: Some(8080)`, so the suite's
-  expectation is right and the environment is wrong. These pass on a clean
-  runner.
-- **Needs root (1).** `.test domain resolution` — `--domain test-app.test` is a
-  non-`.localhost` TLD, so it writes `/etc/hosts` and fails with
-  `Permission denied writing /etc/hosts (needs sudo)`. Either run that
-  assertion under sudo or drop the custom TLD and use a `.localhost` one.
-- **Untriaged (1).** `Route added` in `e2e_portless_simple.sh`.
-- **ROADMAP C9 (1).** `Port detected from --port flag` — a `vite --port 3001`
-  dev script is ignored in favour of the framework default 5173. A real
-  behaviour question, not a test bug. See C9.
+The last 19 are cleared and the fixes are worth remembering:
+
+- **Missing toolchain → SKIP, not FAIL.** 11 tests are gated on `command -v`
+  for `yarn`, `bun`, `python`, `mix`, `php`. A missing interpreter is not a
+  broken feature, and a suite that goes red for it teaches people to ignore
+  it. Skips are counted and printed in the summary so a green run never claims
+  more than it checked. `1 .test domain resolution` also SKIPs, because
+  resolving a non-`.localhost` TLD writes `/etc/hosts` and needs root.
+- **Framework-default port tests assert the choice, not the bind.** They
+  failed because 8080 was occupied, so the run stopped before printing the
+  route. Both paths name the port, so `grep 8080` is the honest
+  environment-independent assertion; the command assertion moved to a second
+  run forced onto a probed-free port.
+- **No more hardcoded ports.** `free_port` probes with bash's `/dev/tcp`. 3001
+  turned out to be held by an unrelated desktop app on this machine — the
+  Agent Orchestrator — which is exactly the failure mode a literal port invites.
+- **ROADMAP C9 is a characterisation test now.** `vite --port 3001` inside a
+  `package.json` script is genuinely ignored, because `detect_port_from_command`
+  only sees the argv Antra execs (`npm run dev`) and the flag stays inside the
+  script body. The test asserts the current behaviour on purpose, so fixing
+  C9 makes it fail loudly instead of silently changing what the suite claims.
+- **A suite "end-to-end" test that could not fail.** `test_e2e_real_server`
+  started its server with `timeout 5` — GNU coreutils, absent on macOS — so
+  the command died instantly, `kill -0` saw a dead pid, and the `else` branch
+  logged a pass. It never ran a server. It now starts a real one, registers a
+  route, and fetches back through the proxy over HTTPS.
+
+  Verified the replacement can fail: changing the served body to `WRONG BODY`
+  produced exactly one failure, `Proxy forwards requests correctly over HTTPS
+  (got: WRONG BODY)`, and nothing else. **Check that a new assertion can fail
+  before trusting a green suite.**
+
+Also fixed while clearing these: `e2e_portless_parity.sh` had two more
+`else log_pass` branches that reported passes they had not earned, and both
+suites asserted on `Added route`, a line a previous session removed from
+`src/cli/add.rs` as redundant.
 
 ## Phase B — Wire the suites into CI
 

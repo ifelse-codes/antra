@@ -54,6 +54,20 @@ cleanup() {
     # setup() clears the previous one instead.
 }
 
+# Echo a port nothing is listening on. Hardcoding 4001 works until a
+# developer's own server is on it, and then the suite fails for reasons that
+# have nothing to do with Antra.
+free_port() {
+    local p
+    for p in $(seq 45000 45040); do
+        if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+            echo "$p"
+            return 0
+        fi
+    done
+    echo 45099
+}
+
 setup() {
     rm -rf "$TEST_DIR"
     mkdir -p "$TEST_DIR"
@@ -257,12 +271,15 @@ test_add_route_no_daemon() {
     $ANTRA_BIN proxy stop 2>/dev/null || true
     sleep 1
 
-    output=$($ANTRA_BIN add route --domain test-add.localhost --port 3000 2>&1 || true)
+    output=$($ANTRA_BIN add route --domain test-add.localhost --port "$(free_port)" 2>&1 || true)
 
     if echo "$output" | grep -q "Daemon not running"; then
         log_pass "add route detects daemon not running"
     else
-        log_pass "add route command runs"
+        # `add` auto-starts the daemon (ROADMAP #27), so a stopped daemon
+        # still produces "Daemon not running, starting it...". This `else`
+        # used to log a pass, which meant the assertion could never fail.
+        log_fail "add route detects daemon not running"
     fi
 }
 
@@ -604,47 +621,58 @@ test_portless_parity_complete() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 test_e2e_real_server() {
-    log_section "E2E: Real server test with antra run"
+    log_section "E2E: Real server test through the proxy"
 
     local dir="$TEST_DIR/e2e-real"
     mkdir -p "$dir"
     cd "$dir"
 
-    # Create a simple Node.js server
-    cat > server.js << 'SERVEREOF'
-const http = require('http');
-const server = http.createServer((req, res) => {
-    res.writeHead(200, {'Content-Type': 'text/plain'});
-    res.end('Hello from test server!');
-});
-const port = process.env.PORT || 3000;
-server.listen(port, '127.0.0.1', () => {
-    console.log(`Server running on port ${port}`);
-});
-SERVEREOF
+    # A real HTTP server on a real port, fronted by a real Antra route, and
+    # fetched back through the proxy over HTTPS. This is the one test in the
+    # suite that exercises the whole path end to end.
+    #
+    # It used to be vacuous. It started the server with `timeout 5`, which is
+    # GNU coreutils and absent on macOS, so the command failed instantly, the
+    # `kill -0` check saw a dead pid, and the `else` branch reported a pass.
+    # The test could not fail and never ran a server. No `timeout` here, and
+    # every branch asserts something.
+    local app_port
+    app_port=$(free_port)
 
-    # Start server with antra
-    timeout 5 $ANTRA_BIN run --domain e2e-test.localhost --port 3000 --no-trust-prompt -- node server.js &
-    local pid=$!
+    node -e "require('http').createServer((q,r)=>r.end('Hello from test server!')).listen($app_port,'127.0.0.1')" &
+    local server_pid=$!
+    sleep 1
 
-    sleep 2
-
-    # Check if server started
-    if kill -0 $pid 2>/dev/null; then
-        log_pass "Server started successfully"
-
-        # Try to access via proxy
-        if curl -sk https://e2e-test.localhost 2>/dev/null | grep -q "Hello from test server"; then
-            log_pass "Proxy forwards requests correctly"
-        else
-            log_pass "Proxy is running (curl may need CA trust)"
-        fi
-
-        kill $pid 2>/dev/null || true
-        wait $pid 2>/dev/null || true
-    else
-        log_pass "Server process completed"
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+        log_fail "Upstream server started on $app_port"
+        return 0
     fi
+    log_pass "Upstream server started on $app_port"
+
+    output=$($ANTRA_BIN add route --domain e2e-test.localhost --port "$app_port" 2>&1 || true)
+    if echo "$output" | grep -q "Route registered"; then
+        log_pass "Route registered for the live server"
+    else
+        log_fail "Route registered for the live server"
+        kill "$server_pid" 2>/dev/null || true
+        return 0
+    fi
+
+    # Point at the port the daemon actually bound. $ANTRA_PORT is what the
+    # suite runs with, because 443 needs root and 8443 is not reliably free.
+    local https_port="${ANTRA_PORT:-443}"
+    local body
+    body=$(curl -sk --max-time 10 "https://e2e-test.localhost:${https_port}/" 2>/dev/null || true)
+
+    if echo "$body" | grep -q "Hello from test server!"; then
+        log_pass "Proxy forwards requests correctly over HTTPS"
+    else
+        log_fail "Proxy forwards requests correctly over HTTPS (got: ${body:0:80})"
+    fi
+
+    $ANTRA_BIN remove e2e-test.localhost >/dev/null 2>&1 || true
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
 }
 
 test_e2e_add_route() {
@@ -654,19 +682,25 @@ test_e2e_add_route() {
     mkdir -p "$dir"
     cd "$dir"
 
-    # Start a simple server on port 4001
-    node -e "require('http').createServer((req,res)=>{res.end('add-test')}).listen(4001,'127.0.0.1',()=>console.log('running'))" &
+    # Start a simple server on a probed-free port
+    local app_port
+    app_port=$(free_port)
+    node -e "require('http').createServer((req,res)=>{res.end('add-test')}).listen($app_port,'127.0.0.1',()=>console.log('running'))" &
     local server_pid=$!
 
     sleep 1
 
     # Add route to it
-    output=$($ANTRA_BIN add route --domain add-test.localhost --port 4001 2>&1 || true)
+    output=$($ANTRA_BIN add route --domain add-test.localhost --port "$app_port" 2>&1 || true)
 
-    if echo "$output" | grep -q "Added route"; then
+    # Was `grep -q "Added route"`, for a line that no longer exists — a
+    # previous session removed it as redundant (src/cli/add.rs). Worse, the
+    # `else` branch also called log_pass, so the assertion could not fail
+    # and was reporting a pass it had never earned.
+    if echo "$output" | grep -q "Route registered"; then
         log_pass "add route registered successfully"
     else
-        log_pass "add route command executed"
+        log_fail "add route registered successfully"
     fi
 
     # List routes
@@ -675,7 +709,7 @@ test_e2e_add_route() {
     if echo "$list_output" | grep -q "add-test.localhost"; then
         log_pass "Route appears in list"
     else
-        log_pass "List command works"
+        log_fail "Route appears in list"
     fi
 
     kill $server_pid 2>/dev/null || true
