@@ -6,7 +6,11 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
 PROJECT_DIR="$REPO_ROOT"
-TEST_DIR="/tmp/antra-e2e-$(date +%s)"
+
+# Per-worktree tag so parallel suite runs cannot collide — see the note in
+# e2e_all_features.sh.
+WT_TAG="$(basename "$(pwd)" | tr -c 'A-Za-z0-9._-' '-')"
+TEST_DIR="/tmp/antra-e2e-$WT_TAG-$$"
 PASSED=0
 FAILED=0
 

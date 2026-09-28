@@ -10,8 +10,15 @@ set -e
 # binary, $REPO_ROOT for the source-level assertions near the end.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
-TEST_DIR="/tmp/antra-e2e-tests"
-RESULTS_FILE="/tmp/antra-test-results.txt"
+
+# Per-worktree tag, so parallel suite runs cannot collide. The scratch
+# directory and results file below used to be fixed paths, and setup() opens
+# with `rm -rf "$TEST_DIR"` — so two worktrees running the suites at the same
+# time deleted each other's scratch tree mid-run and overwrote each other's
+# results. Git worktrees isolate files; they do not isolate /tmp.
+WT_TAG="$(basename "$(pwd)" | tr -c 'A-Za-z0-9._-' '-')"
+TEST_DIR="/tmp/antra-e2e-tests-$WT_TAG"
+RESULTS_FILE="/tmp/antra-test-results-$WT_TAG.txt"
 
 # Colors
 RED='\033[0;31m'

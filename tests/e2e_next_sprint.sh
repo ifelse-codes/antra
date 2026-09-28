@@ -9,8 +9,13 @@ set -e
 # source-level assertions.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
-TEST_DIR="/tmp/antra-next-tests"
-RESULTS_FILE="/tmp/antra-next-test-results.txt"
+
+# Per-worktree tag so parallel suite runs cannot collide — see the note in
+# e2e_all_features.sh. setup() opens with `rm -rf "$TEST_DIR"`, so two
+# worktrees running at once used to delete each other's scratch tree.
+WT_TAG="$(basename "$(pwd)" | tr -c 'A-Za-z0-9._-' '-')"
+TEST_DIR="/tmp/antra-next-tests-$WT_TAG"
+RESULTS_FILE="/tmp/antra-next-test-results-$WT_TAG.txt"
 
 # Colors
 RED='\033[0;31m'
