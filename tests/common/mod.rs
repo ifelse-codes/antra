@@ -53,13 +53,74 @@ fn base_root() -> PathBuf {
     root
 }
 
+/// A tag that is stable within a worktree and distinct between worktrees.
+///
+/// The disposable homes under `base_root()` used to be shared by every
+/// worktree on the machine, which is only safe while one `cargo test` runs at a
+/// time. It does not hold: `cargo test` is also how an agent session verifies
+/// its work, so several worktrees reach this code concurrently, and the
+/// failure is silent and spectacular.
+///
+/// The daemon writes a CA certificate and its private key as two separate
+/// files. Two runs interleaving between those writes leave a `ca.pem` whose
+/// public key does not match `ca-key.pem`. Every leaf signed afterwards then
+/// fails verification, and `tests/e2e_securetransport.rs` surfaces it as
+/// `LibreSSL ... asn1 encoding routines:CRYPTO_internal:EVP lib` — which reads
+/// as a certificate-encoding bug in the product and is nothing of the kind.
+/// Wiping `/tmp/antra-e2e` made it vanish, which is what gave it away.
+///
+/// A readable prefix keeps `ls /tmp/antra-e2e` diagnosable; the hash suffix
+/// keeps two worktrees whose directory names share a long prefix apart, which
+/// a plain truncated name would not.
+fn worktree_tag() -> String {
+    let raw = std::env::current_dir()
+        .ok()
+        .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "root".to_string());
+    worktree_tag_for(&raw)
+}
+
+/// The tagging itself, separated so the collision property is testable:
+/// `worktree_tag()` reads process-global state that a parallel test cannot
+/// change, but the two checkouts it must keep apart are just strings.
+fn worktree_tag_for(raw: &str) -> String {
+    let mut prefix: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(12)
+        .collect();
+    if prefix.is_empty() {
+        prefix.push_str("wt");
+    }
+
+    // FNV-1a over the full name, not the prefix: two checkouts can differ only
+    // past the twelfth character, and that is exactly the collision a truncated
+    // name reintroduces.
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x1000_0000_01b3;
+    let mut hash = OFFSET;
+    for byte in raw.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+
+    format!("{prefix}-{:06x}", hash & 0xff_ffff)
+}
+
 /// The one home shared by every test in a binary. See module docs: the
 /// daemon has a single fallback port (443 → 8443, `daemon/server.rs`), so a
 /// second home per suite would mean a second daemon that cannot bind and
 /// bails. The user name keeps the path stable across the e2e binaries,
-/// which `cargo test` runs sequentially.
+/// which `cargo test` runs sequentially; `worktree_tag` keeps it stable
+/// across binaries but distinct between worktrees running at the same time.
 static SHARED_HOME: LazyLock<TestHome> = LazyLock::new(|| {
-    let path = base_root().join(user_tag());
+    let path = base_root().join(user_tag()).join(worktree_tag());
     create_layout(&path);
     // The suites start a real daemon (that is the point of the e2e ones) and
     // a daemon outlives the process that spawned it. Left running, it would
@@ -353,6 +414,73 @@ mod tests {
                 "socket path is {} bytes, over the {SUN_PATH_MAX}-byte limit: {}",
                 path.as_os_str().len(),
                 path.display()
+            );
+        }
+    }
+
+    /// The worktree tag is what keeps two checkouts from sharing a disposable
+    /// home — and therefore from interleaving writes to `ca.pem` /
+    /// `ca-key.pem`. Assert both halves: stable within a process, and built
+    /// from the checkout rather than the user name alone.
+    #[test]
+    fn worktree_tag_is_stable_and_namespaces_the_shared_home() {
+        assert_eq!(worktree_tag(), worktree_tag(), "tag must be stable");
+
+        let tag = worktree_tag();
+        assert!(
+            tag.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)),
+            "tag must be filesystem-safe: {tag}"
+        );
+        // Bounded: the socket path budget is 104 bytes and this sits in it.
+        assert!(tag.len() <= 20, "tag is {} bytes: {tag}", tag.len());
+
+        let home = TestHome::shared().path().to_path_buf();
+        assert!(
+            home.components()
+                .any(|c| c.as_os_str() == std::ffi::OsStr::new(&tag)),
+            "shared home {} must sit under its worktree tag {tag}",
+            home.display()
+        );
+    }
+
+    /// Two checkouts whose names differ only past the twelfth character must
+    /// not collide — a plain truncated name would, and that collision is the
+    /// bug this whole change exists to prevent.
+    #[test]
+    fn worktree_tag_separates_checkouts_sharing_a_prefix() {
+        let a = worktree_tag_for(&format!("{}-alpha", "shared-prefix"));
+        let b = worktree_tag_for(&format!("{}-omega", "shared-prefix"));
+        assert_ne!(
+            a, b,
+            "checkouts differing only past the truncation point must not collide"
+        );
+        // Identical input, identical tag: stability is the other half.
+        assert_eq!(a, worktree_tag_for(&format!("{}-alpha", "shared-prefix")));
+    }
+
+    /// The tag lands in a 104-byte socket path, so its length is a budget, not
+    /// a style choice. Anything unsafe for a path also has to be sanitised.
+    #[test]
+    fn worktree_tag_is_bounded_and_filesystem_safe() {
+        for raw in [
+            "antra",
+            "antra-3",
+            "a-very-long-checkout-name-that-keeps-going-and-going",
+            "weird name/with:separators",
+            "",
+        ] {
+            let tag = worktree_tag_for(raw);
+            assert!(!tag.is_empty(), "tag must not be empty for {raw:?}");
+            assert!(
+                tag.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)),
+                "tag must be filesystem-safe: {tag} (from {raw:?})"
+            );
+            assert!(
+                tag.len() <= 20,
+                "tag is {} bytes for {raw:?}: {tag}",
+                tag.len()
             );
         }
     }
