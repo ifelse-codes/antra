@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swinjectem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - name: Build and run shell E2E suites
         shell: bash
         run: |
