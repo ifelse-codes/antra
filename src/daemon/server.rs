@@ -186,11 +186,16 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
         let _ = std::fs::remove_file(&pid_file);
     }
 
-    // Create socket directory
+    // Create the socket directory — private, and owned by the invoking user
+    // under sudo — BEFORE anything is bound into it. A Unix socket file is
+    // created at the process umask, so the `chmod 0o600` below the bind cannot
+    // hold continuously: for as long as it is `0o755`, any local user can
+    // connect and issue IPC commands. `connect` needs `x` on every component,
+    // so a `0o755` socket inside this `0o700` directory is unreachable to
+    // anyone else for the whole window. It also keeps the `/tmp/antra-<uid>/
+    // <hash>/` fallback off the world-readable list.
     #[cfg(unix)]
-    if let Some(parent) = sock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    prepare_socket_dir(&sock_path)?;
 
     #[cfg(windows)]
     {
@@ -246,7 +251,9 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     #[cfg(unix)]
     let listener = tokio::net::UnixListener::bind(&sock_path)?;
 
-    // Set permissions on socket (owner read/write only)
+    // Set permissions on socket (owner read/write only). The bind above
+    // created it at the process umask; `prepare_socket_dir` is what made that
+    // harmless, and this is what holds for the daemon's whole lifetime.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -450,6 +457,21 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     Ok(())
 }
 
+/// Create the directory that will hold `sock_path` as a private `0o700`
+/// directory, handing it back to the invoking user when running under `sudo`.
+///
+/// Unix only, and deliberately a separate function from `start_daemon`: the
+/// property that matters here is what the directory looks like *before* the
+/// bind, which is a filesystem fact a test can assert without standing up a
+/// daemon, ports and all.
+#[cfg(unix)]
+pub(crate) fn prepare_socket_dir(sock_path: &std::path::Path) -> std::io::Result<()> {
+    let Some(parent) = sock_path.parent() else {
+        return Ok(());
+    };
+    crate::platform::ensure_private_dir(parent)
+}
+
 fn wait_for_daemon_exit(timeout: std::time::Duration) -> Option<u32> {
     let start = std::time::Instant::now();
     loop {
@@ -548,4 +570,90 @@ pub fn daemon_status() -> Result<String> {
             ca_fingerprint: None,
         },
     ))
+}
+
+#[cfg(all(test, unix))]
+mod socket_dir_tests {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// The `/tmp/antra-<uid>/<hash>/` shape `socket_path()` falls back to
+    /// when the derived path does not fit `sun_path`.
+    fn fallback_shaped_socket(root: &std::path::Path) -> std::path::PathBuf {
+        root.join("antra-501").join("3f9a1c7e").join("d.sock")
+    }
+
+    /// ROADMAP C10, gap 1. A Unix socket file is created by `bind(2)` at the
+    /// process umask, so it is briefly `0o755` before `start_daemon` tightens
+    /// it to `0o600` — and during that window any local user can connect and
+    /// issue IPC commands. The bind-time mode is not something the daemon
+    /// controls, so what has to hold is the directory: `connect` needs `x` on
+    /// every component of the path, so a world-readable socket inside a
+    /// `0o700` directory is unreachable to everyone else. Both levels of the
+    /// chain are asserted, because one unsearchable ancestor is enough to
+    /// reopen the whole path.
+    #[test]
+    fn socket_dir_is_unsearchable_by_others_before_the_bind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sock = fallback_shaped_socket(tmp.path());
+
+        prepare_socket_dir(&sock).unwrap();
+
+        let per_uid = sock.parent().unwrap().parent().unwrap();
+        for dir in [per_uid, sock.parent().unwrap()] {
+            assert_eq!(
+                mode_of(dir) & 0o077,
+                0,
+                "{} stays reachable by other users at the socket's bind-time mode",
+                dir.display()
+            );
+        }
+
+        // The bind itself still produces an unprotected file — that is the
+        // window, and it is exactly why the assertion above is about the
+        // directory. Run under a permissive umask so the point is not
+        // accidental: a bind created here really is 0o777.
+        let previous = unsafe { libc::umask(0) };
+        let listener = std::os::unix::net::UnixListener::bind(&sock);
+        unsafe { libc::umask(previous) };
+        let _listener = listener.unwrap();
+        assert_ne!(
+            mode_of(&sock) & 0o077,
+            0,
+            "precondition: bind() creates the socket at the umask, not 0o600"
+        );
+    }
+
+    /// The tightening must not lock the CLI out of its own daemon. Under
+    /// `sudo antra proxy start` the directory is created by root and handed to
+    /// the invoking user; the unprivileged CLI then has to be able to traverse
+    /// it and connect. This asserts the same-uid half of that (the half CI can
+    /// run): the prepared directory grants search to its owner and a client in
+    /// that uid reaches the socket through it.
+    #[test]
+    fn prepared_socket_dir_keeps_the_owning_cli_reachable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sock = fallback_shaped_socket(tmp.path());
+
+        prepare_socket_dir(&sock).unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+
+        let parent = sock.parent().unwrap();
+        assert_eq!(
+            std::fs::metadata(parent).unwrap().uid(),
+            unsafe { libc::geteuid() },
+            "the prepared directory must belong to the user who starts the daemon"
+        );
+        assert_eq!(
+            mode_of(parent) & 0o700,
+            0o700,
+            "the owner must keep rwx, or the CLI cannot reach the socket"
+        );
+        std::os::unix::net::UnixStream::connect(&sock)
+            .expect("the owning CLI must reach the socket through a 0o700 directory");
+    }
 }

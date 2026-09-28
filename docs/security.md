@@ -50,11 +50,33 @@ Leaf certificates are cached per hostname and regenerated inside a 45-day renewa
 The daemon's control socket is a Unix socket at `socket_path()`.
 
 - The socket file itself is `0o600`, owner read/write only
-- Under `sudo antra proxy start` with a user-owned `HOME`, the socket is
-  chowned to the invoking user so unprivileged `status`/`stop` can connect
-  while `0600` still holds — enforced for the user instead of root
+- Its parent directory is `0o700`, created before the bind and tightened on
+  every start — not only when it is first created
+- Under `sudo antra proxy start` with a user-owned `HOME`, the socket and
+  every directory component created for it are chowned to the invoking user
+  so unprivileged `status`/`stop` can connect while `0600` still holds —
+  enforced for the user instead of root
 - The bind is the singleton claim: exactly one starter wins, the loser fails
   with `EADDRINUSE` and takes no state
+
+**The directory is what makes the socket safe.** A socket file is created by
+`bind(2)` at the process umask, so the daemon cannot make it `0o600` at the
+moment it appears — the best it can do is tighten it immediately afterwards,
+leaving a window at the umask. `connect` needs `x` on every component of the
+path, so a socket that is briefly `0o755` inside a `0o700` directory is
+unreachable to anyone else for the whole of that window. The directory is
+therefore made private *before* the bind; tightening it afterwards would only
+move the race. Both socket locations get this: the preferred directory
+(`$XDG_RUNTIME_DIR/antra` or the data-local `antra` dir) and the fallback
+below.
+
+The chown is not optional alongside the tightening. A root-owned `0o700`
+directory is unsearchable for the user who ran `sudo`, which would lock the
+unprivileged CLI out of its own daemon. Every component the daemon *created*
+is chowned, not just the leaf — tightening the leaf alone would leave an
+unsearchable root-owned ancestor above it and break the same flow. A
+directory that belongs to neither the process's euid nor the invoking user
+is left untouched and logged rather than silently trusted or reowned.
 
 **Path length.** A Unix socket path is capped at 104 bytes (`sun_path`). The
 preferred location is `$XDG_RUNTIME_DIR` (Linux) or the data-local dir
@@ -65,12 +87,10 @@ path that cannot be bound, failing with the bare
 `path must be shorter than SUN_LEN`. When the derived path does not fit,
 Antra falls back to `/tmp/antra-<uid>/<fnv1a-of-original-path>/d.sock`:
 short enough to bind, still namespaced per user, still distinct per home so
-two daemons cannot collide on the single short name.
-
-Known gaps, tracked in ROADMAP C10: the socket is `bind`-ed before its mode is
-tightened to `0o600`, so there is a brief window at the process umask; and the
-`/tmp` fallback directory is created by `create_dir_all`, which yields `0o755`
-rather than a private `0o700`.
+two daemons cannot collide on the single short name. Every component of that
+`/tmp` tree is created `0o700` (previously `0o755` from `create_dir_all`,
+which let any local user list the per-home hashes) and chowned to the invoking
+user.
 
 ### Hosts File Safety
 
