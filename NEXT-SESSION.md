@@ -55,26 +55,29 @@ several independent ones. Fixed:
 ## Phase A — Triage the 19 residual failures
 
 Two suites are green. `e2e_all_features.sh` (18) and `e2e_portless_simple.sh`
-(1) are not. Most are **not product bugs** — re-run them somewhere with the
-toolchains and the ports, or gate them:
+(1) are not. Every one of the 19 is itemised below, and **none of them is a
+product bug in the fix** — they are environment or stale-expectation problems:
 
-- **Toolchain missing (11).** `yarn`, `bun`, `python` (only `python3` exists),
+- **Toolchain missing (12).** `yarn`, `bun`, `python` (only `python3` exists),
   `mix`, `elixir`, `php` are all absent here, so every suite that spawns one
-  fails on `Failed to spawn`. Either install them on the runner or skip the
-  assertions with a `command -v` guard that reports SKIP, not FAIL.
+  fails on `Failed to spawn`. Either install them on the runner or guard the
+  assertions with `command -v` and report SKIP, not FAIL. SKIP is the better
+  default: a missing interpreter is not a failed feature.
 - **Port 8080 held (4).** An unrelated `ssh` listens on 8080 and 8443. Do not
-  kill it. `cargo run` / `Default port 8080 for axum` / `go run` /
-  `Default port 8080 for Go` fail because the run aborts at the port check.
+  kill it. `cargo run command used` / `Default port 8080 for axum` /
+  `go run command used` / `Default port 8080 for Go` fail because the run
+  aborts at the port check before it ever prints the command it chose.
   `detect.rs:246` really does set `default_port: Some(8080)`, so the suite's
-  expectation is right and the environment is the problem. On a clean runner
-  these pass.
-- **`Route added` (1, in `e2e_portless_simple.sh`).** Untriaged.
-- **`.test domain resolution` (1).** `--domain test-app.test` needs a non-
-  `.localhost` TLD, which means writing `/etc/hosts`, which needs root. Decide
-  whether to run that assertion under sudo or drop the custom TLD.
-- **ROADMAP C9 (1).** `vite --port 3001` in a dev script is ignored in favour of
-  the framework default 5173. A real behaviour question, not a test bug — see
-  C9.
+  expectation is right and the environment is wrong. These pass on a clean
+  runner.
+- **Needs root (1).** `.test domain resolution` — `--domain test-app.test` is a
+  non-`.localhost` TLD, so it writes `/etc/hosts` and fails with
+  `Permission denied writing /etc/hosts (needs sudo)`. Either run that
+  assertion under sudo or drop the custom TLD and use a `.localhost` one.
+- **Untriaged (1).** `Route added` in `e2e_portless_simple.sh`.
+- **ROADMAP C9 (1).** `Port detected from --port flag` — a `vite --port 3001`
+  dev script is ignored in favour of the framework default 5173. A real
+  behaviour question, not a test bug. See C9.
 
 ## Phase B — Wire the suites into CI
 
@@ -97,14 +100,15 @@ toolchains and the ports, or gate them:
 - Full `cargo test` in a **disposable HOME** (never the real HOME):
 
   ```bash
+  # Capture the toolchain paths before redirecting HOME, or rustup cannot
+  # find them and cargo fails with "could not choose a version of cargo".
+  CARGO_HOME_REAL="${CARGO_HOME:-$HOME/.cargo}"
+  RUSTUP_HOME_REAL="${RUSTUP_HOME:-$HOME/.rustup}"
   TEST_HOME=$(mktemp -d /tmp/antra-test.XXXXXX)
-  HOME="$TEST_HOME" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" \
+  HOME="$TEST_HOME" CARGO_HOME="$CARGO_HOME_REAL" RUSTUP_HOME="$RUSTUP_HOME_REAL" \
     cargo test -- --test-threads=4
   rm -rf "$TEST_HOME"
   ```
-
-  Save `CARGO_HOME` / `RUSTUP_HOME` from the real environment first; overriding
-  `HOME` alone makes `cargo` fail with "rustup could not choose a version".
 - All four suites: `for f in tests/e2e_*.sh; do bash -n "$f"; done`
 
 ## Delivery

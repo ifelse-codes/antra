@@ -547,6 +547,21 @@ cargo run -- doctor
 
 CI runs the same matrix on macOS, Ubuntu, and Windows ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+There are also four shell end-to-end suites under `tests/e2e_*.sh` that drive
+the real binary. They are not in CI yet, but they run locally:
+
+```bash
+# Short HOME and free ports. The daemon socket must fit the 104-byte
+# sun_path limit, so a deep temp directory makes the daemon unstartable.
+export HOME=/tmp/antra-shell-e2e ANTRA_PORT=18443 ANTRA_HTTP_PORT=18080
+mkdir -p "$HOME"
+for f in tests/e2e_*.sh; do bash "$f"; done
+```
+
+They need a built binary (`cargo build` first), and some assertions need the
+matching toolchain installed — `yarn`, `bun`, `python`, `mix`, `php`. Results
+land in `/tmp/antra-*-test-results.txt`.
+
 If you are contributing, start with [`AGENT.md`](AGENT.md) — architecture, phase history, and the rules we do not break.
 
 ---

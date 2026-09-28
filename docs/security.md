@@ -45,6 +45,33 @@ Leaf certificates are cached per hostname and regenerated inside a 45-day renewa
 
 `antra doctor` reports whether the CA passes strict X.509 validation, whether a superseded CA is still present in a trust store, and whether the running daemon is serving a CA other than the one on disk (a daemon holds its CA for its whole lifetime, so it must be restarted after a rotation).
 
+### IPC Socket Safety
+
+The daemon's control socket is a Unix socket at `socket_path()`.
+
+- The socket file itself is `0o600`, owner read/write only
+- Under `sudo antra proxy start` with a user-owned `HOME`, the socket is
+  chowned to the invoking user so unprivileged `status`/`stop` can connect
+  while `0600` still holds — enforced for the user instead of root
+- The bind is the singleton claim: exactly one starter wins, the loser fails
+  with `EADDRINUSE` and takes no state
+
+**Path length.** A Unix socket path is capped at 104 bytes (`sun_path`). The
+preferred location is `$XDG_RUNTIME_DIR` (Linux) or the data-local dir
+(macOS: `$HOME/Library/Application Support`). On macOS that second option
+carries 50 bytes of fixed overhead, so any home directory longer than ~54
+characters — a long username, or a CI runner's `mktemp -d` — would produce a
+path that cannot be bound, failing with the bare
+`path must be shorter than SUN_LEN`. When the derived path does not fit,
+Antra falls back to `/tmp/antra-<uid>/<fnv1a-of-original-path>/d.sock`:
+short enough to bind, still namespaced per user, still distinct per home so
+two daemons cannot collide on the single short name.
+
+Known gaps, tracked in ROADMAP C10: the socket is `bind`-ed before its mode is
+tightened to `0o600`, so there is a brief window at the process umask; and the
+`/tmp` fallback directory is created by `create_dir_all`, which yields `0o755`
+rather than a private `0o700`.
+
 ### Hosts File Safety
 
 - Only modify entries within `# BEGIN ANTRA MANAGED HOSTS` block
