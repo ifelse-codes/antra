@@ -379,7 +379,7 @@ src/
 | IPC | Unix socket / named pipe | Platform-native, local-only |
 | Trust store | `os-truststore` | Cross-platform, honest errors |
 
-Full plan and exclusions: [`PLAN.md`](PLAN.md)
+Full plan and exclusions: [`docs/mvp.md`](docs/mvp.md)
 
 ---
 
@@ -450,6 +450,86 @@ antra proxy start --port 8443 --http-port 8080
 
 Then open `https://myapp.localhost:8443` if you are not on 443.
 
+### Configuration via environment variables
+
+Ports and the TLD can be set from the environment instead of flags — useful
+when the daemon is started implicitly (so it inherits them) or for
+config-as-code setups. An explicit flag always wins over the environment
+variable.
+
+| Variable | Default | What it sets |
+|---|---|---|
+| `ANTRA_PORT` | `443` | Daemon HTTPS port (`antra proxy start --port`) |
+| `ANTRA_HTTP_PORT` | `80` | Daemon HTTP→HTTPS redirect port (`--http-port`) |
+| `ANTRA_TLD` | — | Custom TLD for `antra run` (`--tld`) |
+
+For example, to move the whole daemon to unprivileged ports without touching
+every command:
+
+```bash
+export ANTRA_PORT=8443
+export ANTRA_HTTP_PORT=8080
+antra proxy start        # daemon binds :8443 / :8080
+antra alias myapp.localhost 5173   # inherits the daemon on those ports
+```
+
+`ANTRA_PORT` intentionally only configures the **daemon**; the backend app
+port is still auto-detected or passed with `antra run --port`.
+
+---
+
+## Security
+
+### Reporting a Vulnerability
+
+Antra takes security seriously. If you believe you have found a security
+vulnerability in Antra, please **do not** file a public GitHub issue.
+
+Send a private report instead, so the issue can be fixed before it is
+disclosed:
+
+- **GitHub:** use the [Security advisory](https://github.com/ifelse-codes/antra/security/advisories/new)
+  form to create a private vulnerability report (see the maintainer's GitHub
+  profile for `ifelse-codes` for a direct contact email).
+
+We aim to acknowledge reports within **3 business days** and to provide an
+initial assessment within **7 business days**. You will be kept informed of
+the status of your report as it is triaged and fixed.
+
+### Security model
+
+Antra is a local development tool. Its two trust-sensitive surfaces are:
+
+1. **Local Certificate Authority (CA)** — Antra generates a CA on your machine
+   and, with your consent, installs it into the system trust store. Anyone
+   with access to the CA private key can issue certificates that your machine
+   trusts. The key is stored locally and should never leave your device.
+2. **Hosts file management** — Antra writes managed entries to your OS hosts
+   file, scoped to a `# BEGIN ANTRA MANAGED HOSTS` block. These changes are
+   reversible via `antra clean` / `antra trust --remove`.
+
+Neither surface involves a network service controlled by the project. Antra
+has no telemetry, no accounts, and no cloud dependency. The detailed threat
+model and safeguards live in [`docs/security.md`](docs/security.md).
+
+### Scope
+
+The following are **out of scope** and are not eligible for disclosure under
+this policy:
+
+- Theft or loss of the local CA private key due to compromise of the host
+  machine itself (inherent to any local trust store).
+- Social engineering of the user.
+- Vulnerabilities in third-party dependencies already fixed upstream; please
+  report those to the upstream project.
+
+### Coordinating public disclosure
+
+We appreciate coordinated disclosure. We will work with you to agree on a
+timeline before public release once a fix is available. We will credit
+researchers in the release notes when a confirmed vulnerability is reported
+responsibly.
+
 ---
 
 ## Develop Antra
@@ -488,7 +568,7 @@ Issues and PRs are welcome.
 1. Keep it local. No cloud features.
 2. Never silently mutate the trust store or `/etc/hosts`.
 3. `cargo clippy -- -D warnings` and `cargo test` must pass.
-4. If it is not in [`PLAN.md`](PLAN.md) or [`docs/mvp.md`](docs/mvp.md), talk first.
+4. If it is not in [`docs/mvp.md`](docs/mvp.md) or [`ROADMAP.md`](ROADMAP.md), talk first.
 
 ---
 
