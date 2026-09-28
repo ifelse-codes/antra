@@ -67,8 +67,19 @@ fail, with the assertions observed failing on GitHub runners:
 | `ruby_sinatra` | `Ruby Sinatra project detected` | `Default port 4567` |
 | `ruby_generic` | — | `Rackup command used` |
 
-Also `e2e_next_sprint.sh:322` greps for `"not installed"`, but Linux prints
-`"installed but not running"`.
+Also `e2e_next_sprint.sh:322` greps for `"not installed"` but Linux prints
+`"installed but not running"`. **That one is a product bug, not a
+phrasing problem — the test is asserting the honest wording and should not be
+changed.** `cli/service.rs:316-338` infers installed-vs-not from a single
+`systemctl --user is-active antra-proxy` code: `active` → running, `inactive`
+→ "installed but not running" plus `Run: systemctl --user start`, anything
+else → "not installed" plus `Run: antra service install`. `is-active` does not
+reliably separate an absent unit file from a stopped one across systemd
+versions, and on the ubuntu runner it returns `inactive` for a service that
+was never installed — so the user is told to `systemctl --user start` something
+that does not exist, instead of `antra service install`. Distinguish the two
+properly (`is-enabled`, or the presence of the unit file) and leave the test
+alone.
 
 Do this:
 
@@ -76,8 +87,8 @@ Do this:
 2. Split the port assertions the way the axum and Go tests already do — assert
    the port *choice* from a bare run, the command from a second run on a
    probed-free port — so they stop depending on the toolchain being present.
-3. Make the `e2e_next_sprint.sh` service assertion accept both phrasings, or
-   gate it on the platform.
+3. Fix the service-status inference in `cli/service.rs` as described above.
+   Do not loosen the assertion to match the wrong output.
 4. Audit the rest of the spawn-line assertions the way the `uvicorn` one was
    audited: an assertion that greps for a string which also appears inside a
    `Failed to spawn '<x>'` error passes while proving nothing. Known good
