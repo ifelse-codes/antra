@@ -76,6 +76,51 @@ need() {
     return 1
 }
 
+# Run an `antra` invocation with a wall-clock ceiling.
+#
+# `antra dev` stays in the foreground running the project's own dev command.
+# When that command is a server — `python -m http.server`, a web `cargo run`,
+# `go run` — it never returns, and the suite hangs until the CI job's own
+# timeout. Observed on ubuntu-latest: 45 minutes, because `python` is on the
+# runner's PATH there so the test runs instead of skipping, while on a Mac
+# `python` is absent and the test skips. The hang was invisible locally for
+# exactly that reason.
+#
+# `timeout(1)` is GNU coreutils and absent on macOS, so this is a background
+# job plus a kill — both of which every POSIX shell has. Output is still
+# captured, so callers keep writing `output=$(run_antra_capped ...)`.
+#
+# The kill has to be surgical. Antra's children are two: the long-lived daemon
+# and the project's dev command. They are told apart by process group — the
+# dev command is put in its own group (see docs/security.md, "Process Safety")
+# and therefore leads it, while the daemon shares antra's. Killing the group
+# of a child whose pgid equals its own pid takes the server down and leaves the
+# daemon alone. Killing the group blindly would take the daemon with it and
+# force the next test to rebind its ports.
+ANTRA_TIMEOUT="${ANTRA_TIMEOUT:-25}"
+
+run_antra_capped() {
+    local pid killer rc
+    "$@" &
+    pid=$!
+    (
+        sleep "$ANTRA_TIMEOUT"
+        local child pgid
+        for child in $(pgrep -P "$pid" 2>/dev/null); do
+            pgid=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' ')
+            [ -n "$pgid" ] && [ "$pgid" = "$child" ] || continue
+            kill -TERM -"$child" 2>/dev/null
+        done
+        kill -TERM "$pid" 2>/dev/null
+    ) &
+    killer=$!
+    wait "$pid" 2>/dev/null
+    rc=$?
+    kill -TERM "$killer" 2>/dev/null
+    wait "$killer" 2>/dev/null
+    return $rc
+}
+
 # Echo a port nothing is listening on.
 #
 # The framework tests want to observe two different things: which default
@@ -134,7 +179,7 @@ test_node_npm() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-npm-app"; then
         log_pass "Node.js detection from package.json"
@@ -190,7 +235,7 @@ test_node_yarn() {
 EOF
     touch yarn.lock
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "yarn dev"; then
         log_pass "yarn command inferred correctly"
@@ -215,7 +260,7 @@ test_node_pnpm() {
 EOF
     touch pnpm-lock.yaml
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "pnpm run dev"; then
         log_pass "pnpm command inferred correctly"
@@ -241,7 +286,7 @@ test_node_bun() {
 EOF
     touch bun.lockb
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "bun run dev"; then
         log_pass "bun command inferred correctly"
@@ -268,7 +313,7 @@ test_vite() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-vite-app"; then
         log_pass "Vite project detected"
@@ -292,7 +337,7 @@ test_nextjs() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-next-app"; then
         log_pass "Next.js project detected"
@@ -316,7 +361,7 @@ test_nuxt() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-nuxt-app"; then
         log_pass "Nuxt project detected"
@@ -340,7 +385,7 @@ test_react_cra() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-cra-app"; then
         log_pass "React CRA project detected"
@@ -364,7 +409,7 @@ test_angular() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Node.js project: test-angular-app"; then
         log_pass "Angular project detected"
@@ -386,7 +431,7 @@ test_node_no_scripts() {
 EOF
     mkdir -p node_modules
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "npm start"; then
         log_pass "npm start fallback works"
@@ -415,7 +460,7 @@ edition = "2021"
 axum = "0.7"
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Rust project: test-axum-app"; then
         log_pass "Rust project detected"
@@ -437,7 +482,7 @@ EOF
     # The command is only printed once the run proceeds, so force a port
     # this machine is not using.
     free=$(free_port)
-    output=$($ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
     
     if echo "$output" | grep -q "cargo run"; then
         log_pass "cargo run command used"
@@ -462,7 +507,7 @@ edition = "2021"
 actix-web = "4"
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Rust project: test-actix-app"; then
         log_pass "Rust actix project detected"
@@ -487,7 +532,7 @@ edition = "2021"
 rocket = "0.5"
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Rust project: test-rocket-app"; then
         log_pass "Rust rocket project detected"
@@ -512,7 +557,7 @@ edition = "2021"
 serde = "1"
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Rust project: test-noweb-app"; then
         log_pass "Rust non-web project detected"
@@ -539,7 +584,7 @@ go 1.21
 require github.com/gin-gonic/gin v1.9.1
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Go project: test-gin-app"; then
         log_pass "Go project detected"
@@ -558,7 +603,7 @@ EOF
     # The command is only printed once the run proceeds, so force a port
     # this machine is not using.
     free=$(free_port)
-    output=$($ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
     
     if echo "$output" | grep -q "go run"; then
         log_pass "go run command used"
@@ -581,7 +626,7 @@ go 1.21
 require github.com/labstack/echo v4.6.3
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Go project: test-echo-app"; then
         log_pass "Go echo project detected"
@@ -604,7 +649,7 @@ go 1.21
 require github.com/gofiber/fiber/v2 v2.52.0
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Go project: test-fiber-app"; then
         log_pass "Go fiber project detected"
@@ -627,7 +672,7 @@ go 1.21
 require github.com/go-chi/chi/v5 v5.0.12
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Go project: test-chi-app"; then
         log_pass "Go chi project detected"
@@ -648,7 +693,7 @@ module test-noweb-app
 go 1.21
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Go project: test-noweb-app"; then
         log_pass "Go non-web project detected"
@@ -678,7 +723,7 @@ dependencies = [
 ]
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Python project: test-fastapi-app"; then
         log_pass "Python project detected"
@@ -686,13 +731,25 @@ EOF
         log_fail "Python project detected"
     fi
     
-    if echo "$output" | grep -q "uvicorn"; then
+    # `uvicorn` has to be present for this to mean anything. Without it the
+    # run stops at "Failed to spawn 'uvicorn'" — and grepping for "uvicorn"
+    # then matches that error message, so the assertion passes while proving
+    # nothing. The chosen command is only printed after a successful spawn.
+    if ! have uvicorn; then
+        log_skip "uvicorn command used for FastAPI — needs: uvicorn"
+    elif echo "$output" | grep -q "uvicorn"; then
         log_pass "uvicorn command used for FastAPI"
     else
         log_fail "uvicorn command used for FastAPI"
     fi
     
-    if echo "$output" | grep -q "127.0.0.1:8000"; then
+    # Assert the *choice* of port, not a registered route. `uvicorn` is not
+    # installed on every machine, and without it the run stops at
+    # "Failed to spawn 'uvicorn'" before a route is ever registered — so
+    # requiring `127.0.0.1:8000` tested whether uvicorn was installed, not
+    # whether the port was chosen. The choice is printed either way, exactly as
+    # the axum and Go tests rely on.
+    if echo "$output" | grep -q "8000"; then
         log_pass "Default port 8000 for FastAPI"
     else
         log_fail "Default port 8000 for FastAPI"
@@ -715,7 +772,7 @@ dependencies = [
 ]
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Python project: test-django-app"; then
         log_pass "Python Django project detected"
@@ -746,7 +803,7 @@ dependencies = [
 ]
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Python project: test-flask-app"; then
         log_pass "Python Flask project detected"
@@ -754,7 +811,28 @@ EOF
         log_fail "Python Flask project detected"
     fi
     
-    if echo "$output" | grep -q "flask run"; then
+    # Flask's default is 5000, and macOS Control Center holds 5000
+    # permanently (`ControlCe` listening on *:commplex-main). This run can
+    # therefore never get as far as printing the command it chose. Assert the
+    # port choice here — the occupied-port error still names 5000 — and the
+    # command from a second run forced onto a probed-free port, the same split
+    # the axum and Go tests use.
+    if echo "$output" | grep -q "5000"; then
+        log_pass "Default port 5000 for Flask"
+    else
+        log_fail "Default port 5000 for Flask"
+    fi
+
+    free=$(free_port)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
+
+    # The command string is only ever printed once the spawn is attempted, so
+    # asserting it needs `flask` present. Without it the run stops at
+    # "Failed to spawn 'flask'", which names the binary but not the argument
+    # list — grepping for "flask run" would then be asserting nothing.
+    if ! have flask; then
+        log_skip "Flask command used — needs: flask"
+    elif echo "$output" | grep -q "flask run"; then
         log_pass "Flask command used"
     else
         log_fail "Flask command used"
@@ -777,7 +855,7 @@ dependencies = [
 ]
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Python project: test-generic-app"; then
         log_pass "Python generic project detected"
@@ -808,7 +886,7 @@ source 'https://rubygems.org'
 gem 'rails', '~> 7.0'
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Ruby on Rails project"; then
         log_pass "Ruby Rails project detected"
@@ -841,7 +919,7 @@ source 'https://rubygems.org'
 gem 'sinatra'
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Ruby (Sinatra) project"; then
         log_pass "Ruby Sinatra project detected"
@@ -868,7 +946,7 @@ source 'https://rubygems.org'
 gem 'rake'
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Ruby project"; then
         log_pass "Ruby generic project detected"
@@ -911,7 +989,7 @@ defmodule TestPhoenixApp.MixProject do
 end
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Elixir (Phoenix) project"; then
         log_pass "Elixir Phoenix project detected"
@@ -953,7 +1031,7 @@ defmodule TestGenericApp.MixProject do
 end
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected Elixir project"; then
         log_pass "Elixir generic project detected"
@@ -989,7 +1067,7 @@ test_php_laravel() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected PHP (Laravel) project"; then
         log_pass "PHP Laravel project detected"
@@ -1026,7 +1104,7 @@ test_php_generic() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Detected PHP project"; then
         log_pass "PHP generic project detected"
@@ -1060,7 +1138,7 @@ test_env_injection() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "PORT=[0-9]"; then
         log_pass "PORT environment variable set"
@@ -1116,7 +1194,7 @@ EOF
     # held by an unrelated desktop app on this machine, and any hardcoded
     # port is one developer's stray process away from failing the same way.
     free=$(free_port)
-    output=$($ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt --port "$free" 2>&1 || true)
     if echo "$output" | grep -q "Using port $free"; then
         log_pass "Explicit --port honored on the command line"
     else
@@ -1131,7 +1209,7 @@ EOF
     # port-already-in-use error that still proves 3001 was selected. The
     # 5173 half is the regression guard — if the pin is ever missed again,
     # Vite's default shows up in the output and this fails.
-    output=$($ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     if echo "$output" | grep -q "3001" && ! echo "$output" | grep -q "5173"; then
         log_pass "Port pinned in the dev script beats the framework default"
     else
@@ -1160,7 +1238,7 @@ test_domain_resolution() {
 }
 EOF
     
-    output=$($ANTRA_BIN dev --domain custom.localhost --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --domain custom.localhost --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Domain resolved: custom.localhost"; then
         log_pass ".localhost domain resolution"
@@ -1178,7 +1256,7 @@ EOF
         return 0
     fi
     
-    output=$($ANTRA_BIN dev --domain test-app.test --no-trust-prompt 2>&1 || true)
+    output=$(run_antra_capped $ANTRA_BIN dev --domain test-app.test --no-trust-prompt 2>&1 || true)
     
     if echo "$output" | grep -q "Domain resolved: test-app.test"; then
         log_pass ".test domain resolution"
