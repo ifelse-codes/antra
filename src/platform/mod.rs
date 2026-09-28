@@ -97,6 +97,124 @@ pub fn chown_to_invoking_user(path: &std::path::Path) {
     }
 }
 
+/// The uid of the user this process is acting for: the pre-`sudo` user when
+/// running as root, the process's own euid otherwise.
+///
+/// `None` when the process is root but `SUDO_UID` is absent or unusable —
+/// there is no invoking user to hand anything back to, and guessing (root)
+/// would be wrong.
+#[cfg(unix)]
+fn acting_uid() -> Option<u32> {
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 {
+        return Some(euid);
+    }
+    std::env::var("SUDO_UID")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&uid| uid != 0)
+}
+
+/// Whether this process may tighten a directory owned by `dir_uid`.
+///
+/// Only directories belonging to our own euid, or — as root — to the user we
+/// are acting for. Anything else is a pre-existing directory we did not
+/// create and cannot honestly claim: leave it alone and report it rather
+/// than silently trusting (or silently reowning) someone else's tree.
+#[cfg(unix)]
+fn may_tighten_mode(dir_uid: u32, euid: u32, acting_uid: u32) -> bool {
+    dir_uid == euid || dir_uid == acting_uid
+}
+
+/// Create `dir` — and any parents it is missing — as private `0o700`
+/// directories, then hand every component this call created back to the
+/// invoking user under `sudo`. Unix only.
+///
+/// The daemon's control socket is a Unix socket, and both halves of its
+/// safety depend on the *directory* rather than on the socket file:
+///
+/// * **The bind-then-chmod window.** A socket file is created by `bind(2)`
+///   at the process umask (`0o755` under the usual `0o022`), so between the
+///   bind and the `chmod 0o600` that follows it, any local user can connect
+///   and issue IPC commands. `connect` needs `x` on *every* component of the
+///   path, so a socket that is briefly `0o755` inside a `0o700` directory is
+///   still unreachable by anyone else for the whole of that window. The
+///   directory has to be private *before* the bind — tightening it afterwards
+///   would just move the race.
+/// * **The `/tmp` fallback layout.** When the derived socket path does not fit
+///   `sun_path`, the daemon falls back to `/tmp/antra-<uid>/<hash>/d.sock`
+///   (see `ipc::server::socket_path`). `create_dir_all` under the default
+///   umask leaves that at `0o755`, so anyone can list the per-home hashes.
+///
+/// **Chowning is not optional.** `sudo antra proxy start` runs this as root
+/// with a user-owned `HOME`, and a root-owned `0o700` directory is
+/// unsearchable for that user — which locks the unprivileged CLI out of its
+/// own daemon, exactly the failure `chown_to_invoking_user` exists to prevent.
+/// Every component *this call created* is chowned, not only the leaf:
+/// tightening the leaf alone would leave an unsearchable root-owned ancestor
+/// (`/tmp/antra-<uid>`) above it and break the same flow.
+///
+/// Best-effort on tightening, strict on creation: a component that cannot be
+/// chmod-ed or chowned is reported and skipped, so a read-only or foreign
+/// directory degrades to the previous behaviour instead of failing a start.
+#[cfg(unix)]
+pub fn ensure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    // Work out which components are missing before creating them:
+    // `create_dir_all` does not report what it made, and the chown below has
+    // to cover every one of them. Leaf-first, so the walk stops at the first
+    // component that already exists.
+    let mut missing: Vec<&std::path::Path> = Vec::new();
+    let mut cursor = dir;
+    loop {
+        match std::fs::symlink_metadata(cursor) {
+            Ok(_) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        missing.push(cursor);
+        match cursor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => cursor = parent,
+            _ => break,
+        }
+    }
+
+    // `mode` applies at creation only, and the umask still masks it — no umask
+    // in practical use clears any of `0o700`'s three bits, and the explicit
+    // chmod below makes the result independent of the umask anyway.
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+
+    let euid = unsafe { libc::geteuid() };
+    let acting_uid = acting_uid().unwrap_or(euid);
+    for path in missing.iter().rev().copied().chain(std::iter::once(dir)) {
+        let Ok(meta) = std::fs::symlink_metadata(path) else {
+            continue;
+        };
+        if !may_tighten_mode(meta.uid(), euid, acting_uid) {
+            tracing::warn!(
+                path = %path.display(),
+                owner_uid = meta.uid(),
+                "Leaving a directory not owned by the invoking user alone (its mode is not tightened)"
+            );
+            continue;
+        }
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "Failed to set private mode on directory"
+            );
+            continue;
+        }
+        chown_to_invoking_user(path);
+    }
+    Ok(())
+}
+
 /// True when the daemon socket exists but is unreachable due to file
 /// permissions — the classic `sudo antra proxy start` (root-owned socket)
 /// followed by unprivileged `antra status` shape. Distinguishes "running as
@@ -258,5 +376,97 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "x");
         // Missing socket path reporting must not panic either.
         let _ = daemon_socket_permission_denied();
+    }
+
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode_of(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// Run `f` with a fully permissive umask.
+    ///
+    /// The umask is process-global, so this is only sound because it is
+    /// restored before returning and because nothing else in this test binary
+    /// asserts on a directory mode it did not set itself. It exists so the
+    /// assertion below is about the code under test rather than about the
+    /// umask the runner happened to have: with `0o022` (or worse, `0o077`) a
+    /// `create_dir_all` could pass by accident.
+    fn with_permissive_umask<T>(f: impl FnOnce() -> T) -> T {
+        // SAFETY: `umask` only reads/writes the process umask word; both
+        // calls happen on this thread with no filesystem work in between.
+        let previous = unsafe { libc::umask(0) };
+        let out = f();
+        unsafe { libc::umask(previous) };
+        out
+    }
+
+    /// The `/tmp/antra-<uid>/<hash>/` fallback layout must come out private.
+    /// `create_dir_all` under the default umask leaves it `0o755`, which lets
+    /// any local user enumerate the per-home hashes.
+    #[test]
+    fn ensure_private_dir_creates_the_whole_chain_0700() {
+        let tmp = tempfile::tempdir().unwrap();
+        let per_uid = tmp.path().join("antra-501");
+        let hashed = per_uid.join("3f9a1c7e");
+        let dir = hashed.join("nested");
+
+        with_permissive_umask(|| ensure_private_dir(&dir).unwrap());
+
+        for created in [&per_uid, &hashed, &dir] {
+            assert_eq!(
+                mode_of(created),
+                0o700,
+                "{} is not private",
+                created.display()
+            );
+        }
+    }
+
+    /// An already-existing directory (every daemon restart) is tightened too,
+    /// not just one this call happened to create — otherwise a `0o755`
+    /// directory from an older install would keep the socket reachable at its
+    /// bind-time mode forever.
+    #[test]
+    fn ensure_private_dir_tightens_a_preexisting_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("antra");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            mode_of(&dir),
+            0o755,
+            "precondition: an old world-readable dir"
+        );
+
+        ensure_private_dir(&dir).unwrap();
+
+        assert_eq!(mode_of(&dir), 0o700);
+    }
+
+    /// Only our own directory — or, as root, the one belonging to the user we
+    /// act for — may be tightened. A pre-existing directory owned by somebody
+    /// else is left exactly as it is, and reported.
+    #[test]
+    fn may_tighten_only_our_own_or_the_invoking_users_directory() {
+        // euid, acting uid, foreign uid
+        assert!(may_tighten_mode(501, 501, 501));
+        // A root daemon (euid 0) may tighten a directory the invoking user owns.
+        assert!(may_tighten_mode(501, 0, 501));
+        // But not one belonging to an unrelated user.
+        assert!(!may_tighten_mode(502, 0, 501));
+        assert!(!may_tighten_mode(502, 501, 501));
+    }
+
+    /// A missing directory that cannot be created is an error, not a silent
+    /// success: the caller binds into this path immediately afterwards, and a
+    /// bind that fails later reads like a product bug.
+    #[test]
+    fn ensure_private_dir_propagates_creation_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let blocker = tmp.path().join("not-a-dir");
+        std::fs::write(&blocker, "x").unwrap();
+        let err = ensure_private_dir(&blocker.join("child")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotADirectory);
     }
 }
