@@ -119,8 +119,11 @@ pub fn execute(args: DevArgs) -> Result<()> {
     let mut command_parts = vec![detected.command];
     command_parts.extend(detected.args);
 
-    // Determine port
-    let port = args.port.or(detected.default_port);
+    // Port precedence: an explicit `--port` on the command line wins, then
+    // a port the project pinned in its own dev script (`vite --port
+    // 3001`), then the framework default. `None` falls through to
+    // run.rs, which detects from the command or auto-assigns.
+    let port = args.port.or(detected.script_port).or(detected.default_port);
 
     let run_args = run::RunArgs {
         domain,

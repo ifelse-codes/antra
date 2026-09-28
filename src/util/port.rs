@@ -143,6 +143,22 @@ pub fn detect_port_from_command(command: &[String]) -> Option<u16> {
     None
 }
 
+/// Try to detect a port pinned inside a package.json script body.
+///
+/// For a Node project the argv Antra execs is `npm run dev` — the real
+/// command, and any `--port 3001` in it, stays inside the script string in
+/// `package.json`. `detect_port_from_command` only ever sees the argv, so
+/// it cannot find that port. Split the script the way a shell would and
+/// hand the tokens to the same parser, so there is exactly one port-flag
+/// parser in the tree.
+///
+/// Returns `None` when the script pins no port, or when the pin is
+/// something only the shell can resolve (`--port $PORT`). Guessing there
+/// would be worse than falling back to the framework default.
+pub fn detect_port_from_script(script: &str) -> Option<u16> {
+    detect_port_from_command(&crate::config::project::split_command_string(script))
+}
+
 /// Frameworks that ignore the PORT env var and need explicit --port flag injection.
 /// Returns the modified command with --port flag injected if applicable.
 pub fn inject_port_flag(command: &[String], port: u16) -> Vec<String> {
@@ -315,5 +331,59 @@ mod tests {
                 panic!("find_free_port returned {port}, still unavailable after 10 attempts");
             }
         }
+    }
+
+    #[test]
+    fn script_port_space_separated_flag() {
+        assert_eq!(detect_port_from_script("vite --port 3001"), Some(3001));
+    }
+
+    #[test]
+    fn script_port_equals_syntax() {
+        assert_eq!(detect_port_from_script("vite --port=3001"), Some(3001));
+    }
+
+    #[test]
+    fn script_port_short_flag() {
+        assert_eq!(detect_port_from_script("next dev -p 3001"), Some(3001));
+    }
+
+    #[test]
+    fn script_port_quoted_value() {
+        // The whole script is one JSON string; the shell quoting has to
+        // survive the trip or a quoted port reads as part of a word.
+        assert_eq!(
+            detect_port_from_script("vite --host '0.0.0.0' --port 3001"),
+            Some(3001)
+        );
+    }
+
+    #[test]
+    fn script_without_port_yields_none() {
+        assert_eq!(detect_port_from_script("vite"), None);
+        assert_eq!(detect_port_from_script("next dev"), None);
+        assert_eq!(detect_port_from_script(""), None);
+    }
+
+    #[test]
+    fn unparseable_script_port_yields_none() {
+        // Only the shell can resolve these. Guessing a port here would
+        // route the domain somewhere the server never listens, which is
+        // the exact failure this function exists to prevent.
+        assert_eq!(detect_port_from_script("vite --port $PORT"), None);
+        assert_eq!(detect_port_from_script("vite --port=${PORT:-3000}"), None);
+        assert_eq!(detect_port_from_script("vite --port"), None);
+        assert_eq!(detect_port_from_script("vite --port=notaport"), None);
+        // A script Antra cannot make sense of must not error, and must not
+        // invent a port either.
+        assert_eq!(detect_port_from_script("&& || ;;"), None);
+        assert_eq!(detect_port_from_script("node -e \"console.log(1)"), None);
+    }
+
+    #[test]
+    fn script_port_beats_bare_number_but_not_absent_flag() {
+        // A bare trailing number is not a port pin (`webpack-dev-server
+        // . --port` vs `echo 3001`), so only an explicit flag counts.
+        assert_eq!(detect_port_from_script("vite 3001"), None);
     }
 }
