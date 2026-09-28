@@ -216,11 +216,11 @@ fn install_launchd() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn install_systemd() -> Result<()> {
-    let home_dir =
-        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-    let config_dir = home_dir.join(".config/antra");
-    let service_dir = config_dir.join("systemd/user");
-    let service_path = service_dir.join("antra-proxy.service");
+    let service_path = unit_path()?;
+    let service_dir = service_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine the service directory"))?
+        .to_path_buf();
     let antra_path = std::env::current_exe()?;
 
     // Create systemd directory if it doesn't exist
@@ -286,6 +286,63 @@ WantedBy=default.target
     Ok(())
 }
 
+/// Where `antra service install` puts the systemd user unit, and where
+/// `antra service status` looks for it.
+///
+/// Shared so the two cannot drift. It is deliberately *not* systemd's default
+/// search path — see the note on `LinuxServiceState` — so the file's presence
+/// is the only trustworthy statement about whether install ever happened.
+#[cfg(target_os = "linux")]
+fn unit_path() -> Result<std::path::PathBuf> {
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    Ok(home_dir
+        .join(".config/antra")
+        .join("systemd/user")
+        .join("antra-proxy.service"))
+}
+
+/// What `antra service status` should report on Linux.
+///
+/// Split out from the subprocess calls so the mapping is testable — the file
+/// had no tests at all — and so the reasoning is stated once.
+///
+/// Deliberately *not* `#[cfg(target_os = "linux")]`. The mapping is pure
+/// string logic with no platform dependency, and gating it would mean the most
+/// subtle code in this file was exercised on exactly one platform and never
+/// on a developer's Mac.
+#[derive(Debug, PartialEq, Eq)]
+enum LinuxServiceState {
+    Running,
+    InstalledStopped,
+    NotInstalled,
+}
+
+/// Decide what to report, from whether the unit file exists and what systemd
+/// says about it.
+///
+/// `systemctl --user is-active` alone cannot answer this. Across systemd
+/// versions it reports `inactive` for a unit that is merely stopped *and* for
+/// one that does not exist, and `unknown` for a missing unit on others. Reading
+/// `inactive` as "installed" is what told a user on a machine where the
+/// service was never installed to run `systemctl --user start` on nothing.
+///
+/// So the unit file's presence decides "installed", and `is-active` only
+/// decides whether a known-installed service happens to be up. The file is
+/// checked on disk rather than via `systemctl is-enabled` because Antra writes
+/// it outside systemd's search path, so systemd's own view of the unit is not
+/// a reliable proxy for whether install ran.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_service_state(unit_exists: bool, is_active: &str) -> LinuxServiceState {
+    if !unit_exists {
+        return LinuxServiceState::NotInstalled;
+    }
+    if is_active == "active" {
+        return LinuxServiceState::Running;
+    }
+    LinuxServiceState::InstalledStopped
+}
+
 fn service_status() -> Result<()> {
     println!("{}", "ANTRA SERVICE STATUS".bold());
     println!();
@@ -319,24 +376,29 @@ fn service_status() -> Result<()> {
             .args(["--user", "is-active", "antra-proxy"])
             .output()?;
 
-        let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let is_active = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let unit_exists = unit_path().map(|p| p.exists()).unwrap_or(false);
 
-        if status == "active" {
-            println!("  {} Service is running", "✓".green().bold());
-        } else if status == "inactive" {
-            println!(
-                "  {} {}",
-                "⚠".yellow().bold(),
-                "Service is installed but not running".yellow()
-            );
-            println!("    Run: systemctl --user start antra-proxy");
-        } else {
-            println!(
-                "  {} {}",
-                "⚠".yellow().bold(),
-                "Service is not installed".yellow()
-            );
-            println!("    Run: antra service install");
+        match linux_service_state(unit_exists, &is_active) {
+            LinuxServiceState::Running => {
+                println!("  {} Service is running", "✓".green().bold());
+            }
+            LinuxServiceState::InstalledStopped => {
+                println!(
+                    "  {} {}",
+                    "⚠".yellow().bold(),
+                    "Service is installed but not running".yellow()
+                );
+                println!("    Run: systemctl --user start antra-proxy");
+            }
+            LinuxServiceState::NotInstalled => {
+                println!(
+                    "  {} {}",
+                    "⚠".yellow().bold(),
+                    "Service is not installed".yellow()
+                );
+                println!("    Run: antra service install");
+            }
         }
     }
 
@@ -459,4 +521,66 @@ fn uninstall_service() -> Result<()> {
 
     println!();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bug this whole refactor exists for: a machine where the service was
+    /// never installed, `systemctl --user is-active` reported `inactive` on the
+    /// GitHub ubuntu runner, and Antra told the user to
+    /// `systemctl --user start` a service that did not exist.
+    #[test]
+    fn absent_unit_is_never_reported_as_installed() {
+        for is_active in [
+            "inactive",
+            "unknown",
+            "active",
+            "",
+            "activating",
+            "deactivating",
+            "failed",
+        ] {
+            assert_eq!(
+                linux_service_state(false, is_active),
+                LinuxServiceState::NotInstalled,
+                "with no unit on disk, is-active={is_active:?} must not imply installed"
+            );
+        }
+    }
+
+    #[test]
+    fn present_unit_that_is_active_is_running() {
+        assert_eq!(
+            linux_service_state(true, "active"),
+            LinuxServiceState::Running
+        );
+    }
+
+    /// A unit that exists but is up for any other reason is installed-and-stopped,
+    /// which is the only case where `systemctl --user start` is the right advice.
+    #[test]
+    fn present_unit_that_is_not_active_is_installed_and_stopped() {
+        for is_active in ["inactive", "failed", "activating", "unknown", ""] {
+            assert_eq!(
+                linux_service_state(true, is_active),
+                LinuxServiceState::InstalledStopped,
+                "is-active={is_active:?} on an existing unit should mean stopped"
+            );
+        }
+    }
+
+    /// `unit_path` is shared by install and status specifically so they cannot
+    /// drift. Assert it points where install writes and nowhere else.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unit_path_is_under_the_antra_config_dir() {
+        let path = unit_path().expect("home directory should resolve");
+        let text = path.to_string_lossy().replace('\\', "/");
+        assert!(
+            text.contains("/.config/antra/systemd/user/antra-proxy.service"),
+            "unexpected unit path: {text}"
+        );
+    }
 }
