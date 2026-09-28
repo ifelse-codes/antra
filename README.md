@@ -548,7 +548,8 @@ cargo run -- doctor
 CI runs the same matrix on macOS, Ubuntu, and Windows ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 There are also four shell end-to-end suites under `tests/e2e_*.sh` that drive
-the real binary. They are not in CI yet, but they run locally and are green:
+the real binary. Two of them run in CI on macOS and Ubuntu; all four run
+locally and are green:
 
 ```bash
 # Short HOME and free ports. The daemon socket must fit the 104-byte
@@ -561,7 +562,8 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 They need a built binary (`cargo build` first). Each exits non-zero only on a
 real failure — a test whose toolchain is missing reports SKIP and is counted
 in the summary, so `yarn`, `bun`, `python`, `mix` and `php` are optional and
-installing them converts skips into passes. Results land in
+installing them converts skips into passes. Give each suite its own `HOME` if
+you are running more than one at a time. Results land in
 `/tmp/antra-*-test-results.txt`.
 
 If you are contributing, start with [`AGENT.md`](AGENT.md) — architecture, phase history, and the rules we do not break.
