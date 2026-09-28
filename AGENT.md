@@ -5,6 +5,16 @@
 
 ---
 
+## Session kickoff
+
+When the user says **"start next session"** (or anything equivalent), do not
+ask what work is planned — read [`NEXT-SESSION.md`](NEXT-SESSION.md) and
+execute its plan end-to-end. That file is the source of truth for the current
+scheduled work. After it is complete, update its "current plan is done" state
+in `AGENT.md` so the next kickoff points at new work.
+
+---
+
 ## What is Antra
 
 Antra is a native Rust developer CLI that maps stable domain names to local development servers.
