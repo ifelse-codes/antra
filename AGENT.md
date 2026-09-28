@@ -56,18 +56,33 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 - The landing site was re-checked in a real browser after the CSP landed: Inter and JetBrains Mono still load, the Plausible tag is present, zero page errors, `/nonexistent` → 404.
 
 **Do not redo blindly:**
-- **`tests/e2e_next_sprint.sh` was never running.** `log_pass` used `((pass_count++))`, which exits 1 when the counter is 0, so under `set -e` the suite aborted after its first passing assertion — in every one of the four shell suites. Fixed in three of them (`e2e_portless_simple.sh` has no `set -e`). With that fixed the suite runs to completion and reports **9 passed / 46 failed on this machine**, all from one cause: the auto-started daemon cannot bind 443 (no root) or 8443/8080 (an unrelated `ssh` holds both here), so every daemon-dependent test fails. The blocker — the auto-start path having no port override (ROADMAP #21) — is **shipped** as of this change: set `ANTRA_PORT`/`ANTRA_HTTP_PORT` and the auto-started daemon inherits them. The suites still need wiring into CI on a runner where the chosen ports are free.
+- **The four shell e2e suites are repaired but not yet in CI.** They used to report 86 passing / 128 failing assertions; they now report **195 / 19**, and `e2e_next_sprint.sh` and `e2e_portless_parity.sh` are fully green. The dominant cause was `ANTRA_BIN` being relative (`./target/debug/antra`) while every test `cd`s into a scratch dir — anchored to `BASH_SOURCE`, that single line took `e2e_all_features.sh` from 3/70 to 46/70. Also fixed: ~35 `grep src/...` calls that resolved against `/tmp`, a `setup()` that was never called, a `cleanup()` that deleted the run's own results file, a `grep -q "$opt"` where `opt="--domain"` made grep eat the pattern (7 assertions failed unconditionally), a `-q`-piped-into-`grep -q` assertion whose `else` branch also called `log_pass`, and a `pkill -f "node.*test"` that would kill a developer's Jest run. The 19 residuals are itemised in `NEXT-SESSION.md`: 12 need a toolchain this box lacks, 4 need port 8080, 1 needs root for `/etc/hosts`, and ROADMAP C9 is a real behaviour question. Wiring them into CI is ROADMAP C8.
+- **`ipc::server::socket_path()` used to break on a long `$HOME`.** On macOS the path is `$HOME/Library/Application Support/antra/daemon.sock` — 50 bytes of fixed overhead against a 104-byte `sun_path` — so any home over ~54 chars (a long username, a CI runner's `mktemp -d`) made the daemon unstartable with a bare `path must be shorter than SUN_LEN`. It now falls back to `/tmp/antra-<uid>/<fnv1a>/d.sock`. This is why the Rust e2e harness pins its base root to `/tmp/antra-e2e`; keep that in mind before "simplifying" it.
 - Do not kill unrelated processes to make a test pass; 8443/8080 are held by someone else's `ssh` on this machine.
 - If a test daemon lingers on 8443 after a run, it is an orphan from a temp HOME — check its open files (`lsof -p <pid> | grep antra`) before stopping it, so you do not kill the user's real daemon.
+- Overriding `HOME` for a test run breaks `cargo` unless you also pass `CARGO_HOME` and `RUSTUP_HOME`, or rustup fails with "could not choose a version of cargo to run". Copy the local gate below verbatim.
 - The CA rules from the previous handoff still hold: existing installs rotate once and re-prompt; never add a SAN back to the CA.
 
 **Reproduce the local gate:**
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
+# Capture the real toolchain paths first: once HOME is redirected, rustup
+# cannot find them and cargo fails with "could not choose a version".
+CARGO_HOME_REAL="${CARGO_HOME:-$HOME/.cargo}"
+RUSTUP_HOME_REAL="${RUSTUP_HOME:-$HOME/.rustup}"
 TEST_HOME=$(mktemp -d /tmp/antra-test.XXXXXX)
-HOME="$TEST_HOME" CARGO_HOME=/Users/suman/.cargo RUSTUP_HOME=/Users/suman/.rustup cargo test -- --test-threads=4
+HOME="$TEST_HOME" CARGO_HOME="$CARGO_HOME_REAL" RUSTUP_HOME="$RUSTUP_HOME_REAL" \
+  cargo test -- --test-threads=4
 rm -rf "$TEST_HOME"
+```
+
+The shell suites need a **short** `HOME`, for the `sun_path` reason above, and
+ports that are free on this box:
+```bash
+export HOME=/tmp/antra-shell-e2e ANTRA_PORT=18443 ANTRA_HTTP_PORT=18080
+mkdir -p "$HOME"
+for f in tests/e2e_*.sh; do bash "$f"; done
 ```
 
 **One trap this session cost time:** `wrangler pages deploy .` infers the branch from git. Deployed from a feature branch it creates a *branch* deployment and prints an alias URL — production does not move, and the site silently keeps serving the old installer. Deploy from `main`, or pass `--branch main`, and check the live domain afterwards rather than the deployment URL.
@@ -92,7 +107,7 @@ rm -rf "$TEST_HOME"
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. The working tree was clean, then gained ROADMAP #21 (env vars: `ANTRA_PORT`, `ANTRA_HTTP_PORT`, `ANTRA_TLD`, shipped with `cli::env_tests`). Still open: the formal browser checklist (Safari, Firefox) and wiring the shell e2e suites into CI (no longer blocked — the daemon's ports are now configurable via env).
+**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. ROADMAP #21 (env vars: `ANTRA_PORT`, `ANTRA_HTTP_PORT`, `ANTRA_TLD`) shipped with `cli::env_tests`. Since then: cleanup rows C4-C6 were verified shipped and marked DONE, C7 fixed a real bug (`ipc::server::socket_path` could exceed the 104-byte `sun_path` limit on any macOS home over ~54 chars, making the daemon unstartable — it now falls back to a short per-uid path), and the four shell e2e suites were repaired: 86/128 assertions passing before, 195/19 after, with `e2e_next_sprint.sh` and `e2e_portless_parity.sh` fully green. Still open: the 19 residual suite failures (mostly missing local toolchains and an occupied port 8080, tracked as ROADMAP C8/C9), wiring the suites into CI, and the formal browser checklist (Safari, Firefox).
 
 ### Landing Page
 

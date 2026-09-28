@@ -1,11 +1,20 @@
 #!/bin/bash
 # Antra Portless-Parity E2E Test
 
-ANTRA_BIN="$(pwd)/target/debug/antra"
-PROJECT_DIR="$(pwd)"
+# Anchored to the repo via BASH_SOURCE, not `$(pwd)`: this suite was only
+# runnable from the repo root, and CI invokes suites by path.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
+PROJECT_DIR="$REPO_ROOT"
 TEST_DIR="/tmp/antra-e2e-$(date +%s)"
 PASSED=0
 FAILED=0
+
+# The throwaway HTTP server the tests point routes at. Tracked by PID so
+# cleanup kills only what this script started — `kill $(lsof -ti:4001)` would
+# take down whatever else holds 4001, including the developer's own server if
+# the bind below failed.
+UPSTREAM_PID=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,8 +26,19 @@ pass() { echo -e "${GREEN}✓ PASS${RESET}: $1"; PASSED=$((PASSED+1)); }
 fail() { echo -e "${RED}✗ FAIL${RESET}: $1"; FAILED=$((FAILED+1)); }
 section() { echo -e "\n${BOLD}${CYAN}═══ $1 ═══${RESET}"; }
 
+start_upstream() {
+    node -e "require('http').createServer((q,r)=>{r.end('hello')}).listen(4001,'127.0.0.1')" &
+    UPSTREAM_PID=$!
+    sleep 1
+}
+
+stop_upstream() {
+    [ -n "$UPSTREAM_PID" ] && kill "$UPSTREAM_PID" 2>/dev/null || true
+    UPSTREAM_PID=""
+}
+
 cleanup() {
-    kill $(lsof -ti:4001) 2>/dev/null || true
+    stop_upstream
     $ANTRA_BIN proxy stop 2>/dev/null || true
     rm -rf "$TEST_DIR"
 }
@@ -30,8 +50,7 @@ section "FEATURE 1: ZERO-CONFIG antra add"
 mkdir -p "$TEST_DIR/add-test"
 cd "$TEST_DIR/add-test"
 
-node -e "require('http').createServer((q,r)=>{r.end('hello')}).listen(4001,'127.0.0.1')" &
-sleep 1
+start_upstream
 
 OUTPUT=$($ANTRA_BIN add route --domain myapp.localhost --port 4001 2>&1)
 echo "$OUTPUT" | head -8
@@ -43,7 +62,7 @@ echo "$OUTPUT" | grep -q "Added route" && pass "Route added" || fail "Route adde
 LIST=$($ANTRA_BIN list 2>&1)
 echo "$LIST" | grep -q "myapp.localhost" && pass "Route in list" || fail "Route in list"
 
-kill $(lsof -ti:4001) 2>/dev/null || true
+stop_upstream
 
 # ═══════════════════════════════════════════════════════════════════════════════
 section "FEATURE 2: PACKAGE SCRIPT WRAPPING"

@@ -4,7 +4,11 @@ set -e
 # Antra NEXT Sprint Features E2E Test Script
 # Tests all newly implemented features
 
-ANTRA_BIN="./target/debug/antra"
+# Tests `cd` into scratch dirs under $TEST_DIR, so resolve both paths against
+# the repo up front: $ANTRA_BIN to reach the binary, $REPO_ROOT for the
+# source-level assertions.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANTRA_BIN="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
 TEST_DIR="/tmp/antra-next-tests"
 RESULTS_FILE="/tmp/antra-next-test-results.txt"
 
@@ -40,11 +44,12 @@ log_section() {
 
 cleanup() {
     rm -rf "$TEST_DIR"
-    rm -f "$RESULTS_FILE"
+    # $RESULTS_FILE is this run's record and the artifact the caller reads;
+    # setup() clears the previous one instead.
 }
 
 setup() {
-    cleanup
+    rm -rf "$TEST_DIR"
     mkdir -p "$TEST_DIR"
     echo "Antra NEXT Sprint E2E Test Results - $(date)" > "$RESULTS_FILE"
 }
@@ -55,6 +60,10 @@ setup() {
 
 test_prune_no_daemon() {
     log_section "Task #9: antra prune (no daemon)"
+    
+    # Enforce the precondition, rather than depending on being the first test
+    # in the file to run against a clean $HOME.
+    $ANTRA_BIN proxy stop >/dev/null 2>&1 || true
     
     output=$($ANTRA_BIN prune 2>&1 || true)
     
@@ -226,6 +235,13 @@ test_hosts_clean_help() {
 test_hosts_sync_no_daemon() {
     log_section "Task #8: antra hosts sync (no daemon)"
     
+    # Enforce the precondition this test is named for. `test_tld_domain_
+    # construction` runs earlier and its `antra run` auto-starts the daemon,
+    # so by the time we get here one is running and the "Daemon not running"
+    # branch is unreachable. Tests that need a running daemon auto-start it
+    # again on demand, so stopping here only costs a restart later.
+    $ANTRA_BIN proxy stop >/dev/null 2>&1 || true
+    
     output=$($ANTRA_BIN hosts sync 2>&1 || true)
     
     if echo "$output" | grep -q "ANTRA HOSTS SYNC"; then
@@ -337,33 +353,33 @@ test_loop_detection_code() {
     log_section "Task #11: Loop detection implementation"
     
     # Check that loop detection is implemented in http.rs
-    if grep -q "508 Loop Detected" src/proxy/http.rs; then
+    if grep -q "508 Loop Detected" "$REPO_ROOT/src/proxy/http.rs"; then
         log_pass "Loop detection returns 508 status"
     else
         log_fail "Loop detection returns 508 status"
     fi
     
-    if grep -q "x-antra-hops" src/proxy/http.rs; then
+    if grep -q "x-antra-hops" "$REPO_ROOT/src/proxy/http.rs"; then
         log_pass "Loop detection checks x-antra-hops header"
     else
         log_fail "Loop detection checks x-antra-hops header"
     fi
     
-    if grep -q "MAX_HOPS" src/proxy/http.rs; then
+    if grep -q "MAX_HOPS" "$REPO_ROOT/src/proxy/http.rs"; then
         log_pass "Loop detection has MAX_HOPS constant"
     else
         log_fail "Loop detection has MAX_HOPS constant"
     fi
     
     # Check WebSocket loop detection
-    if grep -q "LOOP_DETECTED" src/proxy/websocket.rs; then
+    if grep -q "LOOP_DETECTED" "$REPO_ROOT/src/proxy/websocket.rs"; then
         log_pass "WebSocket loop detection implemented"
     else
         log_fail "WebSocket loop detection implemented"
     fi
     
     # Check hop count increment in forward.rs
-    if grep -q "x-antra-hops" src/proxy/forward.rs; then
+    if grep -q "x-antra-hops" "$REPO_ROOT/src/proxy/forward.rs"; then
         log_pass "Hop count incremented in forward.rs"
     else
         log_fail "Hop count incremented in forward.rs"
@@ -398,7 +414,10 @@ test_run_command_options() {
     local options=("--domain" "--port" "--tld" "--allow-custom-domain" "--no-trust-prompt" "--yes" "--force")
     
     for opt in "${options[@]}"; do
-        if echo "$output" | grep -q "$opt"; then
+        # `--` ends grep's option parsing. Without it, `grep -q "--domain"`
+        # makes grep read `--domain` as its own flag and fail, so every
+        # assertion here failed no matter what the help text said.
+        if echo "$output" | grep -qF -- "$opt"; then
             log_pass "Option '$opt' available in run"
         else
             log_fail "Option '$opt' available in run"
@@ -461,7 +480,12 @@ main() {
     echo -e "${YELLOW}Building antra...${RESET}"
     cargo build --quiet 2>&1 | grep -v "^warning" || true
     echo ""
-    
+
+    # Creates $TEST_DIR and the results header. Without it the scratch dirs
+    # existed only as a side effect of the first test's `mkdir -p`, and every
+    # result was `tee -a`'d onto a file that was never created.
+    setup
+
     # Task #9: Prune tests
     test_prune_no_daemon
     test_prune_help

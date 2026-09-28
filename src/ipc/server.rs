@@ -49,13 +49,44 @@ pub fn signal_shutdown() {
     }
 }
 
+/// Longest byte length a `sockaddr_un::sun_path` can hold, excluding the NUL.
+///
+/// 104 on macOS, 108 on Linux. A bind with anything longer does not fail
+/// cleanly — `libc` rejects it, and the daemon dies with the bare message
+/// `path must be shorter than SUN_LEN`, naming neither the path nor the
+/// limit. `tests/common/mod.rs` already documents this by working around it.
+#[cfg(unix)]
+pub const SUN_PATH_MAX: usize = if cfg!(target_os = "macos") { 104 } else { 108 };
+
 /// Path to the daemon socket (Unix only)
 #[cfg(unix)]
 pub fn socket_path() -> PathBuf {
     let dir = dirs::runtime_dir()
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    dir.join("antra").join("daemon.sock")
+    let path = dir.join("antra").join("daemon.sock");
+    if fits_sun_path(&path) {
+        return path;
+    }
+    // Too long for a `sun_path`. Fall back to a short, still-per-user path:
+    // on macOS `data_local_dir()` is `$HOME/Library/Application Support`, a
+    // 50-character fixed overhead that leaves under 54 for `$HOME` itself, so
+    // any home directory longer than that — a long username, or a CI runner's
+    // `mktemp -d` — used to make the daemon unstartable with no way out.
+    // Folding the original path into a hash keeps distinct homes (and so
+    // distinct daemons) from colliding on the one short name.
+    let uid = unsafe { libc::geteuid() };
+    let hash = crate::certs::fingerprint(path.to_string_lossy().as_bytes());
+    PathBuf::from("/tmp")
+        .join(format!("antra-{uid}"))
+        .join(hash)
+        .join("d.sock")
+}
+
+/// Whether `path` is short enough to bind as a Unix socket.
+#[cfg(unix)]
+fn fits_sun_path(path: &std::path::Path) -> bool {
+    path.as_os_str().len() < SUN_PATH_MAX
 }
 
 /// Path to the daemon PID file
@@ -452,6 +483,37 @@ mod tests {
     #[test]
     fn pid_contents_parses_plain_pid() {
         assert_eq!(parse_pid_contents("12345"), Some(12345));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_always_fits_sun_path() {
+        // The whole point of the guard: whatever `dirs` resolves, the returned
+        // path must be bindable. Asserting on the real environment catches the
+        // long-`$HOME` case that motivated it, on the machine that has it.
+        let path = socket_path();
+        assert!(
+            fits_sun_path(&path),
+            "socket path is {} bytes, over the {SUN_PATH_MAX}-byte limit: {}",
+            path.as_os_str().len(),
+            path.display()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fits_sun_path_rejects_overlong_paths() {
+        // A macOS-shaped home: 33 chars of "Library/Application Support"
+        // plus "antra/daemon.sock" is 50 bytes of overhead before $HOME.
+        let long_home = format!("/Users/{}/Library/Application Support", "a".repeat(60));
+        let derived = std::path::Path::new(&long_home)
+            .join("antra")
+            .join("daemon.sock");
+        assert!(derived.as_os_str().len() > SUN_PATH_MAX);
+        assert!(!fits_sun_path(&derived));
+        assert!(fits_sun_path(std::path::Path::new(
+            "/tmp/antra/daemon.sock"
+        )));
     }
 
     #[test]
