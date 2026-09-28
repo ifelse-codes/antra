@@ -45,29 +45,54 @@ python on PATH : 57 pass / 0 fail /  9 skip   exit 0   (622s, bounded)
 macOS baseline : 49 pass / 0 fail / 11 skip   exit 0   (522s)
 ```
 
-**Reason (b) — OPEN.** The two detection suites assert on `antra dev`'s spawn
-line (`Started: <cmd>`), which is only printed after a successful spawn, so
-they need a full toolchain on the runner. And `e2e_next_sprint.sh` has a
-platform bug: its service-status assertion greps for `"not installed"`, but
-Linux prints `"installed but not running"`.
+**Reason (b) — OPEN.** The two detection suites assert on `antra dev`'s
+**spawn line** and on **registered routes**, neither of which is observable
+unless the referenced toolchain is installed on the runner.
+
+The rule, verified against the suite: **a test asserting only on *detection* is
+safe ungated** — the Node framework tests pass on a lean runner because
+`npm` is present and detection never needs the framework itself. **A test
+asserting the chosen command or a route needs a `need` gate**, because the
+spawn line is only printed after a successful spawn.
+
+Ten tests are gated (`yarn`, `bun`, `python`×4, `mix`×2, `php`×2, and the
+root-requiring `.test` case). Twenty-five are not, and these are the ones that
+fail, with the assertions observed failing on GitHub runners:
+
+| Test | asserts on detection | needs a gate |
+|---|---|---|
+| `node_pnpm` | — | `pnpm run dev` — **fails on both runners** |
+| `go_gin`/`go_echo`/`go_fiber`/`go_chi` | `Go project detected` | `go run`, `Default port 8080` |
+| `ruby_rails` | `Ruby Rails project detected` | `Rails server command used`, `Default port 3000` |
+| `ruby_sinatra` | `Ruby Sinatra project detected` | `Default port 4567` |
+| `ruby_generic` | — | `Rackup command used` |
+
+Also `e2e_next_sprint.sh:322` greps for `"not installed"`, but Linux prints
+`"installed but not running"`.
 
 Do this:
 
-1. Fix the `e2e_next_sprint.sh` service assertion to accept both phrasings,
-   or gate it on the platform.
-2. Audit the remaining spawn-line assertions in `e2e_all_features.sh` the same
-   way the `uvicorn` one was audited: an assertion that greps for a string which
-   also appears in a `Failed to spawn '<x>'` error passes while proving nothing.
-   Gate each on the binary it actually needs. Known good already: `cargo run`,
-   `go run`, `Django manage.py runserver` — that last one is genuine because
-   python exists, so antra prints the spawn line and the *child* then fails on
-   a missing `manage.py`.
-3. Add both suites to the E2E job, behind the same hermetic `HOME` and free-port
-   setup. Report the SKIP count in the job output — a green run with 9 skips is
-   a different claim from "every feature works".
-4. Once they are in CI, re-check C13 (`pnpm command inferred correctly` fails
-   on ubuntu only, unreproducible locally). If it still fails there, the
-   detector is picking a different package manager than the lockfile implies.
+1. Gate the spawn-line assertions above on the binary each one needs.
+2. Split the port assertions the way the axum and Go tests already do — assert
+   the port *choice* from a bare run, the command from a second run on a
+   probed-free port — so they stop depending on the toolchain being present.
+3. Make the `e2e_next_sprint.sh` service assertion accept both phrasings, or
+   gate it on the platform.
+4. Audit the rest of the spawn-line assertions the way the `uvicorn` one was
+   audited: an assertion that greps for a string which also appears inside a
+   `Failed to spawn '<x>'` error passes while proving nothing. Known good
+   already: `cargo run` and `Django manage.py runserver` — the latter is
+   genuine because python exists, so antra prints the spawn line and the
+   *child* then fails on a missing `manage.py`.
+5. Add both suites to the E2E job, behind the same hermetic `HOME` and
+   free-port setup. Report the SKIP count in the job output — a green run with
+   9 skips is a different claim from "every feature works".
+6. Then chase C13, which is the one failure gating will not explain: `pnpm
+   command inferred correctly` fails on **both** runners while passing on this
+   machine, which has pnpm. Reproduce it by running `test_node_pnpm` with pnpm
+   removed from PATH. If it passes without pnpm, it is a gating problem after
+   all; if it still fails, the detector is picking a different package manager
+   than the lockfile implies.
 
 ## Phase B — The manual browser pass
 
