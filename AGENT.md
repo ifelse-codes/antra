@@ -382,6 +382,7 @@ tokio::spawn(async move {
 ```
 antra/
 ├── AGENT.md              ← YOU ARE HERE
+├── NEXT-SESSION.md       ← Current scheduled work — execute on "start next session"
 ├── README.md             ← User docs (install, commands, env vars, security)
 ├── ROADMAP.md            ← Feature status (done / now / next / later)
 ├── Cargo.toml            ← Dependencies
@@ -422,6 +423,7 @@ tests/
 
 | File | When to Read |
 |------|-------------|
+| `NEXT-SESSION.md` | The current scheduled work — execute it when told to "start next session" |
 | `README.md` | User-facing: install, commands, env vars, security policy |
 | `ROADMAP.md` | What is done / approved next / future — status column is current |
 | `docs/architecture.md` | When implementing modules — data types, flows |
