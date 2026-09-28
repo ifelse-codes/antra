@@ -72,7 +72,11 @@ jobs:
   e2e-shell:
     name: E2E Shell Suites (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # These suites spawn the real binary hundreds of times (each language/
+    # framework detection test is a full `antra dev` invocation). On a 2-core
+    # CI runner that is far slower than a local arm64 box, and the first run
+    # also pays a cold `cargo build`. 25 min was not enough; 45 gives headroom.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
