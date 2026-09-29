@@ -78,6 +78,27 @@ unit to `~/.config/antra/systemd/user/`, which is not a path `systemctl --user`
 searches, and then runs `systemctl --user enable` with no `daemon-reload` or
 `--user link`. Install is likely broken on Linux for that reason. ROADMAP C14.
 
+**Release mechanics, all verified after the fact:**
+- Tag `v0.6.1` → the release workflow built all five targets; the draft was
+  published with real release notes. <https://github.com/ifelse-codes/antra/releases/tag/v0.6.1>
+- The two binaries that could be checked were downloaded from the **public**
+  release URL and re-hashed: `antra-aarch64-apple-darwin` (`48d18897…`) runs
+  and reports `antra 0.6.1`; `antra-x86_64-linux` (`d943d92d…`) is a real ELF
+  x86-64 executable. Formula sha256s come from the release's own `.sha256`
+  assets rather than a local hash, so a typo cannot creep in.
+- One download arrived 8.3 MB against an expected 10.3 MB — a truncated
+  transfer — and appeared to mismatch its checksum. The checksum was right and
+  the download was not. **Check size alongside hash.**
+- `releases/latest` now redirects to `v0.6.1`, so a fresh
+  `curl -fsSL https://antra.iifelse.com/install.sh | bash` installs v0.6.1 with
+  no code change; only the copy-pasteable examples were updated.
+- Landing redeployed as a **production** deployment (`b6482eed`), from
+  `landing/` and with an explicit `--branch main`. Verified against the live
+  domain rather than the deployment URL: `/install.sh` and the index both read
+  v0.6.1, `/install.sh` still returns `Content-Type: text/plain`, unknown paths
+  return 404, and CSP/HSTS/`X-Frame-Options`/`nosniff`/`Referrer-Policy`/
+  `Permissions-Policy` are all still present.
+
 ---
 
 ## Session Handoff — 2026-09-27 (afternoon)
@@ -163,7 +184,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 - **Project name:** `antra-landing`
 - **Design language:** Mudra (dark, surgical, violet accent)
 - **To update:** run `wrangler pages deploy . --project-name antra-landing` **from `landing/`** — from the repo root it would publish the whole tree, source and `target/` included
-- **Last deployed:** 2026-09-27, deployment `a6908b4f` (v0.6.0 assets). Verified after the fact against the live domain: `/install.sh` returns `Content-Type: text/plain` and serves the v0.6.0 pin, the index pin example reads v0.6.0, unknown paths return 404, and the security headers are present
+- **Last deployed:** 2026-09-29, deployment `b6482eed` (v0.6.1 assets). Verified after the fact against the live domain: `/install.sh` returns `Content-Type: text/plain` and serves the v0.6.1 pin, the index pin example reads v0.6.1, unknown paths return 404, and the security headers are present
 
 ---
 
