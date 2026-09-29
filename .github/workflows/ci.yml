@@ -71,23 +71,30 @@ jobs:
 
   e2e-shell:
     name: E2E Shell Suites (${{ matrix.os }})
-    # Scope note: the two language/framework-detection suites
-    # (e2e_all_features.sh, e2e_next_sprint.sh) are intentionally NOT run here
-    # yet. They assert on `antra dev`'s spawn line ("Started: <cmd>"), so they
-    # only pass where pnpm/go/rails/sinatra/rackup are installed, and they were
-    # only ever validated on a full dev toolchain. On a lean CI runner they fail
-    # for reasons unrelated to this wiring, and e2e_next_sprint.sh additionally
-    # has a platform bug (service status greps for "not installed", but Linux
-    # prints "installed but not running"). They will be added once made
-    # hermetic (need-gates on the toolchain they execute + a platform-aware
-    # service assertion). Until then this job covers the two suites that
-    # genuinely exercise the real binary end to end, including the HTTPS proxy
-    # path.
+    # All four suites now run here.
+    #
+    # The two language/framework-detection suites (e2e_all_features.sh,
+    # e2e_next_sprint.sh) were previously held out: they assert on `antra dev`'s
+    # spawn line ("Started: <cmd>"), which is printed only after a successful
+    # spawn, so a lean runner without pnpm/go/rails/rackup failed them for
+    # reasons that had nothing to do with the wiring. Each of those assertions
+    # is now gated on the tool it actually needs and reports SKIP when absent,
+    # and the port assertions read the *chosen* port instead of a registered
+    # route, exactly as the axum and Go tests already did.
+    #
+    # Verified on a stripped PATH (node/npm/python3/cargo only) before this
+    # change: e2e_all_features 45 pass / 0 fail / 15 skip, e2e_next_sprint
+    # 55 pass / 0 fail. A green run here means no assertion failed; the SKIP
+    # count is reported in the output so a green run never implies more than it
+    # checked.
     runs-on: ${{ matrix.os }}
-    # parity + simple spawn the real binary and the real proxy, so they are
-    # slower than a unit test but finish in a few minutes. 30 min leaves room
-    # for a cold `cargo build` on a 2-core runner.
-    timeout-minutes: 30
+    # All four suites spawn the real binary, the real proxy and real child
+    # processes, so this is minutes-per-suite rather than seconds. Measured
+    # locally on a full toolchain: e2e_all_features ~9 min (many capped waits),
+    # e2e_next_sprint ~2 min, parity ~2 min, simple ~1 min. On a 2-core runner
+    # a cold `cargo build` adds several more. 45 leaves headroom; the earlier
+    # 30 was calibrated for two suites and would be marginal with four.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -149,7 +156,8 @@ jobs:
           # A plain "name=rc name=rc" string, not an associative array: the
           # macOS runner's /bin/bash is 3.2 and has no `declare -A`.
           results=""
-          for f in tests/e2e_portless_parity.sh tests/e2e_portless_simple.sh; do
+          for f in tests/e2e_all_features.sh tests/e2e_next_sprint.sh \
+                   tests/e2e_portless_parity.sh tests/e2e_portless_simple.sh; do
             name="$(basename "$f" .sh)"
             echo "::group::$name"
             set +e
