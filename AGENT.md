@@ -39,6 +39,47 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
+## Release — v0.6.1 (2026-09-29)
+
+**Two user-facing fixes and one behaviour change.** Both fixes are bugs a user
+could hit without doing anything unusual.
+
+- **The daemon could refuse to start on a long `$HOME`.** `socket_path()`
+  built its Unix socket path from `dirs::data_local_dir()`, which on macOS is
+  `$HOME/Library/Application Support` — 50 bytes of fixed overhead against a
+  104-byte `sun_path`. Any home directory longer than ~54 characters (a long
+  username, a CI runner's `mktemp -d`) produced a path that could not be bound,
+  and the failure was the bare `Error: path must be shorter than SUN_LEN`,
+  naming neither the path nor the limit. It now falls back to
+  `/tmp/antra-<uid>/<fnv1a-of-home>/d.sock`. ROADMAP C7.
+- **The IPC socket was briefly reachable by any other local user.** It was
+  `bind`-ed and only *then* tightened to `0o600`, so between the two it sat at
+  the process umask. `platform::ensure_private_dir` now creates the parent
+  chain `0o700` before the bind, and chowns each component to the invoking user
+  so `sudo antra proxy start` still leaves the CLI able to reach its own
+  daemon. ROADMAP C10.
+- **`antra service status` told Linux users to start a service that was never
+  installed.** It inferred installed-versus-not from a single
+  `systemctl --user is-active` code, which reports `inactive` both for a unit
+  that is stopped and for one that does not exist. The result was
+  `Run: systemctl --user start antra-proxy` on a machine with no service. The
+  unit file's presence now decides "installed".
+
+**Behaviour change:**
+
+- **`antra dev` honours a port pinned in your dev script.** A project whose
+  `package.json` says `{"dev": "vite --port 3001"}` was registered on Vite's
+  default 5173, so the URL pointed at a port nothing listened on. Precedence is
+  now: explicit `--port` > a port pinned in the dev script > the framework
+  default > auto-assign. ROADMAP C9.
+
+**Known issue, not fixed here:** `antra service install` writes the systemd
+unit to `~/.config/antra/systemd/user/`, which is not a path `systemctl --user`
+searches, and then runs `systemctl --user enable` with no `daemon-reload` or
+`--user link`. Install is likely broken on Linux for that reason. ROADMAP C14.
+
+---
+
 ## Session Handoff — 2026-09-27 (afternoon)
 
 **`v0.6.0` is published** (tag `v0.6.0`, PRs #14–#16, formula updated from the release's own sha256s, landing redeployed as a *production* deployment). ROADMAP #32 (`antra logs`) and #33 (shared upstream client) are done, along with the two resolver fixes (wrong-subcommand sudo hint, underscore domains) and the landing security headers + real 404. The working tree is clean. The v0.5.0 CA work it builds on is documented in `docs/security.md` (CA versioning and rotation).
@@ -113,7 +154,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.0` is published, including the CA rewrite that makes HTTPS work on Apple's TLS stack (v0.5.0) and, in v0.6.0, `antra logs`, the pooled upstream client, and the landing security headers. Since then, in one session: ROADMAP C4-C6 were verified shipped and marked DONE; C7 fixed a real bug (`ipc::server::socket_path` could exceed the 104-byte `sun_path` limit on any macOS home over ~54 chars, making the daemon unstartable — it now falls back to a short per-uid path); C8 wired two of the four shell e2e suites into CI; C9 made `antra dev` honour a port pinned in a `package.json` dev script; C10 made the IPC socket unreachable by other local users for its whole life rather than only after a post-bind `chmod`; C11 namespaced both test harnesses per worktree after discovering that two concurrent `cargo test` runs can cross the CA certificate and key and produce a fake certificate bug. The four shell suites went from 86 passing / 128 failing assertions to 195 / 0 / 11 skipped, and `e2e_all_features.sh` was then made Linux-safe — 37 uncapped `antra dev` calls, one of which hung the suite for 45 minutes on a runner where `python` is present. Still open: adding the two detection suites to CI (C12), a Linux-only `pnpm` inference failure (C13), and the formal browser checklist (Safari, Firefox).
+**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C13 are done or filed; the exceptions are C13 (a `pnpm` inference difference on GitHub runners, now gated so it cannot fail the job) and C14 (`antra service install` likely broken on Linux — the unit is written outside systemd's search path, so this needs verifying on a real Linux box). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 
