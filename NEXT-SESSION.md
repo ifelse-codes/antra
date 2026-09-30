@@ -138,27 +138,37 @@ are the most expensive lessons in this codebase:
 
 ## Releasing
 
-Tag `v*` triggers `.github/workflows/release.yml`, which cross-compiles five
-targets and creates a **draft** release. The draft is not published
-automatically. Then:
+Every step runs on GitHub; none needs a local machine. The workflows are
+started from the **Actions** tab (*Run workflow*), or by an agent through the
+GitHub API.
 
-1. Publish it with real release notes (`gh release edit <tag> --draft=false
-   --title ... --notes-file ...`).
-2. Read each `sha256` from the release's own `.sha256` assets — do not hash
-   locally, so a typo cannot creep into the formula.
-3. Update `Formula/antra.rb` with the new version and those hashes, **and copy
+1. Bump the version (`Cargo.toml`, `Cargo.lock`, `README.md` badge + status
+   line) and write `docs/releases/v<version>.md`. Merge.
+2. Push the tag `v<version>` on `main`. `release.yml` cross-compiles five
+   targets into a **draft** release. A cloud agent session cannot push tags
+   (its git proxy answers 403), so a person pushes this one.
+3. Publish the draft. Then run **Release Notes** with the tag: it replaces
+   GitHub's generated PR list with `docs/releases/<tag>.md` and reads it back.
+4. Read each `sha256` from the release's own `.sha256` assets — do not hash
+   locally, so a typo cannot creep into the formula. Check size alongside
+   hash: a truncated transfer looks exactly like a corrupted release, and one
+   did during v0.6.1.
+5. Update `Formula/antra.rb` with the new version and those hashes, **and copy
    the same file to the tap repo, `ifelse-codes/homebrew-antra`**. That repo is
    what `brew install ifelse-codes/antra/antra` reads; the file in this repo is
    not. The tap sat on 0.2.3 from v0.3.0 through v0.6.1 because only this copy
    was updated, so Homebrew users got a build without the v0.5.0 CA fix.
-4. If `install.sh` or `landing/` changed, redeploy the landing site **as a
-   production deployment**: from `landing/`, with an explicit `--branch main`.
-   `wrangler pages deploy .` infers the branch from git, and from a feature
-   branch it creates a *branch* deployment that silently leaves production on
-   the old assets.
-5. Verify against the **live domain**, not the deployment URL.
-6. Check size alongside hash when verifying a download. A truncated transfer
-   looks exactly like a corrupted release, and one did during v0.6.1.
+   Update the pin examples in `install.sh`, `landing/install.sh` and
+   `landing/index.html` in the same PR.
+6. Merging a change under `landing/` runs **Deploy Landing**, which deploys a
+   *production* deployment and then checks the live domain serves that commit
+   (`.github/scripts/check-landing.sh`). It replaces the manual
+   `wrangler pages deploy`, which from a feature branch created a *branch*
+   deployment and silently left production on the old files. It needs the
+   repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+7. Run **Release Check** with the version: Homebrew and the `curl` installer
+   (latest and pinned) on macOS and Linux runners, plus the live site. It is
+   the only Homebrew check that needs no Mac at hand.
 
 ## Delivery
 
