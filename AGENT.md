@@ -39,7 +39,10 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
-## Unreleased — on `main` after v0.6.2
+## Release — v0.6.3 (2026-09-30)
+
+**One macOS fix, no behaviour change on Linux or Windows.**
+
 
 **`antra service install` keeps one supervised daemon on macOS (ROADMAP
 C16).** Confirmed on a GitHub `macos-latest` runner before fixing: launchd ran
@@ -144,7 +147,7 @@ machines, which have IPv6, still guard it; five mutations were each caught.
 **Do not redo blindly:**
 - **Any service manager that runs `antra proxy start` needs `ANTRA_DAEMON=1`.**
   Without it the managed process is a launcher that exits in ~100 ms. The
-  launchd plist had the same shape (ROADMAP C16, fixed after v0.6.2).
+  launchd plist had the same shape (ROADMAP C16, fixed in v0.6.3).
 - **Running `systemd --user` in a container that was not booted with systemd.**
   `systemd --user` exits 1 silently; `strace` shows it checking
   `/run/systemd/system/`. This is enough to get a real user manager:
@@ -313,7 +316,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.2` is published and verified on macOS and Linux runners, Homebrew included. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. C16 (the launchd plist relaunching `proxy start` every 10 s) is fixed on `main` after v0.6.2, verified on a macOS runner, and not yet released. The formal browser checklist (Safari, Firefox) is the one item still needing a human.
+**Current state:** Phases (0-10) are implemented and `v0.6.2` is published and verified on macOS and Linux runners, Homebrew included. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. C16 (the launchd plist relaunching `proxy start` every 10 s) is fixed in v0.6.3, verified on a macOS runner. The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 
