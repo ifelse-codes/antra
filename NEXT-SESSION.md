@@ -3,9 +3,20 @@
 > Written to be read cold, by any tool. It does not assume you were present for
 > the previous conversation.
 >
-> **Direction: `v0.6.3` is released and verified on real macOS and Linux
-> machines, Homebrew included. No new features.** Work should be GTM, plus
-> the items in "Still owed" below.
+>
+> **Direction (maintainer, 2026-09-30): make Antra "good to market", then
+> release once, then GTM.** `v0.6.3` is released; C17 is on `main`,
+> unreleased. The maintainer's calls, not to be re-litigated:
+> - **No release** until the launch-readiness fixes below are in; C17 rides
+>   along with them.
+> - **No GitHub Actions upgrade** for now (the Node 20 deprecation warnings
+>   on `actions/checkout@v4` etc.) — revisit only if a workflow breaks.
+> - **GTM starts only** once everything on the plate is done.
+> - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
+>   launch, and only on customer demand.
+>
+> **Start with "Still owed" — two decisions there are waiting on the
+> maintainer.**
 
 Repo: `main` is the default branch; work in a feature branch.
 
@@ -86,9 +97,26 @@ now passes in it with the real binary.
 
 Ordered by how many users they affect, not by how interesting they are.
 
+**The goal is launch readiness:** a stranger installs Antra, runs an app and
+gets a real HTTPS page with no browser warning, on macOS, Linux and Windows.
+A 15-minute probe on 2026-09-30 in the (Linux) cloud container found three
+real problems, each reproduced there:
+
 | Item | Blast radius | What it takes |
 |---|---|---|
-| **Release v0.6.4** — ship C17 | Flask users, and anyone who hits a busy port | The busy-port advice and the Flask `--port` fix are on `main` and do nothing until released. Follow **Releasing** below. |
+| **Linux: Chrome warns after `antra trust`** | Every Linux user of Chrome, and very likely Firefox — the product's headline promise | `antra trust` installs the CA into the system store (`/usr/local/share/ca-certificates`), which `curl` uses but Chrome on Linux does not: Chrome reads its own NSS store, `~/.pki/nssdb`. Reproduced with Playwright's Chromium: `net::ERR_CERT_AUTHORITY_INVALID`; after `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "Antra Local CA" -i ca.pem`, the same page loads (200). Firefox keeps a per-profile NSS store and is untested. The fix is what mkcert does — also add the CA to the NSS stores via `certutil` (`libnss3-tools`), always behind the consent prompt — and `trust --remove` must undo it. **Needs the maintainer's OK**: Phase 6's exclusions say "No Firefox NSS store modification". |
+| **`antra trust --remove --yes` ignores `--yes`** | Anyone uninstalling by script | It prints "Remove CA from system trust store? [y/N]", reads no answer without a TTY, and ends "Skipped. CA remains trusted." Install honours `--yes`; remove does not. |
+| **The installer prints raw `\033[…m`** | Every new user, on first contact | `install.sh` defines its colours as `'\033[1m'` literals and prints 10 lines with plain `echo` (lines ~221–337: "Trusting the CA", "Quick start", "NEXT STEPS"…), which does not interpret them. First reported in `tests/user-test-2026-09-07-1430.md`, never fixed. Keep `landing/install.sh` identical; merging deploys it. |
+| **A1 — automated browser check** (proposed, not started) | Proves or disproves the headline promise per browser/OS | A workflow on GitHub's macOS and Linux runners: `antra trust`, then Chrome, Firefox and (macOS) Safari load an Antra URL with no certificate error; a Vite HMR edit reaches the page; Ctrl+C removes the route with no orphans. Covers `docs/mvp.md`'s definition of done without a person. **Waiting on the maintainer's OK.** |
+| **A2 — fresh "stranger" test of the current release** (proposed, not started) | Finds what the probe did not | The last one was `tests/user-test-2026-09-07-1430.md`, on v0.2.8. Same format: website → install → first run → core usage → error paths. **Waiting on the maintainer's OK.** |
+| **Then: one release** | — | Carries the fixes above plus C17. Follow **Releasing** below. Then GTM. |
+
+To reproduce the Chrome finding in the cloud container: Chromium is at
+`/opt/pw-browsers`, Playwright is global (`NODE_PATH=/opt/node22/lib/node_modules
+node script.js`), and `apt-get install -y libnss3-tools` provides `certutil`.
+Undo `antra trust` by hand afterwards if `--remove --yes` is still broken
+(`rm /usr/local/share/ca-certificates/Antra-Local-CA-*.crt &&
+update-ca-certificates --fresh`).
 
 **Deliberately not planned** (maintainer's call, 2026-09-30): the manual
 Safari + Firefox pass on `docs/mvp.md`. It stays low value while the TLS half
