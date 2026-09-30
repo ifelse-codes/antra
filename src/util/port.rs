@@ -383,6 +383,8 @@ pub fn port_holder(_port: u16) -> Option<PortHolder> {
 
 /// Parse `lsof -F pc` output: a `p<pid>` line, then `c<command>` (and
 /// other field lines) for each process. Takes the first complete pair.
+/// Unused on Windows, which has no `lsof`; tested everywhere.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn parse_lsof_holder(out: &str) -> Option<PortHolder> {
     let mut pid = None;
     for line in out.lines() {
