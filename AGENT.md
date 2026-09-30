@@ -66,6 +66,20 @@ uninstall delete them and status mentions them.
 on the same box. Five new unit tests in `cli/service.rs`; each was mutated to
 confirm it goes red.
 
+**The daemon starts on a host without IPv6 (ROADMAP C15).** Every listener
+bound `::1` beside `127.0.0.1` and treated *any* failure as "port in use", so
+on a kernel with no IPv6 (`EAFNOSUPPORT`) or no `::1` (`EADDRNOTAVAIL`) the
+daemon refused to start with `Both 443 and 8443 are in use` on free ports, and
+`is_port_available` called every port taken. `util::port::loopback_binds` now
+makes the one decision for the sync check and the three async listeners
+(`proxy::https::bind_loopback`): `::1` is dropped only for those two errors,
+and a taken or forbidden `::1` is still an error, so the reason for binding it
+— nothing else may answer `localhost` on IPv6 — is kept wherever IPv6 exists.
+Verified in the IPv6-less cloud container with the real binary: the daemon
+serves HTTPS and the redirect, the whole Rust suite goes from 7 failures to
+0, and the 28 service checks pass. Five hermetic tests pin the decision so CI
+machines, which have IPv6, still guard it; five mutations were each caught.
+
 **Do not redo blindly:**
 - **Any service manager that runs `antra proxy start` needs `ANTRA_DAEMON=1`.**
   Without it the managed process is a launcher that exits in ~100 ms. The
@@ -82,14 +96,15 @@ confirm it goes red.
   ```
   `systemd-analyze --user unit-paths` prints the search path without a manager.
 - **The claude.ai cloud container has no IPv6** (`socket(AF_INET6)` →
-  `EAFNOSUPPORT`), and the daemon binds `::1` unconditionally, so it cannot
-  start there and blames *port in use* (ROADMAP C15). Seven Rust tests fail
-  there for that reason alone (`util::port` ×2 in each of lib and bin,
-  `util_port` ×1, `upstream_pool` ×2) and pass once `::1` is skipped. To
-  exercise the daemon in such a box, build a throwaway binary with `"::1"`
-  dropped from the loops in `proxy/https.rs` and the `::1` check in
-  `util/port.rs`, copy it out of `target/`, and `git checkout` both files. Do
-  not commit that as a fix; C15 needs the error kinds told apart.
+  `EAFNOSUPPORT`). Since C15 that no longer matters: the full Rust suite and
+  the shell suites pass there with the real binary. It is also the one place
+  that exercises the IPv4-only path for real, so run the suites there after
+  touching `loopback_binds`. **Never "fix" a bind failure by dropping `::1`
+  outright** — on a dual-stack Mac that reopens the hole `::1` closes.
+- **The cloud container can restart between turns** and takes the user
+  manager with it: `systemctl --user` then says *Connection refused*. Re-run
+  the recipe above; `tests/manual_service_linux.sh` refuses to run without a
+  manager rather than printing 14 failures that read like product bugs.
 - **The service and the CLI find each other through `$XDG_RUNTIME_DIR`.**
   `socket_path()` prefers it, and the user manager always sets it. A shell
   without it (`su` without `-l`, some cron or container shells) looks under
@@ -238,7 +253,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C14 are done; C14 (`antra service install` on Linux) is fixed on `main` and not yet released, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C15 (the daemon cannot start on a host without IPv6) and C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
+**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) are fixed on `main` and not yet released, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 
