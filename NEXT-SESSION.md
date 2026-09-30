@@ -88,8 +88,12 @@ Ordered by how many users they affect, not by how interesting they are.
 
 | Item | Blast radius | What it takes |
 |---|---|---|
-| **Browser pass** — Safari + Firefox, never manually tested | Every user, on the one thing they judge you by | `docs/mvp.md` wants a human run. The TLS half is machine-checked in CI — `tests/e2e_securetransport.rs` asks Apple's own stack via `/usr/bin/curl` — but nobody has put the URL in a browser. **Highest value per minute of anyone's time.** |
-| **Port 5000 message** | Flask users on macOS | A first `antra dev` on a Flask app says "Stop the process on port 5000" — it is macOS Control Center's AirPlay Receiver, which they cannot stop — and suggests `antra alias`, the wrong tool. The advice is wrong, not the behaviour, and it cannot be auto-fixed: Antra is right to refuse to silently remap, since the app would bind 5000 while the route pointed elsewhere. Name the actual holder, drop the `alias` suggestion. |
+| **Release v0.6.4** — ship C17 | Flask users, and anyone who hits a busy port | The busy-port advice and the Flask `--port` fix are on `main` and do nothing until released. Follow **Releasing** below. |
+
+**Deliberately not planned** (maintainer's call, 2026-09-30): the manual
+Safari + Firefox pass on `docs/mvp.md`. It stays low value while the TLS half
+is machine-checked in CI (`tests/e2e_securetransport.rs` asks Apple's own
+stack via `/usr/bin/curl`). Do not re-add it to "Still owed" unprompted.
 
 ## Two things that will bite whoever touches the tests
 
