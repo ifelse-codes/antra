@@ -827,9 +827,22 @@ EOF
 # name AirPlay instead. No python needed: antra refuses before spawning.
 test_flask_airplay_advice() {
     log_section "Flask on a Mac's port 5000 (AirPlay Receiver)"
+    local stand_in=""
     if ! lsof -nP -iTCP:5000 -sTCP:LISTEN 2>/dev/null | grep -q '^ControlCe'; then
-        log_skip "AirPlay advice — port 5000 is not held by Control Center here"
-        return 0
+        # GitHub's macOS runners have AirPlay Receiver off, so nothing holds
+        # 5000 there. Stand in for it: a copy of nc named ControlCenter — the
+        # name lsof reports for the real thing — listening on 5000. That
+        # exercises the whole macOS path (lsof, the macOS branch, run.rs);
+        # only the real Control Center's name is taken on trust. macOS only:
+        # elsewhere the advice is rightly the generic one.
+        if [ "$(uname -s)" != Darwin ] || lsof -nP -iTCP:5000 -sTCP:LISTEN >/dev/null 2>&1; then
+            log_skip "AirPlay advice — needs macOS, with 5000 free or held by Control Center"
+            return 0
+        fi
+        cp /usr/bin/nc "$TEST_DIR/ControlCenter"
+        "$TEST_DIR/ControlCenter" -lk 5000 >/dev/null 2>&1 &
+        stand_in=$!
+        sleep 1
     fi
     local dir="$TEST_DIR/flask-airplay"
     mkdir -p "$dir"
@@ -853,6 +866,7 @@ EOF
     else
         log_fail "AirPlay is not offered to antra alias"
     fi
+    if [ -n "$stand_in" ]; then kill "$stand_in" 2>/dev/null || true; fi
 }
 
 test_python_flask() {
