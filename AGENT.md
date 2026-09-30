@@ -39,6 +39,35 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
+## Unreleased — on `main` after v0.6.2
+
+**`antra service install` keeps one supervised daemon on macOS (ROADMAP
+C16).** Confirmed on a GitHub `macos-latest` runner before fixing: launchd ran
+the job 7 times in 60 s and supervised no pid, because the plist ran `antra
+proxy start` without `ANTRA_DAEMON=1` — C14's bug in launchd form. The plist
+now sets it; install also unloads a loaded job, refuses to load beside a
+daemon already running outside the service, and waits for the socket before
+saying *started*. **Service (macOS)** checks it on a real Mac on every change
+to `service.rs`: 17/0, including an upgrade over a v0.6.2 plist.
+
+**Do not redo blindly:**
+- **A GitHub `macos-latest` runner is a real Mac for launchd.** Its shell is in
+  the `Aqua` session (`launchctl managername`), so `launchctl load` of a
+  LaunchAgent works and `launchctl print gui/$(id -u)/<label>` reports `runs`,
+  `state` and `pid`. `runs` counts starts since the job was loaded; `pid`
+  missing while `state` is `not running` between relaunches is the C16
+  signature.
+- **launchd stops only the job's own process group on unload.** A daemon
+  forked into its own group (what `proxy start` does without
+  `ANTRA_DAEMON=1`) outlives `launchctl unload` — which is why upgrading over
+  a v0.6.2 job must hand over rather than load beside it.
+- **The macOS install code does not compile on Linux**, and cross-checking
+  for `x86_64-apple-darwin` fails in `ring`'s build script. To type-check it
+  here, replace its `#[cfg(target_os = "macos")]` with `#[allow(dead_code)]`,
+  run clippy, and restore the file; it depends on nothing macOS-only.
+
+---
+
 ## Release — v0.6.2 (2026-09-30)
 
 **Two Linux fixes, no behaviour change.** C14 makes `antra service install`
@@ -115,8 +144,7 @@ machines, which have IPv6, still guard it; five mutations were each caught.
 **Do not redo blindly:**
 - **Any service manager that runs `antra proxy start` needs `ANTRA_DAEMON=1`.**
   Without it the managed process is a launcher that exits in ~100 ms. The
-  launchd plist has the same shape and is filed as ROADMAP C16 — unverified,
-  since it needs a Mac.
+  launchd plist had the same shape (ROADMAP C16, fixed after v0.6.2).
 - **Running `systemd --user` in a container that was not booted with systemd.**
   `systemd --user` exits 1 silently; `strace` shows it checking
   `/run/systemd/system/`. This is enough to get a real user manager:
@@ -285,7 +313,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.2` is published and verified on macOS and Linux runners, Homebrew included. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
+**Current state:** Phases (0-10) are implemented and `v0.6.2` is published and verified on macOS and Linux runners, Homebrew included. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. C16 (the launchd plist relaunching `proxy start` every 10 s) is fixed on `main` after v0.6.2, verified on a macOS runner, and not yet released. The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 

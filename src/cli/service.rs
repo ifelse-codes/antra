@@ -133,6 +133,7 @@ fn install_launchd() -> Result<()> {
         dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     let launch_agents_dir = home_dir.join("Library/LaunchAgents");
     let plist_path = launch_agents_dir.join("com.antra.proxy.plist");
+    let plist_arg = plist_path.to_string_lossy().to_string();
     let antra_path = std::env::current_exe()?;
 
     // Create LaunchAgents directory if it doesn't exist
@@ -147,7 +148,107 @@ fn install_launchd() -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let plist_content = format!(
+    std::fs::write(
+        &plist_path,
+        launchd_plist(&antra_path, &log_path, &port_overrides()),
+    )?;
+    println!(
+        "  {} Created launchd plist: {}",
+        "✓".green().bold(),
+        plist_path.display()
+    );
+
+    // A loaded job keeps its old definition until it is reloaded. Unloading
+    // stops a current job's daemon with it. A job written by v0.6.2 or
+    // earlier forked its daemon into its own process group, which launchd
+    // leaves running — the check below catches that one.
+    let was_loaded = std::process::Command::new("launchctl")
+        .args(["list", "com.antra.proxy"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if was_loaded {
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", &plist_arg])
+            .output();
+    }
+
+    if daemon_running_outside_service() {
+        // Loading now would start a second daemon on the same socket and
+        // ports; it would exit, and KeepAlive would relaunch it every ten
+        // seconds until the first one idled out. Stopping the running one
+        // would drop the routes of every `antra run` using it. Leave it, and
+        // say how to hand over.
+        println!(
+            "  {} {}",
+            "⚠".yellow().bold(),
+            "A daemon is already running outside the service, so the service was not loaded now."
+                .yellow()
+        );
+        println!("    It will start at your next login. To hand over now:");
+        println!("    antra proxy stop && launchctl load -w {plist_arg}");
+        println!();
+        return Ok(());
+    }
+
+    let output = std::process::Command::new("launchctl")
+        .args(["load", "-w", &plist_arg])
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        println!(
+            "  {} Failed to load service: {}",
+            "✗".red().bold(),
+            stderr.trim()
+        );
+        println!();
+        return Ok(());
+    }
+    if !daemon_comes_up() {
+        println!(
+            "  {} Service loaded but the daemon did not come up",
+            "✗".red().bold()
+        );
+        println!("    Check: antra logs");
+        println!();
+        return Ok(());
+    }
+    println!("  {} Service loaded and started", "✓".green().bold());
+    println!();
+    println!(
+        "  {}",
+        "Antra proxy will start automatically on login".dimmed()
+    );
+    println!("  {}", "URLs will survive reboots".dimmed());
+    println!();
+    Ok(())
+}
+
+/// The launchd plist `antra service install` writes.
+///
+/// `ANTRA_DAEMON=1` runs the daemon in the foreground as the job's own
+/// process, exactly as the CLI's auto-start does. Without it, `antra proxy
+/// start` forks the daemon into its own process group and exits; KeepAlive
+/// then relaunched `proxy start` every ten seconds, each run finding the
+/// daemon already up, printing so into the log, and exiting — while launchd
+/// supervised nothing (ROADMAP C16; seen on a macOS runner: 7 runs in 60 s,
+/// no pid). The Linux unit has the same line for the same reason (C14).
+///
+/// Not `#[cfg(target_os = "macos")]`, for the reason given on
+/// `LinuxServiceState`: pure string logic should be tested everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn launchd_plist(exe: &std::path::Path, log: &std::path::Path, env: &[(&str, String)]) -> String {
+    let exe = xml_escape(&exe.display().to_string());
+    let log = xml_escape(&log.display().to_string());
+    let mut environment =
+        String::from("        <key>ANTRA_DAEMON</key>\n        <string>1</string>\n");
+    for (key, value) in env {
+        environment.push_str(&format!(
+            "        <key>{key}</key>\n        <string>{}</string>\n",
+            xml_escape(value)
+        ));
+    }
+    format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -157,10 +258,14 @@ fn install_launchd() -> Result<()> {
 
     <key>ProgramArguments</key>
     <array>
-        <string>{}</string>
+        <string>{exe}</string>
         <string>proxy</string>
         <string>start</string>
     </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+{environment}    </dict>
 
     <key>RunAtLoad</key>
     <true/>
@@ -169,49 +274,23 @@ fn install_launchd() -> Result<()> {
     <true/>
 
     <key>StandardOutPath</key>
-    <string>{}</string>
+    <string>{log}</string>
 
     <key>StandardErrorPath</key>
-    <string>{}</string>
+    <string>{log}</string>
 </dict>
-</plist>"#,
-        antra_path.display(),
-        log_path.display(),
-        log_path.display()
-    );
+</plist>
+"#
+    )
+}
 
-    std::fs::write(&plist_path, &plist_content)?;
-
-    println!(
-        "  {} Created launchd plist: {}",
-        "✓".green().bold(),
-        plist_path.display()
-    );
-
-    // Load the service
-    let output = std::process::Command::new("launchctl")
-        .args(["load", "-w", &plist_path.to_string_lossy()])
-        .output()?;
-
-    if output.status.success() {
-        println!("  {} Service loaded and enabled", "✓".green().bold());
-        println!();
-        println!(
-            "  {}",
-            "Antra proxy will start automatically on login".dimmed()
-        );
-        println!("  {}", "URLs will survive reboots".dimmed());
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        println!(
-            "  {} Failed to load service: {}",
-            "✗".red().bold(),
-            stderr.trim()
-        );
-    }
-
-    println!();
-    Ok(())
+/// Escape text for a plist `<string>`. A path containing `&` or `<` would
+/// otherwise make the whole plist unparseable.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(target_os = "linux")]
@@ -227,15 +306,7 @@ fn install_systemd() -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Carry the documented port overrides into the unit, so the service binds
-    // what the installing user's CLI would. The user manager does not inherit
-    // this shell's environment. Only real port numbers: the value lands on an
-    // `Environment=` line, where whitespace or a newline would corrupt it.
-    let env: Vec<(&str, String)> = ["ANTRA_PORT", "ANTRA_HTTP_PORT"]
-        .into_iter()
-        .filter_map(|k| std::env::var(k).ok().map(|v| (k, v)))
-        .filter(|(_, v)| v.parse::<u16>().is_ok())
-        .collect();
+    let env = port_overrides();
 
     // A re-install that fails must leave the working unit it found, not
     // delete it.
@@ -317,14 +388,7 @@ fn install_systemd() -> Result<()> {
             println!();
             return Ok(());
         }
-        // `Type=simple` reports success the moment the process is forked,
-        // so a daemon that dies on a port conflict would still read as
-        // started. Wait for the IPC socket, as `ensure_daemon` does.
-        let started = (0..30).any(|_| {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            crate::ipc::client::is_daemon_running()
-        });
-        if !started {
+        if !daemon_comes_up() {
             println!(
                 "  {} Service started but the daemon did not come up",
                 "✗".red().bold()
@@ -443,9 +507,33 @@ fn print_no_user_systemd_hint(reason: &str) {
     }
 }
 
+/// The documented port overrides, to carry into the service definition so
+/// the service binds what the installing user's CLI would: neither the
+/// systemd user manager nor launchd inherits this shell's environment. Only
+/// real port numbers, since the value lands verbatim in a unit or plist.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn port_overrides() -> Vec<(&'static str, String)> {
+    ["ANTRA_PORT", "ANTRA_HTTP_PORT"]
+        .into_iter()
+        .filter_map(|k| std::env::var(k).ok().map(|v| (k, v)))
+        .filter(|(_, v)| v.parse::<u16>().is_ok())
+        .collect()
+}
+
+/// Wait for the daemon's IPC socket, as `ensure_daemon` does. Both service
+/// managers report success the moment they spawn the process, so a daemon
+/// that dies on a port conflict would otherwise read as started.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn daemon_comes_up() -> bool {
+    (0..30).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        crate::ipc::client::is_daemon_running()
+    })
+}
+
 /// A daemon the service did not start: one the CLI auto-started, or a
 /// root-owned one from `sudo antra proxy start`.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn daemon_running_outside_service() -> bool {
     crate::ipc::client::is_daemon_running() || crate::platform::daemon_socket_permission_denied()
 }
@@ -789,6 +877,82 @@ mod tests {
             text.ends_with("/.config/antra/systemd/user/antra-proxy.service"),
             "unexpected legacy path: {text}"
         );
+    }
+
+    fn plist_for(env: &[(&str, String)]) -> String {
+        launchd_plist(
+            std::path::Path::new("/opt/antra/bin/antra"),
+            std::path::Path::new("/Users/u/Library/Application Support/antra/daemon.log"),
+            env,
+        )
+    }
+
+    /// ROADMAP C16: without `ANTRA_DAEMON=1`, KeepAlive relaunched
+    /// `proxy start` every ten seconds while launchd supervised nothing.
+    #[test]
+    fn plist_runs_the_daemon_in_the_foreground() {
+        let plist = plist_for(&[]);
+        assert!(
+            plist.contains(
+                "<key>EnvironmentVariables</key>\n    <dict>\n        <key>ANTRA_DAEMON</key>\n        <string>1</string>\n"
+            ),
+            "{plist}"
+        );
+        assert!(
+            plist.contains("<string>/opt/antra/bin/antra</string>\n        <string>proxy</string>\n        <string>start</string>"),
+            "{plist}"
+        );
+        assert!(
+            plist.contains("<key>KeepAlive</key>\n    <true/>"),
+            "{plist}"
+        );
+    }
+
+    #[test]
+    fn plist_logs_where_antra_logs_reads() {
+        let plist = plist_for(&[]);
+        let log = "<string>/Users/u/Library/Application Support/antra/daemon.log</string>";
+        assert!(
+            plist.contains(&format!("<key>StandardOutPath</key>\n    {log}")),
+            "{plist}"
+        );
+        assert!(
+            plist.contains(&format!("<key>StandardErrorPath</key>\n    {log}")),
+            "{plist}"
+        );
+    }
+
+    #[test]
+    fn plist_carries_port_overrides_only_when_set() {
+        assert!(!plist_for(&[]).contains("ANTRA_PORT"));
+        let plist = plist_for(&[
+            ("ANTRA_PORT", "18443".to_string()),
+            ("ANTRA_HTTP_PORT", "18080".to_string()),
+        ]);
+        assert!(
+            plist.contains("<key>ANTRA_PORT</key>\n        <string>18443</string>"),
+            "{plist}"
+        );
+        assert!(
+            plist.contains("<key>ANTRA_HTTP_PORT</key>\n        <string>18080</string>"),
+            "{plist}"
+        );
+    }
+
+    /// A `&` in the binary's path (a folder named "R&D") would make an
+    /// unescaped plist unparseable, and launchd would refuse it.
+    #[test]
+    fn plist_escapes_paths() {
+        let plist = launchd_plist(
+            std::path::Path::new("/Users/u/R&D <tools>/antra"),
+            std::path::Path::new("/tmp/d.log"),
+            &[],
+        );
+        assert!(
+            plist.contains("<string>/Users/u/R&amp;D &lt;tools&gt;/antra</string>"),
+            "{plist}"
+        );
+        assert!(!plist.contains("R&D"), "{plist}");
     }
 
     fn unit_for(env: &[(&str, String)]) -> String {

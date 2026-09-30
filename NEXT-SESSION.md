@@ -4,7 +4,8 @@
 > the previous conversation.
 >
 > **Direction: `v0.6.2` is released and verified on real macOS and Linux
-> machines, Homebrew included. No new features.** Work should be GTM, plus
+> machines, Homebrew included. C16 (macOS service) is fixed on `main` and
+> not yet released. No new features.** Work should be GTM, plus
 > the items in "Still owed" below.
 
 Repo: `main` is the default branch; work in a feature branch.
@@ -29,7 +30,7 @@ difference is Antra never leaves your machine.
 1. `AGENT.md` — architecture, phase history, and a section headed *do not redo
    blindly* recording the ways this codebase has lied to itself. That section is
    the highest-value thing in the repo.
-2. `ROADMAP.md` — what is done (C1–C15 DONE) and what is not (C16).
+2. `ROADMAP.md` — what is done (C1–C16 DONE; C16 not yet released).
 3. `README.md` — the user-facing description and install paths.
 4. `docs/security.md` — CA versioning, rotation, and the IPC socket rules. Read
    it before changing anything under `src/certs/` or `src/cli/service.rs`.
@@ -84,7 +85,7 @@ Ordered by how many users they affect, not by how interesting they are.
 | Item | Blast radius | What it takes |
 |---|---|---|
 | **Browser pass** — Safari + Firefox, never manually tested | Every user, on the one thing they judge you by | `docs/mvp.md` wants a human run. The TLS half is machine-checked in CI — `tests/e2e_securetransport.rs` asks Apple's own stack via `/usr/bin/curl` — but nobody has put the URL in a browser. **Highest value per minute of anyone's time.** |
-| **C16** — launchd plist likely has C14's fork problem | Every macOS user of `antra service install` | Unverified, by reading only: the plist runs `antra proxy start` with `KeepAlive` and no `ANTRA_DAEMON`, so it probably relaunches `proxy start` every ~10 s forever, each time printing *already running* into `daemon.log`. **Verify on a Mac first** — a GitHub `macos-latest` runner counts, as **Release Check** showed (`launchctl print gui/$(id -u)/com.antra.proxy`, watch the runs count and the log). If real, add `ANTRA_DAEMON=1` under `EnvironmentVariables`, as C14 did for systemd. |
+| **Release v0.6.3** — ship C16 | Every macOS user of `antra service install` | The fix is on `main` and verified on a macOS runner, but does nothing until released. Follow **Releasing** below; the notes should say that a service installed by v0.6.2 or earlier needs `antra service install` again, which prints the hand-over (`antra proxy stop && launchctl load -w …`) because the old job's daemon outlives the unload. |
 | **Port 5000 message** | Flask users on macOS | A first `antra dev` on a Flask app says "Stop the process on port 5000" — it is macOS Control Center's AirPlay Receiver, which they cannot stop — and suggests `antra alias`, the wrong tool. The advice is wrong, not the behaviour, and it cannot be auto-fixed: Antra is right to refuse to silently remap, since the app would bind 5000 while the route pointed elsewhere. Name the actual holder, drop the `alias` suggestion. |
 
 ## Two things that will bite whoever touches the tests

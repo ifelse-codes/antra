@@ -1,0 +1,52 @@
+name: Service (macOS)
+
+# ROADMAP C16: `antra service install` on macOS, against the real launchd.
+#
+# v0.6.2's plist ran `antra proxy start` with KeepAlive and without
+# ANTRA_DAEMON=1, so `proxy start` forked the daemon and exited and launchd
+# relaunched it every ten seconds while supervising nothing. The first run
+# of this job showed it: 7 runs in 60 s, no pid. The checks live in
+# .github/scripts/check-launchd.sh: fresh install, install beside an
+# already-running daemon, and upgrade over a v0.6.2 plist, each passing only
+# if launchd started the job once and supervises the daemon itself.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/cli/service.rs'
+      - '.github/workflows/service-macos.yml'
+      - '.github/scripts/check-launchd.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  launchd:
+    name: launchd service
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build
+
+      - name: Install, watch and uninstall under launchd
+        run: .github/scripts/check-launchd.sh
+        env:
+          ANTRA_BIN: ./target/debug/antra
+
+      - name: Evidence
+        if: failure()
+        run: |
+          launchctl print "gui/$(id -u)/com.antra.proxy" || true
+          cat ~/Library/LaunchAgents/com.antra.proxy.plist || true
+          tail -n 60 "$HOME/Library/Application Support/antra/daemon.log" || true
+
+      - name: Clean up
+        if: always()
+        run: |
+          ./target/debug/antra service uninstall || true
+          ./target/debug/antra proxy stop || true
