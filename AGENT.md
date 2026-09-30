@@ -308,7 +308,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 - Update this file's status table when a phase completes
 - Do not accumulate untested changes
 - `landing/install.sh` must stay byte-identical to the root `install.sh` — it is the copy users actually download. The two drifted during the v0.5.0 release (only the version-pin comments), and nothing caught it. If you touch one, `cp install.sh landing/install.sh` and re-deploy the site with `wrangler pages deploy . --project-name antra-landing`.
-- A version bump touches `Cargo.toml`, `Cargo.lock`, `README.md` (badge + status line), `install.sh` **and** `landing/install.sh`, `landing/index.html` (pin example), and `Formula/antra.rb` (needs the sha256s from the published release, so it is a separate PR *after* the release).
+- A version bump touches `Cargo.toml`, `Cargo.lock`, `README.md` (badge + status line), `install.sh` **and** `landing/install.sh`, `landing/index.html` (pin example), and `Formula/antra.rb` (needs the sha256s from the published release, so it is a separate PR *after* the release) — **plus the same file in the tap repo `ifelse-codes/homebrew-antra`**, which is what `brew install ifelse-codes/antra/antra` actually reads. It sat on 0.2.3 through v0.6.1 because only this repo's copy was updated.
 
 ---
 
