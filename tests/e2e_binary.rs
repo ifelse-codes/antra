@@ -416,3 +416,51 @@ fn test_run_with_busy_explicit_port_fails_instead_of_remapping() {
     );
     drop(held);
 }
+
+/// The busy-port error names what holds the port — here, this test
+/// process — and suggests a concrete free port. It used to say only "stop
+/// the process on that port", which on a Mac meant AirPlay Receiver.
+#[cfg(unix)]
+#[test]
+fn test_busy_port_error_names_the_holder() {
+    if std::process::Command::new("lsof")
+        .arg("-v")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipping: lsof not installed");
+        return;
+    }
+    let home = TestHome::shared();
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port();
+
+    let (stdout, stderr, code) = run_antra(
+        home,
+        &[
+            "run",
+            "--domain",
+            "holder-test.localhost",
+            "--port",
+            &port.to_string(),
+            "--",
+            "echo",
+            "hi",
+        ],
+    );
+    let combined = format!("{stdout}\n{stderr}");
+    assert_ne!(code, 0, "busy --port must fail, got: {combined}");
+    assert!(
+        combined.contains(&format!("(PID {})", std::process::id())),
+        "must name the process holding the port, got: {combined}"
+    );
+    assert!(
+        combined.contains(&format!("antra alias holder-test.localhost {port}")),
+        "something is serving, so fronting it is a real option, got: {combined}"
+    );
+    assert!(
+        combined.contains("run on another port: --port "),
+        "must suggest a concrete free port, got: {combined}"
+    );
+    drop(held);
+}

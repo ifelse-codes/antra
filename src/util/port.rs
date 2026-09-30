@@ -244,6 +244,13 @@ pub fn inject_port_flag(command: &[String], port: u16) -> Vec<String> {
         "npx" if rest.first().is_some_and(|s| s.starts_with("svelte")) => true,
         // Solid
         "npx" if rest.first().is_some_and(|s| s.starts_with("solid")) => true,
+        // Flask's CLI ignores $PORT (it reads FLASK_RUN_PORT or --port), so
+        // without this `antra dev --port 5001` routed to 5001 while Flask
+        // still bound 5000.
+        "flask" if rest.first().is_some_and(|s| s == "run") => true,
+        "python" | "python3" if rest.starts_with(&["-m".into(), "flask".into(), "run".into()]) => {
+            true
+        }
         _ => false,
     };
 
@@ -344,6 +351,122 @@ pub fn describe_port_conflict(port: u16) -> Option<String> {
     }
 }
 
+/// A process listening on a port, as `lsof` names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortHolder {
+    pub pid: u32,
+    pub name: String,
+}
+
+/// Who is listening on `port`, if `lsof` can tell.
+///
+/// Best-effort: `None` when `lsof` is missing, finds nothing, or is not
+/// allowed to see another user's process. `+c 0` asks for the full command
+/// name — macOS truncates it to nine characters otherwise, which is how
+/// Control Center shows up as `ControlCe`.
+#[cfg(unix)]
+pub fn port_holder(port: u16) -> Option<PortHolder> {
+    let out = std::process::Command::new("lsof")
+        .args(["+c", "0", "-nP", "-sTCP:LISTEN", "-Fpc"])
+        .arg(format!("-iTCP:{port}"))
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    parse_lsof_holder(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(not(unix))]
+pub fn port_holder(_port: u16) -> Option<PortHolder> {
+    None
+}
+
+/// Parse `lsof -F pc` output: a `p<pid>` line, then `c<command>` (and
+/// other field lines) for each process. Takes the first complete pair.
+/// Unused on Windows, which has no `lsof`; tested everywhere.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn parse_lsof_holder(out: &str) -> Option<PortHolder> {
+    let mut pid = None;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix('p') {
+            pid = p.trim().parse().ok();
+        } else if let (Some(name), Some(pid)) = (line.strip_prefix('c'), pid) {
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some(PortHolder {
+                    pid,
+                    name: name.to_string(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Why a port a user asked for is taken, and what to do instead.
+///
+/// Pure, so each case is tested: the advice this replaced was wrong in the
+/// most common case of all. A first `antra dev` on a Flask app (default
+/// port 5000) on a Mac hits macOS Control Center, which holds 5000 for
+/// AirPlay Receiver — and was told to "stop the process on that port",
+/// which no user can, and asked whether they meant `antra alias`, which
+/// would have routed their domain to AirPlay.
+///
+/// * `serving`: something accepts connections on the port, so it may be
+///   the user's own app, already running — the one case `antra alias` fits.
+/// * `pinned`: the user's own command names the port, so `--port` alone
+///   cannot move it; the command has to change.
+/// * `free`: a nearby port that is free now, to suggest concretely.
+pub fn port_conflict_advice(
+    port: u16,
+    holder: Option<&PortHolder>,
+    serving: bool,
+    pinned: bool,
+    domain: &str,
+    free: Option<u16>,
+    macos: bool,
+) -> Vec<String> {
+    let elsewhere = match (pinned, free) {
+        (true, Some(f)) => format!("change the port in your command, e.g. to {f}"),
+        (true, None) => "change the port in your command".to_string(),
+        (false, Some(f)) => format!("run on another port: --port {f}"),
+        (false, None) => "pass a free --port".to_string(),
+    };
+
+    // macOS Monterey and later: Control Center listens on 5000 and 7000 for
+    // AirPlay Receiver. Not a process anyone should kill, and never the
+    // user's app.
+    let airplay = macos
+        && (port == 5000 || port == 7000)
+        && holder.is_some_and(|h| h.name.starts_with("ControlCe"));
+    if airplay {
+        return vec![
+            format!("Port {port} is held by macOS AirPlay Receiver (Control Center)."),
+            "Turn it off in System Settings → General → AirDrop & Handoff → AirPlay Receiver,"
+                .to_string(),
+            format!("or {elsewhere}"),
+        ];
+    }
+
+    let mut advice = Vec::new();
+    match holder {
+        Some(h) => advice.push(format!(
+            "Port {port} is in use by {} (PID {}).",
+            h.name, h.pid
+        )),
+        None if serving => advice.push(format!("Something is already serving on port {port}.")),
+        None => {}
+    }
+    if serving && !pinned {
+        advice.push(format!(
+            "If that is your app, already running, front it instead: antra alias {domain} {port}"
+        ));
+    }
+    // No closing full stop: the line can end in a flag to copy.
+    advice.push(format!("Otherwise stop it, or {elsewhere}"));
+    advice
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +562,175 @@ mod tests {
             loopback_binds::<i32>(Err(kind(std::io::ErrorKind::AddrInUse)), Ok(6)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
         assert!(loopback_binds::<i32>(Err(no_ipv6()), Ok(6)).is_err());
+    }
+
+    fn holder(pid: u32, name: &str) -> PortHolder {
+        PortHolder {
+            pid,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn lsof_field_output_names_the_first_listener() {
+        // `lsof +c 0 -Fpc` on macOS with AirPlay Receiver on.
+        let out = "p412\ncControlCenter\nf9\nf10\n";
+        assert_eq!(parse_lsof_holder(out), Some(holder(412, "ControlCenter")));
+        assert_eq!(parse_lsof_holder(""), None);
+        assert_eq!(
+            parse_lsof_holder("p12\n"),
+            None,
+            "a pid with no command is no holder"
+        );
+    }
+
+    /// The case the old advice got wrong: Flask's default port on a Mac.
+    #[test]
+    fn airplay_on_5000_is_named_and_never_offered_to_alias() {
+        let airplay = holder(412, "ControlCenter");
+        let advice = port_conflict_advice(
+            5000,
+            Some(&airplay),
+            true,
+            false,
+            "demo.localhost",
+            Some(5001),
+            true,
+        );
+        let text = advice.join("\n");
+        assert!(text.contains("macOS AirPlay Receiver"), "{text}");
+        assert!(text.contains("AirDrop & Handoff"), "{text}");
+        assert!(text.ends_with("--port 5001"), "{text}");
+        assert!(!text.contains("antra alias"), "{text}");
+        assert!(!text.contains("stop it"), "{text}");
+    }
+
+    #[test]
+    fn airplay_is_recognised_by_its_truncated_lsof_name_too() {
+        let text = port_conflict_advice(
+            7000,
+            Some(&holder(412, "ControlCe")),
+            true,
+            false,
+            "d.localhost",
+            None,
+            true,
+        )
+        .join("\n");
+        assert!(text.contains("AirPlay Receiver"), "{text}");
+        assert!(text.ends_with("pass a free --port"), "{text}");
+    }
+
+    /// Control Center is only AirPlay on 5000/7000, and only on macOS.
+    #[test]
+    fn control_center_elsewhere_gets_the_generic_advice() {
+        for (port, macos) in [(8080, true), (5000, false)] {
+            let text = port_conflict_advice(
+                port,
+                Some(&holder(412, "ControlCenter")),
+                true,
+                false,
+                "d.localhost",
+                None,
+                macos,
+            )
+            .join("\n");
+            assert!(
+                !text.contains("AirPlay"),
+                "port {port}, macos {macos}: {text}"
+            );
+            assert!(text.contains("in use by ControlCenter (PID 412)"), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_serving_app_is_named_and_offered_alias_with_its_domain() {
+        let advice = port_conflict_advice(
+            5000,
+            Some(&holder(2312, "python3")),
+            true,
+            false,
+            "demo-flask.localhost",
+            Some(5001),
+            false,
+        );
+        assert_eq!(
+            advice,
+            vec![
+                "Port 5000 is in use by python3 (PID 2312).".to_string(),
+                "If that is your app, already running, front it instead: antra alias demo-flask.localhost 5000".to_string(),
+                "Otherwise stop it, or run on another port: --port 5001".to_string(),
+            ]
+        );
+    }
+
+    /// `--port` cannot move a command that names its own port.
+    #[test]
+    fn a_pinned_command_is_told_to_change_its_command() {
+        let text = port_conflict_advice(
+            18090,
+            Some(&holder(9, "python3")),
+            true,
+            true,
+            "d.localhost",
+            Some(18091),
+            false,
+        )
+        .join("\n");
+        assert!(!text.contains("antra alias"), "{text}");
+        assert!(
+            text.contains("change the port in your command, e.g. to 18091"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn nothing_known_and_nothing_serving_still_says_what_to_do() {
+        assert_eq!(
+            port_conflict_advice(5000, None, false, false, "d.localhost", None, false),
+            vec!["Otherwise stop it, or pass a free --port".to_string()]
+        );
+    }
+
+    /// Asks the real `lsof` about a port this test holds.
+    #[cfg(unix)]
+    #[test]
+    fn port_holder_finds_this_process() {
+        if std::process::Command::new("lsof")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: lsof not installed");
+            return;
+        }
+        let held = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        let found = port_holder(port).expect("lsof should see our own listener");
+        assert_eq!(found.pid, std::process::id());
+        assert!(!found.name.is_empty());
+    }
+
+    #[test]
+    fn flask_run_gets_the_port_it_is_routed_to() {
+        let cmd = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            inject_port_flag(&cmd(&["flask", "run"]), 5001),
+            cmd(&["flask", "run", "--port", "5001"])
+        );
+        assert_eq!(
+            inject_port_flag(&cmd(&["python3", "-m", "flask", "run"]), 5001),
+            cmd(&["python3", "-m", "flask", "run", "--port", "5001"])
+        );
+        // An explicit port is the user's; other flask commands are not servers.
+        assert_eq!(
+            inject_port_flag(&cmd(&["flask", "run", "-p", "6000"]), 5001),
+            cmd(&["flask", "run", "-p", "6000"])
+        );
+        assert_eq!(
+            inject_port_flag(&cmd(&["flask", "db", "upgrade"]), 5001),
+            cmd(&["flask", "db", "upgrade"])
+        );
     }
 
     #[test]
