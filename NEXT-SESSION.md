@@ -1,13 +1,47 @@
 # NEXT-SESSION.md — Instructions for the next session
 
-> The user says **"start next session"** → read this file and execute the plan below.
+> Written to be read cold, by any tool. It does not assume you were present for
+> the previous conversation.
 >
 > **Direction: `v0.6.1` is released and the roadmap's engineering items are
-> closed. No new features.** Work should be GTM, plus the three items in
-> "Still owed" below, which are all small.
+> closed. No new features.** Work should be GTM, plus the items in
+> "Still owed" below.
 
-Repo: `main` is the default branch; work in a feature branch. Root docs are
-`AGENT.md` / `README.md` / `ROADMAP.md` / this file.
+Repo: `main` is the default branch; work in a feature branch.
+
+## Orientation — 60 seconds
+
+**Antra** is a native macOS/Linux/Windows CLI that gives a local dev server a
+stable HTTPS domain, so you stop memorising ports.
+
+    antra run --domain myapp.localhost -- pnpm dev
+    # → https://myapp.localhost
+
+It runs a background daemon holding a local CA and a TLS proxy, injects
+`PORT` and `NODE_EXTRA_CA_CERTS` into your child process, and routes
+`*.localhost` subdomains at whatever port each app happens to use. The promise
+is one command, a real HTTPS URL, your process unchanged. Rust, no runtime
+dependencies. The competitive set is `portless` and ngrok-style tunnels; the
+difference is Antra never leaves your machine.
+
+**Read these, in order, before touching anything:**
+
+1. `AGENT.md` — architecture, phase history, and a section headed *do not redo
+   blindly* recording the ways this codebase has lied to itself. That section is
+   the highest-value thing in the repo.
+2. `ROADMAP.md` — what is done (C1–C12 all DONE) and what is not (C13, C14).
+3. `README.md` — the user-facing description and install paths.
+4. `docs/security.md` — CA versioning, rotation, and the IPC socket rules. Read
+   it before changing anything under `src/certs/` or `src/cli/service.rs`.
+
+**Sanity check that you have a healthy checkout:**
+
+    cargo fmt --all -- --check
+    cargo clippy --all-targets -- -D warnings     # warnings are errors
+    ./target/debug/antra --version                 # 0.6.1
+
+Full test commands, including the two traps that cost real time, are under
+**Gates** at the bottom of this file.
 
 ## Where things stand
 
@@ -15,19 +49,21 @@ Repo: `main` is the default branch; work in a feature branch. Root docs are
 and `curl | bash`. Release mechanics and post-release verification are recorded
 in the v0.6.1 section of `AGENT.md`.
 
-The four shell e2e suites are green and **all four now run in CI** on macOS and
+The four shell e2e suites are green and **all four run in CI** on macOS and
 Ubuntu: 206 passing / 0 failing / 9 skipped. The Rust suite is at 406 passing.
-They went from 86 passing / 128 failing at the start of this work.
+They were at 86 passing / 128 failing before this work, and the four suites had
+never run in CI at all.
 
-ROADMAP C1–C12 are done. C8 is now `DONE` rather than `DONE (2 of 4)`.
+## Still owed
 
-## Still owed — all small
+Ordered by how many users they affect, not by how interesting they are.
 
-| Item | What it is | Why it matters |
+| Item | Blast radius | What it takes |
 |---|---|---|
-| **C14** | `antra service install` is likely broken on Linux | The unit is written to `~/.config/antra/systemd/user/`, which `systemctl --user` does not search, then `systemctl --user enable` runs with no `daemon-reload` or `--user link`. ROADMAP #6 claims it shipped — verify on a real Linux box before a user reports it. Fixing it means writing to systemd's search path or linking the unit, plus deciding what happens to units already on disk. |
-| **C13** | `pnpm` inference differs on GitHub runners | Now gated, so it cannot fail the job, but the question is open: it fails on **both** runners while passing on a machine that has pnpm. Reproduce with `test_node_pnpm` and pnpm removed from `PATH`. |
-| **Browser pass** | Safari + Firefox | `docs/mvp.md` still wants a human run. The Safari-critical half is machine-checked in CI (`tests/e2e_securetransport.rs`, which asks Apple's own TLS stack via `/usr/bin/curl`), but the browser itself is not. |
+| **C14** — `antra service install` likely broken on Linux | **Every Linux user** who tries the documented service install | The unit is written to `~/.config/antra/systemd/user/`, which `systemctl --user` does not search, and then `systemctl --user enable` runs with no `daemon-reload` and no `--user link` — so systemd cannot see the unit and enable fails. ROADMAP #6 claims this shipped, so **verify on a real Linux box first**. The fix is to write to systemd's search path or link the unit, and to decide what happens to units already on disk at the old path. |
+| **Browser pass** — Safari + Firefox, never manually tested | Every user, on the one thing they judge you by | `docs/mvp.md` wants a human run. The TLS half is machine-checked in CI — `tests/e2e_securetransport.rs` asks Apple's own stack via `/usr/bin/curl` — but nobody has put the URL in a browser. **Highest value per minute of anyone's time.** |
+| **C13** — `pnpm` inference differs on GitHub runners | Narrow | Now gated so it cannot fail the job, but open: it fails on **both** runners while passing on a machine that has pnpm. Reproduce with `test_node_pnpm` and pnpm removed from `PATH`. |
+| **Port 5000 message** | Flask users on macOS | A first `antra dev` on a Flask app says "Stop the process on port 5000" — it is macOS Control Center's AirPlay Receiver, which they cannot stop — and suggests `antra alias`, the wrong tool. The advice is wrong, not the behaviour, and it cannot be auto-fixed: Antra is right to refuse to silently remap, since the app would bind 5000 while the route pointed elsewhere. Name the actual holder, drop the `alias` suggestion. |
 
 ## Two things that will bite whoever touches the tests
 
