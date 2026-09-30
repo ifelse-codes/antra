@@ -1,0 +1,88 @@
+name: Service (macOS)
+
+# ROADMAP C16: does `antra service install` on macOS keep one daemon running,
+# or does launchd relaunch `antra proxy start` over and over?
+#
+# The plist runs `antra proxy start` with KeepAlive and without
+# ANTRA_DAEMON=1, so `proxy start` forks the daemon and exits — the shape
+# that made systemd kill and restart the daemon on Linux (C14). This job
+# installs the real service on a macOS runner, watches launchd for a minute,
+# and fails unless launchd started the job once and is supervising the
+# daemon itself.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/cli/service.rs'
+      - '.github/workflows/service-macos.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  launchd:
+    name: launchd service
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build
+
+      - name: Which launchd domain this shell reaches
+        run: |
+          echo "uid $(id -u), launchctl manager: $(launchctl managername 2>&1 || true)"
+
+      - name: Install the service
+        run: ./target/debug/antra service install
+
+      - name: Watch launchd for 60 s
+        run: |
+          label=com.antra.proxy
+          for i in 0 1 2 3 4 5 6; do
+            info="$(launchctl print "gui/$(id -u)/$label" 2>&1 || true)"
+            runs=$(awk -F' = ' '/^[[:space:]]*runs = /{print $2; exit}' <<<"$info")
+            state=$(awk -F' = ' '/^[[:space:]]*state = /{print $2; exit}' <<<"$info")
+            pid=$(awk -F' = ' '/^[[:space:]]*pid = /{print $2; exit}' <<<"$info")
+            n=$(pgrep -f "antra proxy start" | wc -l | tr -d ' ')
+            echo "t=$((i * 10))s  runs=${runs:-?}  state=${state:-?}  pid=${pid:--}  'proxy start' processes=$n"
+            if [ "$i" -lt 6 ]; then sleep 10; fi
+          done
+          echo "RUNS=${runs:-0}" >> "$GITHUB_ENV"
+          echo "JOB_PID=${pid:-}" >> "$GITHUB_ENV"
+
+      - name: Evidence
+        if: always()
+        run: |
+          launchctl print "gui/$(id -u)/com.antra.proxy" || true
+          ./target/debug/antra service status || true
+          ./target/debug/antra proxy status || true
+          log="$HOME/Library/Application Support/antra/daemon.log"
+          already=$(grep -c 'already running' "$log" 2>/dev/null || true)
+          ready=$(grep -c 'Daemon ready' "$log" 2>/dev/null || true)
+          echo "daemon.log: ${already:-0} 'already running' lines, ${ready:-0} 'Daemon ready' lines"
+          tail -n 40 "$log" 2>/dev/null || true
+
+      - name: One daemon, started once, supervised by launchd
+        run: |
+          fail=0
+          if [ "${RUNS:-0}" != 1 ]; then
+            echo "::error::launchd ran the job ${RUNS:-0} times in 60 s; expected 1. KeepAlive is relaunching 'antra proxy start' (C16)."
+            fail=1
+          fi
+          daemon_pid=$(./target/debug/antra proxy status 2>/dev/null | awk '/Daemon PID:/{print $3}')
+          if [ -z "$daemon_pid" ]; then
+            echo "::error::No daemon is reachable after install."
+            fail=1
+          elif [ "${JOB_PID:-}" != "$daemon_pid" ]; then
+            echo "::error::launchd supervises pid '${JOB_PID:-none}' but the daemon is pid '$daemon_pid': launchd is not watching the daemon, so it cannot restart it if it dies."
+            fail=1
+          fi
+          exit $fail
+
+      - name: Uninstall
+        if: always()
+        run: ./target/debug/antra service uninstall || true
