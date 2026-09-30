@@ -290,12 +290,21 @@ EOF
     
     output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
     
-    # This one failed on BOTH GitHub runners while passing on a dev machine that
-    # has pnpm, which no toolchain gate explains — see ROADMAP C13. Gate it on
-    # pnpm being present so it cannot fail for a missing binary, and leave the
-    # question of why the runners differ open rather than papering over it. If
-    # it still fails on a runner that *does* have pnpm, C13 has its answer.
-    assert_needs_bin pnpm "pnpm run dev" "pnpm command inferred correctly"
+    # ROADMAP C13, answered. The lockfile picks pnpm whether or not pnpm is
+    # installed: with it stripped from PATH the spawn fails *naming pnpm*. The
+    # old check grepped the "Started: pnpm run dev" line, which only exists
+    # after a successful spawn, so it failed on every runner without pnpm —
+    # the C12 rule again. Assert the inference either way instead of skipping:
+    # the spawn line where pnpm exists, the spawn error naming it where not.
+    # Either can fail: without the lockfile this infers npm, and neither
+    # string appears.
+    local want="Failed to spawn 'pnpm'"
+    have pnpm && want="pnpm run dev"
+    if echo "$output" | grep -q "$want"; then
+        log_pass "pnpm command inferred correctly"
+    else
+        log_fail "pnpm command inferred correctly"
+    fi
 }
 
 test_node_bun() {
