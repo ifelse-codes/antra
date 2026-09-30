@@ -252,7 +252,8 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                 p
             } else {
                 output::print_error(&format!("Port {p} is already in use."));
-                if detect_port_from_command(&args.command) == Some(p) {
+                let pinned = detect_port_from_command(&args.command) == Some(p);
+                if pinned {
                     // The child's own args pin it to the busy port (e.g.
                     // `python3 -m http.server 18090`), so spawning it would
                     // only dump a raw `Address already in use` traceback.
@@ -263,19 +264,29 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                         "Your command looks pinned to port {p} (`{}`), so it cannot start there.",
                         args.command.join(" ")
                     ));
-                } else if std::net::TcpStream::connect_timeout(
+                }
+                let serving = std::net::TcpStream::connect_timeout(
                     &std::net::SocketAddr::from(([127, 0, 0, 1], p)),
                     std::time::Duration::from_millis(200),
                 )
-                .is_ok()
-                {
-                    output::print_warning(&format!(
-                        "Something is already serving on port {p} — did you mean `antra alias` to front it instead of `run`?"
-                    ));
+                .is_ok();
+                // Name what holds the port and say what fits it: the old
+                // generic "stop the process" / "did you mean `antra alias`"
+                // was wrong for the commonest case, macOS AirPlay on 5000.
+                let holder = crate::util::port::port_holder(p);
+                let free = (p.saturating_add(1)..=p.saturating_add(100))
+                    .find(|&candidate| is_port_available(candidate));
+                for line in crate::util::port::port_conflict_advice(
+                    p,
+                    holder.as_ref(),
+                    serving,
+                    pinned,
+                    &domain,
+                    free,
+                    cfg!(target_os = "macos"),
+                ) {
+                    output::print_warning(&line);
                 }
-                output::print_warning(
-                    "Stop the process on that port (see `antra list`), or pass a free --port.",
-                );
                 return Err(anyhow::anyhow!("Port {p} is already in use"));
             }
         }

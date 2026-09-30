@@ -821,6 +821,40 @@ EOF
     fi
 }
 
+# macOS keeps AirPlay Receiver on 5000 (Control Center), Flask's default
+# port. The busy-port error used to say "stop the process on that port" and
+# ask whether you meant `antra alias` — neither possible nor wanted. It must
+# name AirPlay instead. No python needed: antra refuses before spawning.
+test_flask_airplay_advice() {
+    log_section "Flask on a Mac's port 5000 (AirPlay Receiver)"
+    if ! lsof -nP -iTCP:5000 -sTCP:LISTEN 2>/dev/null | grep -q '^ControlCe'; then
+        log_skip "AirPlay advice — port 5000 is not held by Control Center here"
+        return 0
+    fi
+    local dir="$TEST_DIR/flask-airplay"
+    mkdir -p "$dir"
+    cd "$dir"
+    cat > pyproject.toml << 'EOF'
+[project]
+name = "airplay-app"
+version = "0.1.0"
+dependencies = ["flask>=3.0.0"]
+EOF
+    output=$(run_antra_capped $ANTRA_BIN dev --no-trust-prompt 2>&1 || true)
+
+    if echo "$output" | grep -q "macOS AirPlay Receiver"; then
+        log_pass "Busy 5000 is named as AirPlay Receiver"
+    else
+        log_fail "Busy 5000 is named as AirPlay Receiver"
+    fi
+    # Only meaningful once the busy-port error printed at all.
+    if echo "$output" | grep -q "Port 5000 is already in use" && ! echo "$output" | grep -q "antra alias"; then
+        log_pass "AirPlay is not offered to antra alias"
+    else
+        log_fail "AirPlay is not offered to antra alias"
+    fi
+}
+
 test_python_flask() {
     log_section "Python (Flask)"
     need "python" "Python (Flask)" || return 0
@@ -1433,6 +1467,7 @@ main() {
     test_python_fastapi
     test_python_django
     test_python_flask
+    test_flask_airplay_advice
     test_python_generic
     
     # Ruby tests
