@@ -39,7 +39,13 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
-## Unreleased — on `main` after v0.6.1
+## Release — v0.6.2 (2026-09-30)
+
+**Two Linux fixes, no behaviour change.** C14 makes `antra service install`
+work on Linux; C15 lets the daemon start on a host without IPv6. C13 is a
+test-only change. Release mechanics and post-release checks are recorded
+below once done.
+
 
 **`antra service install` works on Linux (ROADMAP C14).** It was broken in two
 layers, and fixing only the one the handoff named would have shipped a service
@@ -154,7 +160,7 @@ could hit without doing anything unusual.
 **Known issue, not fixed here:** `antra service install` writes the systemd
 unit to `~/.config/antra/systemd/user/`, which is not a path `systemctl --user`
 searches, and then runs `systemctl --user enable` with no `daemon-reload` or
-`--user link`. Install is likely broken on Linux for that reason. ROADMAP C14. *Fixed on `main` after this release — see "Unreleased" above.*
+`--user link`. Install is likely broken on Linux for that reason. ROADMAP C14. *Fixed in v0.6.2 — see above.*
 
 **Release mechanics, all verified after the fact:**
 - Tag `v0.6.1` → the release workflow built all five targets; the draft was
