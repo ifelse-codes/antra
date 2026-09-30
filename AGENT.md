@@ -267,7 +267,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 - **Deployed to:** Cloudflare Pages → `https://antra.iifelse.com`
 - **Project name:** `antra-landing`
 - **Design language:** Mudra (dark, surgical, violet accent)
-- **To update:** run `wrangler pages deploy . --project-name antra-landing` **from `landing/`** — from the repo root it would publish the whole tree, source and `target/` included
+- **To update:** merge the change to `main`. The **Deploy Landing** workflow (`.github/workflows/landing.yml`) makes a production deployment of `landing/` only and then checks the live domain serves that commit. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and can be re-run by hand from the Actions tab. By hand, the equivalent is `wrangler pages deploy . --project-name antra-landing --branch main` **from `landing/`** — from the repo root it would publish the whole tree, and without `--branch main` from a feature branch it makes a preview deployment
 - **Last deployed:** 2026-09-29, deployment `b6482eed` (v0.6.1 assets). Verified after the fact against the live domain: `/install.sh` returns `Content-Type: text/plain` and serves the v0.6.1 pin, the index pin example reads v0.6.1, unknown paths return 404, and the security headers are present
 
 ---

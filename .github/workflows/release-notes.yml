@@ -1,0 +1,39 @@
+name: Release Notes
+
+# Sets a published release's description from docs/releases/<tag>.md.
+#
+# The release workflow creates drafts with GitHub's generated PR list, and
+# editing that by hand needs `gh` on a machine or careful pasting in the web
+# UI. Keeping the notes in the repo also means they are reviewed in a PR
+# like everything else.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.6.2"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace the release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          notes="docs/releases/${TAG}.md"
+          [ -f "$notes" ] || { echo "::error::$notes does not exist"; exit 1; }
+          gh release view "$TAG" --json isDraft --jq .isDraft
+          gh release edit "$TAG" --notes-file "$notes"
+          # Read it back rather than trusting the exit code. Line endings and
+          # trailing blank lines are not content; GitHub may change either.
+          norm() { tr -d '\r' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'; }
+          gh release view "$TAG" --json body --jq .body | norm > published.md
+          norm < "$notes" > expected.md
+          diff published.md expected.md && echo "Release $TAG description now matches $notes"

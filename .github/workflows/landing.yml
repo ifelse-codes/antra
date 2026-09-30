@@ -1,0 +1,63 @@
+name: Deploy Landing
+
+# Deploys landing/ to Cloudflare Pages as a *production* deployment, then
+# checks the live domain serves exactly this commit.
+#
+# Replaces the manual `wrangler pages deploy` step. That step had two traps
+# this workflow cannot fall into: run from a feature branch it created a
+# branch (preview) deployment and silently left production on the old files,
+# and run from the repo root it would have published the whole tree.
+#
+# Needs two repository secrets: CLOUDFLARE_API_TOKEN (a token with
+# "Cloudflare Pages: Edit" on the account) and CLOUDFLARE_ACCOUNT_ID.
+
+on:
+  push:
+    branches: [main]
+    paths: ['landing/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to antra.iifelse.com
+    # A manual run from any other ref would deploy unmerged files to
+    # production. Only main deploys.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The two installer copies must match
+        # landing/install.sh is the copy users download; install.sh is the
+        # one reviewed in the repo. They drifted once (v0.5.0) unnoticed.
+        run: cmp install.sh landing/install.sh
+
+      - name: Cloudflare secrets are set
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Deploy (production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy landing --project-name=antra-landing --branch=main --commit-dirty=true
+
+      - name: Live domain serves this commit
+        run: .github/scripts/check-landing.sh

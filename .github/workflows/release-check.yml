@@ -1,0 +1,81 @@
+name: Release Check
+
+# Checks a published release the way a user meets it, on machines the
+# maintainer may not have: Homebrew on macOS and Linux, the curl installer
+# (latest and pinned) on macOS and Linux, and the live landing site.
+#
+# Run it by hand after publishing a release, and again after the landing
+# site is deployed. The site job compares the served installer with this
+# commit's landing/install.sh, so it fails until the site is redeployed —
+# that is the point of it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to expect, e.g. 0.6.2"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    name: Homebrew (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      WANT: ${{ inputs.version }}
+    steps:
+      - name: Install from the tap
+        run: |
+          # ubuntu runners ship Homebrew, but not on PATH.
+          if ! command -v brew >/dev/null; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "$(dirname "$(command -v brew)")" >> "$GITHUB_PATH"
+          fi
+          brew install ifelse-codes/antra/antra
+      - name: Installed version is the release
+        run: |
+          got="$(antra --version)"
+          echo "$got"
+          [ "$got" = "antra ${WANT#v}" ] || { echo "::error::Homebrew installed '$got', expected 'antra ${WANT#v}'"; exit 1; }
+          brew test antra
+
+  installer:
+    name: curl installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      WANT: ${{ inputs.version }}
+    steps:
+      - name: Latest
+        run: |
+          curl -fsSL https://antra.iifelse.com/install.sh | bash
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          got="$(antra --version)"
+          echo "$got"
+          [ "$got" = "antra ${WANT#v}" ] || { echo "::error::latest installed '$got', expected 'antra ${WANT#v}'"; exit 1; }
+      - name: Pinned
+        run: |
+          curl -fsSL https://antra.iifelse.com/install.sh | ANTRA_VERSION="v${WANT#v}" bash
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          got="$(antra --version)"
+          echo "$got"
+          [ "$got" = "antra ${WANT#v}" ] || { echo "::error::pinned install gave '$got', expected 'antra ${WANT#v}'"; exit 1; }
+
+  site:
+    name: Live landing site
+    runs-on: ubuntu-latest
+    env:
+      WANT: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the live domain
+        run: .github/scripts/check-landing.sh "${WANT#v}"
