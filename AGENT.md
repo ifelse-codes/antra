@@ -43,8 +43,34 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 **Two Linux fixes, no behaviour change.** C14 makes `antra service install`
 work on Linux; C15 lets the daemon start on a host without IPv6. C13 is a
-test-only change. Release mechanics and post-release checks are recorded
-below once done.
+test-only change.
+
+**Release mechanics, all verified after the fact — and all run without a
+local machine:**
+- Tag `v0.6.2` on `f8aa404` (the merge of #39), pushed by the maintainer: a
+  cloud agent session's git proxy refuses tag pushes with HTTP 403. The
+  release workflow built all five targets and the draft in ~4 min.
+- Published 2026-09-30. The description was set by the new **Release Notes**
+  workflow from `docs/releases/v0.6.2.md` and read back equal.
+- Every asset was checked three ways — the `.sha256` asset, a fresh download,
+  and GitHub's own asset digest — with sizes equal to the asset sizes. `file`
+  reports the right format for each. The published `antra-x86_64-linux` ran in
+  the IPv6-less cloud container (C15), served a real upstream over HTTPS, and
+  passed all 28 service checks (C14).
+- **The Homebrew tap was four releases stale.** `brew install
+  ifelse-codes/antra/antra` reads `ifelse-codes/homebrew-antra`, which was
+  still on 0.2.3; every release since had updated only this repo's
+  `Formula/antra.rb`. Both now carry the same v0.6.2 formula
+  (ifelse-codes/antra#40, ifelse-codes/homebrew-antra#1).
+- Landing deployed by the new **Deploy Landing** workflow as a production
+  deployment (`8090305e`). Its own check then confirmed the live domain serves
+  the new `install.sh` (on the second attempt, ~10 s after the deploy — the
+  retry is load-bearing), as `text/plain`, with the 404 page and all six
+  security headers.
+- **Release Check** on GitHub runners: Homebrew on macOS (Apple Silicon,
+  `/opt/homebrew/Cellar/antra/0.6.2`) and on Linux, and `curl | bash` latest
+  and pinned on both, all report `antra 0.6.2`; `brew test antra` passes; the
+  live-site check passes with the v0.6.2 pin example.
 
 
 **`antra service install` works on Linux (ROADMAP C14).** It was broken in two
@@ -259,7 +285,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) are fixed on `main` and not yet released, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
+**Current state:** Phases (0-10) are implemented and `v0.6.2` is published and verified on macOS and Linux runners, Homebrew included. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C15 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 
@@ -268,7 +294,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 - **Project name:** `antra-landing`
 - **Design language:** Mudra (dark, surgical, violet accent)
 - **To update:** merge the change to `main`. The **Deploy Landing** workflow (`.github/workflows/landing.yml`) makes a production deployment of `landing/` only and then checks the live domain serves that commit. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and can be re-run by hand from the Actions tab. By hand, the equivalent is `wrangler pages deploy . --project-name antra-landing --branch main` **from `landing/`** — from the repo root it would publish the whole tree, and without `--branch main` from a feature branch it makes a preview deployment
-- **Last deployed:** 2026-09-29, deployment `b6482eed` (v0.6.1 assets). Verified after the fact against the live domain: `/install.sh` returns `Content-Type: text/plain` and serves the v0.6.1 pin, the index pin example reads v0.6.1, unknown paths return 404, and the security headers are present
+- **Last deployed:** 2026-09-30, deployment `8090305e` (v0.6.2 assets), by the **Deploy Landing** workflow. Its live-domain check passed: `/install.sh` is this commit's copy and `text/plain`, unknown paths 404, security headers present; **Release Check** confirmed the v0.6.2 pin example
 
 ---
 
