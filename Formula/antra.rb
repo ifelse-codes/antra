@@ -1,26 +1,26 @@
 class Antra < Formula
   desc "Stable HTTPS domains for local development — one command, no ports, no /etc/hosts"
   homepage "https://github.com/ifelse-codes/antra"
-  version "0.6.1"
+  version "0.6.2"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/ifelse-codes/antra/releases/download/v#{version}/antra-aarch64-apple-darwin"
-      sha256 "48d188975edd1f123311abd362d59b93cf0a3bc982122d3b313ebc101213fd2b"
+      sha256 "b42d49439f1cda804952bb064fbe36244db769cbad74868c96e74eefcdb798d3"
     else
       url "https://github.com/ifelse-codes/antra/releases/download/v#{version}/antra-x86_64-apple-darwin"
-      sha256 "00a66f911f1bbb58f64d22fb805f1d4a7c4aaa021ca433097d425311a6f8b07e"
+      sha256 "33934480c3a00b074c946ad8cf6023565856496b35407b5dd3a373d7b462972c"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/ifelse-codes/antra/releases/download/v#{version}/antra-aarch64-linux"
-      sha256 "c0da9027610faa23cdcb7ac64e5aba2391e1c6eecd770a0e4cfb705e739fc7d3"
+      sha256 "010bdaa8eb8726ad3b79b56633d750b971a52cc93a0274a71a5c6cd96a0209a0"
     else
       url "https://github.com/ifelse-codes/antra/releases/download/v#{version}/antra-x86_64-linux"
-      sha256 "d943d92d0bc7832706291beab31a9f326a188151661e88a8776a24633bd26c23"
+      sha256 "5fa2b5fa1cc5b7e60de2cae9b403179173d7578cf2b6dad48512481c17f20a8d"
     end
   end
 
