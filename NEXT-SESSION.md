@@ -3,9 +3,9 @@
 > Written to be read cold, by any tool. It does not assume you were present for
 > the previous conversation.
 >
-> **Direction: `v0.6.1` is released and the roadmap's engineering items are
-> closed. No new features.** Work should be GTM, plus the items in
-> "Still owed" below.
+> **Direction: `v0.6.1` is released; C14 (Linux service install) is fixed on
+> `main` but not yet released. No new features.** Work should be GTM, plus the
+> items in "Still owed" below.
 
 Repo: `main` is the default branch; work in a feature branch.
 
@@ -29,7 +29,7 @@ difference is Antra never leaves your machine.
 1. `AGENT.md` — architecture, phase history, and a section headed *do not redo
    blindly* recording the ways this codebase has lied to itself. That section is
    the highest-value thing in the repo.
-2. `ROADMAP.md` — what is done (C1–C12 all DONE) and what is not (C13, C14).
+2. `ROADMAP.md` — what is done (C1–C14 DONE) and what is not (C15, C16).
 3. `README.md` — the user-facing description and install paths.
 4. `docs/security.md` — CA versioning, rotation, and the IPC socket rules. Read
    it before changing anything under `src/certs/` or `src/cli/service.rs`.
@@ -54,15 +54,29 @@ Ubuntu: 206 passing / 0 failing / 9 skipped. The Rust suite is at 406 passing.
 They were at 86 passing / 128 failing before this work, and the four suites had
 never run in CI at all.
 
+**Since v0.6.1:** `antra service install` on Linux was verified broken against
+a real `systemd --user` manager, then fixed (ROADMAP C14). It had two bugs, not
+one: the unit sat outside systemd's search path, *and* `antra proxy start`
+forks and exits, so systemd killed the daemon and restarted it every 5 s. The
+fix and the lessons are in the "Unreleased" section of `AGENT.md`;
+`tests/manual_service_linux.sh` re-runs the 28-check verification. **It
+reaches users only in a release.**
+
+**C13 is answered too:** pnpm inference was never wrong. The check waited for
+the `pnpm run dev` spawn line, which needs pnpm installed — so the runners
+almost certainly lack pnpm (not read from a CI log; the log host is blocked
+from the cloud container). It now checks the inference with or without pnpm.
+
 ## Still owed
 
 Ordered by how many users they affect, not by how interesting they are.
 
 | Item | Blast radius | What it takes |
 |---|---|---|
-| **C14** — `antra service install` likely broken on Linux | **Every Linux user** who tries the documented service install | The unit is written to `~/.config/antra/systemd/user/`, which `systemctl --user` does not search, and then `systemctl --user enable` runs with no `daemon-reload` and no `--user link` — so systemd cannot see the unit and enable fails. ROADMAP #6 claims this shipped, so **verify on a real Linux box first**. The fix is to write to systemd's search path or link the unit, and to decide what happens to units already on disk at the old path. |
+| **Release v0.6.2** — ship C14 | **Every Linux user** of `antra service install` | The fix is on `main` and does nothing until released. Follow **Releasing** below. Mention in the notes that a unit written by v0.6.1 is inert and the next `antra service install` replaces it. |
 | **Browser pass** — Safari + Firefox, never manually tested | Every user, on the one thing they judge you by | `docs/mvp.md` wants a human run. The TLS half is machine-checked in CI — `tests/e2e_securetransport.rs` asks Apple's own stack via `/usr/bin/curl` — but nobody has put the URL in a browser. **Highest value per minute of anyone's time.** |
-| **C13** — `pnpm` inference differs on GitHub runners | Narrow | Now gated so it cannot fail the job, but open: it fails on **both** runners while passing on a machine that has pnpm. Reproduce with `test_node_pnpm` and pnpm removed from `PATH`. |
+| **C16** — launchd plist likely has C14's fork problem | Every macOS user of `antra service install` | Unverified, by reading only: the plist runs `antra proxy start` with `KeepAlive` and no `ANTRA_DAEMON`, so it probably relaunches `proxy start` every ~10 s forever, each time printing *already running* into `daemon.log`. **Verify on a Mac first** (`launchctl print gui/$(id -u)/com.antra.proxy`, watch the runs count and the log). If real, add `ANTRA_DAEMON=1` under `EnvironmentVariables`, as C14 did for systemd. |
+| **C15** — daemon cannot start without IPv6 | Linux hosts with IPv6 off; some containers and WSL setups | Every listener binds `::1` and treats *any* error as "port in use", so the daemon says `Both 443 and 8443 are in use` on free ports. Tell `EAFNOSUPPORT`/`EADDRNOTAVAIL` apart from `EADDRINUSE` in `proxy/https.rs` and `util::port::is_port_available`, and bind IPv4 only when there is no IPv6 loopback. The claude.ai cloud container reproduces it. |
 | **Port 5000 message** | Flask users on macOS | A first `antra dev` on a Flask app says "Stop the process on port 5000" — it is macOS Control Center's AirPlay Receiver, which they cannot stop — and suggests `antra alias`, the wrong tool. The advice is wrong, not the behaviour, and it cannot be auto-fixed: Antra is right to refuse to silently remap, since the app would bind 5000 while the route pointed elsewhere. Name the actual holder, drop the `alias` suggestion. |
 
 ## Two things that will bite whoever touches the tests

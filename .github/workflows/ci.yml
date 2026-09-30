@@ -189,7 +189,7 @@ jobs:
               echo "| ${entry%%=*} | ${entry##*=} |"
             done
             echo
-            echo "Covers the portless-parity and zero-config suites, including the real end-to-end HTTPS proxy test. The language/framework-detection suites (e2e_all_features.sh, e2e_next_sprint.sh) are not run here yet: they assert on the detected toolchain actually spawning, so they only pass on a full dev toolchain, and e2e_next_sprint.sh has a platform-specific service-status assertion. They will be added once made hermetic."
+            echo "Covers all four suites: portless-parity and zero-config (including the real end-to-end HTTPS proxy test), and the two language/framework-detection suites. Detection is asserted everywhere; an assertion on the spawned command or a registered route is skipped where the runner lacks that toolchain (see SKIP lines in each suite's log), so green does not prove those dev commands start here."
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Run every suite, then fail: a single failure should not hide the

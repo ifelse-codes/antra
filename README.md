@@ -269,6 +269,8 @@ antra service status
 antra service uninstall
 ```
 
+Linux: install writes a systemd user unit to `~/.config/systemd/user/antra-proxy.service`, enables it and starts it; its output goes to `antra logs`. It needs a systemd user session — over SSH without lingering, in WSL or in a container there may not be one, and install says so. The unit runs as you, and most systems do not let a normal user bind 443, so expect the daemon's usual fallback to 8443. `ANTRA_PORT` / `ANTRA_HTTP_PORT` set when you run install are written into the unit.
+
 Windows limitation: the service runs as SYSTEM, so it uses the SYSTEM profile's CA and aliases — not yours. Trust and aliases you created as yourself won't apply to it (expect TLS warnings). For single-user dev, prefer `antra proxy start`.
 
 ### `antra trust`
