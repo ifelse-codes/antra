@@ -3,9 +3,8 @@
 > Written to be read cold, by any tool. It does not assume you were present for
 > the previous conversation.
 >
-> **Direction: `v0.6.2` is released and verified on real macOS and Linux
-> machines, Homebrew included. C16 (macOS service) is fixed on `main` and
-> not yet released. No new features.** Work should be GTM, plus
+> **Direction: `v0.6.3` is released and verified on real macOS and Linux
+> machines, Homebrew included. No new features.** Work should be GTM, plus
 > the items in "Still owed" below.
 
 Repo: `main` is the default branch; work in a feature branch.
@@ -30,7 +29,7 @@ difference is Antra never leaves your machine.
 1. `AGENT.md` — architecture, phase history, and a section headed *do not redo
    blindly* recording the ways this codebase has lied to itself. That section is
    the highest-value thing in the repo.
-2. `ROADMAP.md` — what is done (C1–C16 DONE; C16 not yet released).
+2. `ROADMAP.md` — what is done (C1–C16 all DONE).
 3. `README.md` — the user-facing description and install paths.
 4. `docs/security.md` — CA versioning, rotation, and the IPC socket rules. Read
    it before changing anything under `src/certs/` or `src/cli/service.rs`.
@@ -46,10 +45,13 @@ Full test commands, including the two traps that cost real time, are under
 
 ## Where things stand
 
-`v0.6.2` is published, the landing site serves it, and both install paths
+`v0.6.3` is published, the landing site serves it, and both install paths
 were checked on GitHub's macOS and Linux runners (**Release Check**): Homebrew
-and `curl | bash`, latest and pinned, all report `antra 0.6.2`. Release
-mechanics and verification are in the v0.6.2 section of `AGENT.md`.
+and `curl | bash`, latest and pinned, all report `antra 0.6.3`. v0.6.2 shipped
+the Linux fixes (C14, C15); v0.6.3 the macOS service fix (C16), which the
+**Service (macOS)** workflow now checks on a real Mac on every change to
+`service.rs`. Release mechanics are in the v0.6.2 and v0.6.3 sections of
+`AGENT.md`.
 
 **Homebrew was broken for new users until today.** The tap repo
 (`ifelse-codes/homebrew-antra`) sat on 0.2.3 from v0.3.0 through v0.6.1, since
@@ -57,7 +59,9 @@ releases only updated this repo's copy of the formula. Fixed with the v0.6.2
 release; **Releasing** step 5 now names the tap.
 
 The four shell e2e suites are green and **all four run in CI** on macOS and
-Ubuntu: 206 passing / 0 failing / 9 skipped. The Rust suite is at 406 passing.
+Ubuntu (206 passing / 0 failing / 9 skipped when last counted, at v0.6.1). The
+Rust suite is at 421 passing, and since C15 it passes in full in the IPv6-less
+claude.ai cloud container too.
 They were at 86 passing / 128 failing before this work, and the four suites had
 never run in CI at all.
 
@@ -85,7 +89,6 @@ Ordered by how many users they affect, not by how interesting they are.
 | Item | Blast radius | What it takes |
 |---|---|---|
 | **Browser pass** — Safari + Firefox, never manually tested | Every user, on the one thing they judge you by | `docs/mvp.md` wants a human run. The TLS half is machine-checked in CI — `tests/e2e_securetransport.rs` asks Apple's own stack via `/usr/bin/curl` — but nobody has put the URL in a browser. **Highest value per minute of anyone's time.** |
-| **Release v0.6.3** — ship C16 | Every macOS user of `antra service install` | The fix is on `main` and verified on a macOS runner, but does nothing until released. Follow **Releasing** below; the notes should say that a service installed by v0.6.2 or earlier needs `antra service install` again, which prints the hand-over (`antra proxy stop && launchctl load -w …`) because the old job's daemon outlives the unload. |
 | **Port 5000 message** | Flask users on macOS | A first `antra dev` on a Flask app says "Stop the process on port 5000" — it is macOS Control Center's AirPlay Receiver, which they cannot stop — and suggests `antra alias`, the wrong tool. The advice is wrong, not the behaviour, and it cannot be auto-fixed: Antra is right to refuse to silently remap, since the app would bind 5000 while the route pointed elsewhere. Name the actual holder, drop the `alias` suggestion. |
 
 ## Two things that will bite whoever touches the tests
@@ -151,7 +154,8 @@ GitHub API.
 2. Push the tag `v<version>` on `main`. `release.yml` cross-compiles five
    targets into a **draft** release. A cloud agent session cannot push tags
    (its git proxy answers 403), so a person pushes this one.
-3. Publish the draft. Then run **Release Notes** with the tag: it replaces
+3. Publish the draft, then confirm it is no longer a draft — during v0.6.3
+   the first publish did not take. Then run **Release Notes** with the tag: it replaces
    GitHub's generated PR list with `docs/releases/<tag>.md` and reads it back.
 4. Read each `sha256` from the release's own `.sha256` assets — do not hash
    locally, so a typo cannot creep into the formula. Check size alongside
