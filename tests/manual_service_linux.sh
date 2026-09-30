@@ -24,6 +24,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 A="${ANTRA_BIN:-$REPO_ROOT/target/debug/antra}"
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 export ANTRA_PORT=18443 ANTRA_HTTP_PORT=18080
+if ! systemctl --user show-environment >/dev/null 2>&1; then
+  # Without this, half the checks fail and read like product bugs.
+  echo "No systemd user manager reachable (XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR)." >&2
+  echo "Start one first; see \"Running systemd --user in a container\" in AGENT.md." >&2
+  exit 2
+fi
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/antra-proxy.service"
 LEGACY="$HOME/.config/antra/systemd/user/antra-proxy.service"
 pass=0; fail=0

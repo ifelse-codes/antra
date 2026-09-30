@@ -28,11 +28,13 @@ pub fn find_free_port_in_range() -> anyhow::Result<u16> {
 /// a wildcard-bound server like `python3 -m http.server` owns the port) —
 /// also probe-connects: anything accepting on loopback means taken.
 pub fn is_port_available(port: u16) -> bool {
-    if TcpListener::bind(("127.0.0.1", port)).is_err() {
-        return false;
-    }
-    if TcpListener::bind(("::1", port)).is_err() {
-        return false;
+    let v4 = TcpListener::bind(("127.0.0.1", port));
+    let v6 = TcpListener::bind(("::1", port));
+    // Release both before the connect probe below, or it finds our own
+    // listener and every port reads as taken.
+    match loopback_binds(v4, v6) {
+        Ok(listeners) => drop(listeners),
+        Err(_) => return false,
     }
     if std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
@@ -43,6 +45,59 @@ pub fn is_port_available(port: u16) -> bool {
         return false;
     }
     true
+}
+
+/// Combine the two loopback binds for one port into "both", "IPv4 only", or
+/// an error.
+///
+/// Antra binds `::1` beside `127.0.0.1` so `localhost`, which modern macOS
+/// resolves to `::1` first, can never reach some other IPv6 listener on the
+/// same port. That reason disappears on a host with no IPv6 loopback: nothing
+/// can listen on `::1` there, so there is nothing to shadow. Before this, any
+/// `::1` failure counted as "port in use", and on such a host (booted with
+/// `ipv6.disable=1`, some containers and WSL setups) every port read as taken
+/// and the daemon refused to start with `Both 443 and 8443 are in use` on
+/// free ports — ROADMAP C15.
+///
+/// So the `::1` bind is dropped only for [`ipv6_loopback_unavailable`]; any
+/// other failure, above all the port being taken, is still an error, which
+/// keeps callers from half-listening. The IPv4 bind is always required.
+///
+/// Generic over the listener so the sync and async binds share one decision,
+/// and so it can be tested without a host that lacks IPv6.
+pub fn loopback_binds<L>(
+    v4: std::io::Result<L>,
+    v6: std::io::Result<L>,
+) -> std::io::Result<Vec<L>> {
+    let mut listeners = vec![v4?];
+    match v6 {
+        Ok(listener) => listeners.push(listener),
+        Err(e) if ipv6_loopback_unavailable(&e) => {}
+        Err(e) => return Err(e),
+    }
+    Ok(listeners)
+}
+
+/// Whether a failed `::1` bind means the host has no IPv6 loopback, rather
+/// than that the port is taken or forbidden.
+///
+/// `EAFNOSUPPORT`: the kernel has no IPv6 at all, so the socket cannot even
+/// be created. `EADDRNOTAVAIL`: IPv6 exists but `::1` is not configured, as
+/// with `net.ipv6.conf.lo.disable_ipv6=1`. `EADDRINUSE` and `EACCES` are
+/// deliberately not here.
+pub fn ipv6_loopback_unavailable(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::AddrNotAvailable {
+        return true;
+    }
+    #[cfg(unix)]
+    let no_ipv6 = libc::EAFNOSUPPORT;
+    #[cfg(windows)]
+    let no_ipv6 = 10047; // WSAEAFNOSUPPORT
+    #[cfg(any(unix, windows))]
+    if e.raw_os_error() == Some(no_ipv6) {
+        return true;
+    }
+    false
 }
 
 /// Try to detect the port from a command's arguments.
@@ -316,6 +371,74 @@ mod tests {
                 panic!("released port {port} still unavailable after 10 attempts (port snatched by parallel load?)");
             }
         }
+    }
+
+    /// The error a `::1` socket gets on a kernel with no IPv6 at all.
+    fn no_ipv6() -> std::io::Error {
+        #[cfg(unix)]
+        let code = libc::EAFNOSUPPORT;
+        #[cfg(windows)]
+        let code = 10047; // WSAEAFNOSUPPORT
+        std::io::Error::from_raw_os_error(code)
+    }
+
+    fn kind(k: std::io::ErrorKind) -> std::io::Error {
+        std::io::Error::from(k)
+    }
+
+    #[test]
+    fn missing_ipv6_is_told_apart_from_a_busy_port() {
+        assert!(ipv6_loopback_unavailable(&no_ipv6()));
+        assert!(ipv6_loopback_unavailable(&kind(
+            std::io::ErrorKind::AddrNotAvailable
+        )));
+        for k in [
+            std::io::ErrorKind::AddrInUse,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::ConnectionRefused,
+        ] {
+            assert!(
+                !ipv6_loopback_unavailable(&kind(k)),
+                "{k:?} must not read as missing IPv6"
+            );
+        }
+    }
+
+    #[test]
+    fn loopback_binds_keeps_both_stacks_when_both_bind() {
+        assert_eq!(loopback_binds(Ok(4), Ok(6)).unwrap(), vec![4, 6]);
+    }
+
+    /// ROADMAP C15: on a host without IPv6 loopback the daemon must still
+    /// bind 127.0.0.1, instead of reading every port as taken.
+    #[test]
+    fn loopback_binds_drops_ipv6_only_when_the_host_has_none() {
+        assert_eq!(loopback_binds(Ok(4), Err(no_ipv6())).unwrap(), vec![4]);
+        assert_eq!(
+            loopback_binds(Ok(4), Err(kind(std::io::ErrorKind::AddrNotAvailable))).unwrap(),
+            vec![4]
+        );
+    }
+
+    /// The reason `::1` is bound at all: another server there would catch
+    /// `localhost`. A taken or forbidden `::1` must stay an error.
+    #[test]
+    fn loopback_binds_fails_when_ipv6_is_taken_or_forbidden() {
+        for k in [
+            std::io::ErrorKind::AddrInUse,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let err = loopback_binds(Ok(4), Err(kind(k))).unwrap_err();
+            assert_eq!(err.kind(), k);
+        }
+    }
+
+    #[test]
+    fn loopback_binds_always_needs_ipv4() {
+        let err =
+            loopback_binds::<i32>(Err(kind(std::io::ErrorKind::AddrInUse)), Ok(6)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        assert!(loopback_binds::<i32>(Err(no_ipv6()), Ok(6)).is_err());
     }
 
     #[test]

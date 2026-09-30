@@ -8,16 +8,33 @@ use crate::certs::cache::CertCache;
 use crate::proxy::http::ProxyState;
 use crate::routing::registry::RouteRegistry;
 
+/// Bind `port` on both loopback stacks, or on 127.0.0.1 alone when the host
+/// has no IPv6 loopback. Any other failure — the port being taken, above all
+/// — is an error, so a caller never half-listens. The rule and its reasons
+/// live in [`crate::util::port::loopback_binds`], shared with the sync check.
+pub async fn bind_loopback(port: u16) -> Result<Vec<TcpListener>> {
+    let v4 = TcpListener::bind(("127.0.0.1", port)).await;
+    let v6 = TcpListener::bind(("::1", port)).await;
+    let listeners = crate::util::port::loopback_binds(v4, v6)?;
+    if listeners.len() == 1 {
+        tracing::debug!(
+            port,
+            "No IPv6 loopback on this host; binding 127.0.0.1 only"
+        );
+    }
+    Ok(listeners)
+}
+
 /// Bind HTTP→HTTPS redirect listeners on the given port (does not serve).
 /// Binds both 127.0.0.1 and ::1 so `localhost` (which prefers ::1 on modern
-/// macOS) never falls through to an unrelated IPv6 listener.
+/// macOS) never falls through to an unrelated IPv6 listener — 127.0.0.1
+/// alone on a host with no IPv6 loopback, where no such listener can exist.
 pub async fn bind_http_redirect(port: u16) -> Result<Vec<TcpListener>> {
-    let mut listeners = Vec::new();
-    for host in ["127.0.0.1", "::1"] {
-        let addr = format!("{host}:{port}");
-        let listener = TcpListener::bind(&addr).await?;
-        tracing::info!(%addr, "HTTP→HTTPS redirect listening");
-        listeners.push(listener);
+    let listeners = bind_loopback(port).await?;
+    for listener in &listeners {
+        if let Ok(addr) = listener.local_addr() {
+            tracing::info!(%addr, "HTTP→HTTPS redirect listening");
+        }
     }
     Ok(listeners)
 }
@@ -86,18 +103,15 @@ pub fn run_http_redirect(listener: TcpListener, https_port: u16) {
     });
 }
 
-/// Probe whether a port is bindable on both loopback stacks
+/// Probe whether a port is bindable on the loopback stacks this host has
 /// (quick check, drops the listeners immediately).
 pub async fn probe_port(port: u16) -> Result<()> {
-    for host in ["127.0.0.1", "::1"] {
-        let addr = format!("{host}:{port}");
-        let _listener = TcpListener::bind(&addr).await?;
-    }
-    Ok(())
+    bind_loopback(port).await.map(drop)
 }
 
 /// Start the HTTPS proxy server with TLS termination.
-/// Listens on both 127.0.0.1 and ::1 (dual-stack loopback).
+/// Listens on both 127.0.0.1 and ::1 (dual-stack loopback), or 127.0.0.1
+/// alone on a host with no IPv6 loopback.
 pub async fn start_server(
     port: u16,
     registry: Arc<RouteRegistry>,
@@ -119,12 +133,11 @@ pub async fn start_server(
 
     // Bind both loopback stacks; fail fast if either is taken so the
     // daemon falls back cleanly instead of half-listening.
-    let mut listeners = Vec::new();
-    for host in ["127.0.0.1", "::1"] {
-        let addr = format!("{host}:{port}");
-        let listener = TcpListener::bind(&addr).await?;
-        tracing::info!(%addr, "HTTPS proxy listening");
-        listeners.push(listener);
+    let listeners = bind_loopback(port).await?;
+    for listener in &listeners {
+        if let Ok(addr) = listener.local_addr() {
+            tracing::info!(%addr, "HTTPS proxy listening");
+        }
     }
 
     // One accept loop per listener; all share acceptor + state.
