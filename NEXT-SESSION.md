@@ -45,8 +45,9 @@ Full test commands, including the two traps that cost real time, are under
 
 ## Where things stand
 
-`v0.6.1` is published, live on the landing site, and installable via both Homebrew
-and `curl | bash`. Release mechanics and post-release verification are recorded
+`v0.6.2` is published. Until the tap PR (ifelse-codes/homebrew-antra#1) is merged,
+Homebrew still installs **0.2.3** — see **Releasing** step 3. `curl | bash`
+installs v0.6.2. Release mechanics and post-release verification are recorded
 in the v0.6.1 section of `AGENT.md`.
 
 The four shell e2e suites are green and **all four run in CI** on macOS and
@@ -145,7 +146,11 @@ automatically. Then:
    --title ... --notes-file ...`).
 2. Read each `sha256` from the release's own `.sha256` assets — do not hash
    locally, so a typo cannot creep into the formula.
-3. Update `Formula/antra.rb` with the new version and those hashes.
+3. Update `Formula/antra.rb` with the new version and those hashes, **and copy
+   the same file to the tap repo, `ifelse-codes/homebrew-antra`**. That repo is
+   what `brew install ifelse-codes/antra/antra` reads; the file in this repo is
+   not. The tap sat on 0.2.3 from v0.3.0 through v0.6.1 because only this copy
+   was updated, so Homebrew users got a build without the v0.5.0 CA fix.
 4. If `install.sh` or `landing/` changed, redeploy the landing site **as a
    production deployment**: from `landing/`, with an explicit `--branch main`.
    `wrangler pages deploy .` infers the branch from git, and from a feature
