@@ -39,6 +39,69 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
+## Unreleased — on `main` after v0.6.1
+
+**`antra service install` works on Linux (ROADMAP C14).** It was broken in two
+layers, and fixing only the one the handoff named would have shipped a service
+that restarts forever:
+
+1. The unit went to `~/.config/antra/systemd/user/`, which `systemctl --user`
+   does not search, and `enable` ran with no `daemon-reload`. It now goes to
+   `$XDG_CONFIG_HOME/systemd/user/` and install runs reload → enable → start.
+2. `antra proxy start` **forks the daemon and exits**. Under `Type=simple`
+   systemd reads that exit as the service stopping and SIGTERMs the rest of the
+   cgroup — the daemon — then `Restart=always` starts the cycle again. The unit
+   now sets `Environment=ANTRA_DAEMON=1`, so `proxy start` runs the daemon in
+   the foreground, which is exactly what the CLI's own auto-start does.
+
+Install also stopped lying: it prints *started* only once the IPC socket
+answers, rolls the unit file back to what it found when reload or enable fails,
+refuses to start a second daemon beside one already running (and says how to
+hand over), and names the missing systemd user session instead of printing a
+bare D-Bus error. Units left at the old path were never loaded; install and
+uninstall delete them and status mentions them.
+
+**Verified against a real `systemd --user` manager**, with
+`tests/manual_service_linux.sh`: 28 checks, 28/0 on the fix and 10/18 on v0.6.1
+on the same box. Five new unit tests in `cli/service.rs`; each was mutated to
+confirm it goes red.
+
+**Do not redo blindly:**
+- **Any service manager that runs `antra proxy start` needs `ANTRA_DAEMON=1`.**
+  Without it the managed process is a launcher that exits in ~100 ms. The
+  launchd plist has the same shape and is filed as ROADMAP C16 — unverified,
+  since it needs a Mac.
+- **Running `systemd --user` in a container that was not booted with systemd.**
+  `systemd --user` exits 1 silently; `strace` shows it checking
+  `/run/systemd/system/`. This is enough to get a real user manager:
+  ```bash
+  mkdir -p /run/systemd/system
+  export XDG_RUNTIME_DIR=/run/user/$(id -u); mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+  setsid systemd --user >/tmp/sd-user.log 2>&1 &
+  systemctl --user is-system-running   # → running
+  ```
+  `systemd-analyze --user unit-paths` prints the search path without a manager.
+- **The claude.ai cloud container has no IPv6** (`socket(AF_INET6)` →
+  `EAFNOSUPPORT`), and the daemon binds `::1` unconditionally, so it cannot
+  start there and blames *port in use* (ROADMAP C15). Seven Rust tests fail
+  there for that reason alone (`util::port` ×2 in each of lib and bin,
+  `util_port` ×1, `upstream_pool` ×2) and pass once `::1` is skipped. To
+  exercise the daemon in such a box, build a throwaway binary with `"::1"`
+  dropped from the loops in `proxy/https.rs` and the `::1` check in
+  `util/port.rs`, copy it out of `target/`, and `git checkout` both files. Do
+  not commit that as a fix; C15 needs the error kinds told apart.
+- **The service and the CLI find each other through `$XDG_RUNTIME_DIR`.**
+  `socket_path()` prefers it, and the user manager always sets it. A shell
+  without it (`su` without `-l`, some cron or container shells) looks under
+  `data_local_dir()` instead, cannot see the service's daemon, and auto-starts
+  a second one. Check `echo $XDG_RUNTIME_DIR` before debugging anything else.
+- **A service restarts on idle.** The daemon exits after 10 minutes with no
+  routes and `Restart=always` brings it back 5 s later — observed: *Idle
+  timeout reached* at 09:52:34, *Daemon ready* again at 09:52:39,
+  `NRestarts=1`. Harmless, but it reads like a crash in `NRestarts`.
+
+---
+
 ## Release — v0.6.1 (2026-09-29)
 
 **Two user-facing fixes and one behaviour change.** Both fixes are bugs a user
@@ -76,7 +139,7 @@ could hit without doing anything unusual.
 **Known issue, not fixed here:** `antra service install` writes the systemd
 unit to `~/.config/antra/systemd/user/`, which is not a path `systemctl --user`
 searches, and then runs `systemctl --user enable` with no `daemon-reload` or
-`--user link`. Install is likely broken on Linux for that reason. ROADMAP C14.
+`--user link`. Install is likely broken on Linux for that reason. ROADMAP C14. *Fixed on `main` after this release — see "Unreleased" above.*
 
 **Release mechanics, all verified after the fact:**
 - Tag `v0.6.1` → the release workflow built all five targets; the draft was
@@ -175,7 +238,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C13 are done or filed; the exceptions are C13 (a `pnpm` inference difference on GitHub runners, now gated so it cannot fail the job) and C14 (`antra service install` likely broken on Linux — the unit is written outside systemd's search path, so this needs verifying on a real Linux box). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
+**Current state:** Phases (0-10) are implemented and `v0.6.1` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 406 passing. ROADMAP C4–C14 are done; C14 (`antra service install` on Linux) is fixed on `main` and not yet released, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. Open: C15 (the daemon cannot start on a host without IPv6) and C16 (the launchd plist likely has C14's fork problem — needs a Mac). The formal browser checklist (Safari, Firefox) is the one item still needing a human.
 
 ### Landing Page
 
