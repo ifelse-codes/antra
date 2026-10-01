@@ -13,7 +13,10 @@ use crate::certs::store::CertStore;
 pub struct CertCache {
     certs: RwLock<HashMap<String, Arc<rustls::sign::CertifiedKey>>>,
     store: CertStore,
-    ca: CaCert,
+    /// The CA leaves are signed with. Behind a lock, not a plain field: it is
+    /// replaced when `antra trust` rotates the CA underneath a running daemon,
+    /// and `resolve_cert` reads it on every handshake.
+    ca: RwLock<CaCert>,
 }
 
 impl fmt::Debug for CertCache {
@@ -46,12 +49,65 @@ impl CertCache {
         Ok(Self {
             certs: RwLock::new(HashMap::new()),
             store,
-            ca,
+            ca: RwLock::new(ca),
         })
+    }
+
+    /// Re-read the CA if it is no longer the one this cache is signing with.
+    ///
+    /// `antra trust` rotates the CA on disk while the daemon is running. The
+    /// trust store then holds the new CA and the daemon still holds the old
+    /// one, so every handshake it completes chains to a key the client no
+    /// longer trusts. Reloading here — and dropping the memory cache, whose
+    /// entries are all signed by the old key — is what makes a rotation
+    /// survivable without restarting the daemon.
+    fn reload_ca_if_rotated(&self) {
+        let Ok(fresh) = self.store.get_or_create_ca() else {
+            return;
+        };
+        let same = match (self.ca.read(), read_ca_fingerprint(&self.store)) {
+            (Ok(loaded), Some(on_disk)) => {
+                crate::certs::fingerprint(loaded.cert_der.as_ref()) == on_disk
+            }
+            // No fingerprint to compare against, or the lock is poisoned. Do
+            // not churn: the worst case is the pre-fix behaviour.
+            _ => true,
+        };
+        if same {
+            return;
+        }
+        match self.ca.write() {
+            Ok(mut ca) => {
+                tracing::warn!(
+                    "The local CA changed while this daemon was running — reloading it and dropping cached certificates"
+                );
+                *ca = fresh;
+                if let Ok(mut certs) = self.certs.write() {
+                    certs.clear();
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "Failed to reload the rotated CA"),
+        }
     }
 
     /// Resolve or generate a certificate for the given hostname.
     fn resolve_cert(&self, hostname: &str) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        // 0. If the CA on disk is no longer the one this cache loaded at
+        //    startup, reload before doing anything else. A long-lived daemon
+        //    otherwise keeps signing with the CA it loaded at boot: after
+        //    `antra trust` rotates the CA, the trust store holds the new one
+        //    and the daemon still issues leaves from the old key, so *every*
+        //    domain fails to verify until the daemon is restarted — and
+        //    re-running `antra trust` cannot help, because the rotation is
+        //    exactly what already succeeded.
+        //
+        //    This costs one small file read per SNI resolution that is not
+        //    already in memory, which is not a hot path. It is checked before
+        //    the memory cache deliberately: a cert cached under the old CA is
+        //    just as untrusted as a fresh one, and returning it would hide the
+        //    rotation.
+        self.reload_ca_if_rotated();
+
         // 1. Check memory cache. A long-lived daemon holds these for the
         //    process lifetime, so a leaf that entered its renewal window
         //    while cached has to be dropped here — otherwise the disk-side
@@ -73,7 +129,14 @@ impl CertCache {
         }
 
         // 2. Check disk cache / generate new
-        let leaf = match self.store.get_or_create_leaf(hostname, &self.ca) {
+        let ca = match self.ca.read() {
+            Ok(ca) => ca,
+            Err(e) => {
+                tracing::error!(%hostname, error = %e, "Failed to read the CA for signing");
+                return None;
+            }
+        };
+        let leaf = match self.store.get_or_create_leaf(hostname, &ca) {
             Ok(leaf) => leaf,
             Err(e) => {
                 tracing::warn!(%hostname, error = %e, "Failed to generate leaf certificate — TLS handshake will fail");
@@ -105,14 +168,20 @@ impl CertCache {
     /// Read by the proxy end-to-end test as a trust anchor; nothing in the
     /// binary itself needs it.
     #[allow(dead_code)]
-    pub fn ca_cert_der(&self) -> &[u8] {
-        &self.ca.cert_der
+    pub fn ca_cert_der(&self) -> Vec<u8> {
+        self.ca
+            .read()
+            .map(|ca| ca.cert_der.to_vec())
+            .unwrap_or_default()
     }
 
     /// Fingerprint of the CA this process is serving, reported over IPC so a
     /// CLI can spot a daemon that predates a CA rotation.
     pub fn ca_fingerprint(&self) -> String {
-        crate::certs::fingerprint(self.ca.cert_der.as_ref())
+        self.ca
+            .read()
+            .map(|ca| crate::certs::fingerprint(ca.cert_der.as_ref()))
+            .unwrap_or_default()
     }
 }
 
@@ -138,6 +207,12 @@ fn is_expiring(key: &rustls::sign::CertifiedKey) -> bool {
         .is_some_and(|der| crate::certs::validate::needs_renewal(der.as_ref()))
 }
 
+/// Fingerprint of the CA currently on disk, if there is one.
+fn read_ca_fingerprint(store: &CertStore) -> Option<String> {
+    let pem = std::fs::read_to_string(store.config_dir.join("ca.pem")).ok()?;
+    let der = crate::certs::store::pem_to_der(&pem).ok()?;
+    Some(crate::certs::fingerprint(&der))
+}
 #[cfg(test)]
 mod tests {
     use super::*;

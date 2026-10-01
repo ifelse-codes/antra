@@ -45,7 +45,13 @@ impl CertStore {
             .join("antra");
         let certs_dir = config_dir.join("certs");
         std::fs::create_dir_all(&certs_dir)?;
-        ensure_leaf_version(&certs_dir)?;
+        // The CA on disk, if there is one yet. Passing it in lets
+        // `ensure_leaf_version` also purge leaves signed by a retired CA — a
+        // fresh `CertStore` is built on every daemon start and on every
+        // `antra trust`, so this is the one place that reliably notices a
+        // rotation has happened.
+        let existing_ca = std::fs::read_to_string(config_dir.join("ca.pem")).ok();
+        ensure_leaf_version(&certs_dir, existing_ca.as_deref())?;
         Ok(Self {
             config_dir,
             certs_dir,
@@ -192,7 +198,7 @@ impl CertStore {
     pub fn load_leaf(&self, hostname: &str) -> Result<LeafCert> {
         let cert_pem = std::fs::read_to_string(self.leaf_cert_path(hostname))?;
         let key_pem = std::fs::read_to_string(self.leaf_key_path(hostname))?;
-        let cert_der = load_pem_cert(&cert_pem)?;
+        let cert_der = pem_to_der(&cert_pem)?;
         Ok(LeafCert {
             cert_der,
             cert_pem,
@@ -273,19 +279,41 @@ impl CertStore {
     }
 }
 
-fn load_pem_cert(pem: &str) -> Result<CertificateDer<'static>> {
+/// Decode a PEM certificate to DER. `pub` so the SNI cache can fingerprint the
+/// on-disk CA without duplicating the base64 handling.
+pub fn pem_to_der(pem: &str) -> Result<CertificateDer<'static>> {
     let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
     let der = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)?;
     Ok(CertificateDer::from(der))
 }
 
-/// Purge cached leaf certs when the leaf format version changes.
-/// Old leafs can't chain to the CA, so serving them would keep browsers
-/// warning even after `antra trust`. The CA itself is kept (re-trust not needed).
-fn ensure_leaf_version(certs_dir: &Path) -> Result<()> {
+/// Purge cached leaf certs when the leaf format version changes, or when the CA
+/// they were signed by is no longer the current one.
+///
+/// The leaf-format half is the original intent. The CA half is the bug this
+/// function was missing, and it is the worse of the two: a leaf signed by a
+/// retired CA cannot chain to the CA now in the trust store, so every domain the
+/// user had already opened keeps warning *after* a successful `antra trust` —
+/// and re-running `antra trust` cannot fix it, because that is the thing that
+/// already succeeded.
+///
+/// The subject name cannot be used to spot this. Every Antra CA is
+/// `CN=Antra Local CA`, so a stale leaf's issuer looks identical to the current
+/// one; the key is what differs. So the marker records the CA's key
+/// fingerprint alongside the format version, and a mismatch purges.
+///
+/// The CA itself is never touched — it lives outside `certs_dir` — so this costs
+/// a re-sign, not a re-trust.
+fn ensure_leaf_version(certs_dir: &Path, ca_pem: Option<&str>) -> Result<()> {
+    let expected = match ca_pem.and_then(ca_key_fingerprint) {
+        Some(fp) => format!("{LEAF_VERSION}:{fp}"),
+        // No CA yet (a first run). The format version alone is the right
+        // marker; the CA check becomes meaningful from the second run on.
+        None => LEAF_VERSION.to_string(),
+    };
     let marker = certs_dir.join(".leaf-version");
     let current = std::fs::read_to_string(&marker).unwrap_or_default();
-    if current.trim() == LEAF_VERSION {
+    if current.trim() == expected {
         return Ok(());
     }
     if let Ok(entries) = std::fs::read_dir(certs_dir) {
@@ -296,8 +324,17 @@ fn ensure_leaf_version(certs_dir: &Path) -> Result<()> {
             }
         }
     }
-    std::fs::write(&marker, LEAF_VERSION)?;
+    std::fs::write(&marker, expected)?;
     Ok(())
+}
+
+/// A short, stable identifier for a CA certificate — not its subject, which is
+/// the same string (`CN=Antra Local CA`) for every CA Antra has ever generated.
+/// A rotation changes the certificate, so its fingerprint is what distinguishes
+/// the current CA from a retired one.
+fn ca_key_fingerprint(ca_pem: &str) -> Option<String> {
+    let der = pem_to_der(ca_pem).ok()?;
+    Some(crate::certs::fingerprint(&der))
 }
 
 #[cfg(test)]
@@ -328,7 +365,7 @@ mod tests {
         std::fs::write(certs.join("old.localhost.pem"), "stale").unwrap();
         std::fs::write(certs.join(".leaf-version"), "1").unwrap();
 
-        ensure_leaf_version(certs).unwrap();
+        ensure_leaf_version(certs, None).unwrap();
 
         assert!(!certs.join("old.localhost.pem").exists());
         assert_eq!(
@@ -338,7 +375,54 @@ mod tests {
 
         // Second run is a no-op: fresh leafs survive.
         std::fs::write(certs.join("new.localhost.pem"), "fresh").unwrap();
-        ensure_leaf_version(certs).unwrap();
+        ensure_leaf_version(certs, None).unwrap();
         assert!(certs.join("new.localhost.pem").exists());
+    }
+
+    /// A leaf signed by a retired CA must not outlive that CA.
+    ///
+    /// The failure this prevents is invisible from the client side and
+    /// unfixable from there: every domain the user had already opened keeps
+    /// warning *after* a successful `antra trust`, and re-running `antra trust`
+    /// cannot help, because the rotation is the thing that already succeeded.
+    /// Confirmed end-to-end on 2026-10-01 — a stale leaf survived a rotation
+    /// and a daemon restart and served `Verify return code: 21` until it was
+    /// deleted by hand.
+    ///
+    /// The marker cannot compare CA *subjects*: every Antra CA is
+    /// `CN=Antra Local CA`, so the fingerprint is the only thing that tells two
+    /// of them apart.
+    #[test]
+    fn leaves_signed_by_a_retired_ca_are_purged() {
+        let dir = tempfile::tempdir().unwrap();
+        let certs = dir.path();
+        let ca1 = ca::generate_ca().unwrap();
+        let ca2 = ca::generate_ca().unwrap();
+        assert_ne!(
+            crate::certs::fingerprint(ca1.cert_der.as_ref()),
+            crate::certs::fingerprint(ca2.cert_der.as_ref()),
+            "two generated CAs must differ, or this test proves nothing"
+        );
+
+        // The first open has no marker, so it writes one and purges. Only
+        // leaves cached *after* that are interesting.
+        ensure_leaf_version(certs, Some(&ca1.cert_pem)).unwrap();
+        std::fs::write(certs.join("app.localhost.pem"), "signed-by-ca1").unwrap();
+        std::fs::write(certs.join("app.localhost-key.pem"), "key").unwrap();
+        ensure_leaf_version(certs, Some(&ca1.cert_pem)).unwrap();
+        assert!(certs.join("app.localhost.pem").exists());
+
+        // The CA rotates. Opening a store now must drop the stale leaf.
+        ensure_leaf_version(certs, Some(&ca2.cert_pem)).unwrap();
+        assert!(
+            !certs.join("app.localhost.pem").exists(),
+            "a leaf signed by the retired CA is still on disk after the rotation"
+        );
+
+        // And the marker now records ca2, so this is stable rather than a purge
+        // on every open.
+        std::fs::write(certs.join("app.localhost.pem"), "signed-by-ca2").unwrap();
+        ensure_leaf_version(certs, Some(&ca2.cert_pem)).unwrap();
+        assert!(certs.join("app.localhost.pem").exists());
     }
 }
