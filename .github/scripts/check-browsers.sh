@@ -166,9 +166,16 @@ probe() {
         // channel:chrome is ignored by the bundled chromium; the plain
         // chromium build is what CI has, and it uses NSS on Linux, which is
         // the store under test.
-        const browser = await engine.launch({ args: ["--no-sandbox"] });
-        const page = await browser.newPage({ ignoreHTTPSErrors: false });
+        //
+        // Launch is INSIDE the try. It used to sit outside, so a browser that
+        // would not start — a missing executable, a missing shared library —
+        // rejected outside any handler and printed nothing at all. The result
+        // was a bare "WebKit: " with no reason, which is the least useful
+        // possible failure message and hid the real cause on the first CI run.
+        let browser;
         try {
+          browser = await engine.launch({ args: ["--no-sandbox"] });
+          const page = await browser.newPage({ ignoreHTTPSErrors: false });
           const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
           if (!resp) { console.log("ERR no response"); }
           else {
@@ -176,9 +183,12 @@ probe() {
             console.log((text || "").includes(marker) ? "OK " + resp.status() : "ERR unexpected body: " + String(text).slice(0, 80));
           }
         } catch (e) {
-          console.log("ERR " + String(e.message || e).split("\n")[0]);
+          // The first line of a Playwright error is often blank, so take the
+          // first non-empty one.
+          const lines = String((e && e.message) || e).split("\n").map(s => s.trim()).filter(Boolean);
+          console.log("ERR " + (lines[0] || String(e)));
         } finally {
-          await browser.close();
+          if (browser) { await browser.close().catch(() => {}); }
         }
       })();
     ' "$channel" "$url" "${ANTRA_BROWSER_BODY:-antra-browser-ok}"

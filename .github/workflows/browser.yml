@@ -57,6 +57,13 @@ jobs:
       ANTRA_HTTP_PORT: "18996"
       ANTRA_BROWSER_UPSTREAM: "18477"
       ANTRA_BROWSER_DOMAIN: browser.localhost
+      # An explicit browsers path. Playwright defaults to $HOME/.cache, and
+      # this job runs the check under a hermetic HOME, so the browsers
+      # installed during setup (where HOME is still the runner's) were
+      # invisible to the check ("Executable doesn't exist at
+      # /tmp/ab-ci/.cache/ms-playwright/..."). Pinning the path decouples the
+      # two HOMEs.
+      PLAYWRIGHT_BROWSERS_PATH: /tmp/pw-browsers
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
