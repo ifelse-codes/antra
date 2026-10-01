@@ -192,6 +192,24 @@ else
     skip_it "Playwright not installed (npm i -g playwright && npx playwright install)"
 fi
 
+# Whether the CA is actually trusted *in this environment*. This is the single
+# most important input to how a browser failure is read, so it is a real
+# assertion rather than a comment.
+#
+# Measured 2026-10-01: `sudo antra trust` succeeds on ubuntu-latest and fails on
+# macos-latest, where neither the user keychain nor the system keychain is
+# writable without a GUI authorisation dialog. A macOS runner therefore cannot
+# host this check at all, and its browser failures say nothing about Antra's
+# certificates. Conflating that with the Linux NSS gap (C19) would be a false
+# report of the same bug in two places.
+TRUSTED=no
+if "$ANTRA_BIN" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
+    TRUSTED=yes
+    ok "the CA is trusted in this environment"
+else
+    xfail "the CA is NOT trusted here — browser results below say nothing about Antra's certificates"
+fi
+
 for b in chrome firefox; do
     url="$(browser_url)"
     if ! have_playwright; then
@@ -204,11 +222,13 @@ for b in chrome firefox; do
             ok "$b loaded $(browser_url) with no certificate error (${result#OK })"
             ;;
         *)
-            # Expected on Linux: `antra trust` writes the system store, Chrome
-            # and Firefox read ~/.pki/nssdb. Recorded, not hidden — this is the
-            # debt that Phase 6's NSS exclusion creates.
-            if [ "$(uname -s)" = "Linux" ]; then
-                xfail "$b: $result  [Linux reads ~/.pki/nssdb; antra trust writes only the system store — see AGENT.md Phase 6 exclusions]"
+            if [ "$TRUSTED" = "no" ]; then
+                xfail "$b: $result  [cause: no CA trust in this environment, not Antra's TLS]"
+            elif [ "$(uname -s)" = "Linux" ]; then
+                # Expected on Linux: `antra trust` writes the system store,
+                # Chrome and Firefox read ~/.pki/nssdb. Recorded, not hidden —
+                # this is the debt Phase 6's NSS exclusion creates (ROADMAP C19).
+                xfail "$b: $result  [cause: Linux reads ~/.pki/nssdb and antra trust writes only the system store — ROADMAP C19]"
             else
                 bad "$b: $result"
             fi
@@ -223,7 +243,11 @@ if have_playwright; then
     result="$(probe webkit "$url")"
     case "$result" in
         OK*)   ok "WebKit loaded $(browser_url) with no certificate error (${result#OK })" ;;
-        *)     bad "WebKit: $result" ;;
+        *)     if [ "$TRUSTED" = "no" ]; then
+                   xfail "WebKit: $result  [cause: no CA trust in this environment, not Antra's TLS]"
+               else
+                   bad "WebKit: $result"
+               fi ;;
     esac
 else
     xfail "WebKit: no Playwright driver"
@@ -241,12 +265,17 @@ fi
 # assertion here that is known to be meaningful today — it is what
 # e2e_securetransport.rs already covers on macOS. A failure here is a real
 # regression in Antra's own TLS, not a browser store issue.
+#
+# It passes `--cacert` explicitly, so it validates Antra's certificate and the
+# proxy's TLS without needing the CA in any system store. That is deliberate: it
+# is the only strict assertion that still means something on a runner where
+# trust cannot be installed, which is every macOS runner today.
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
         --cacert "$CA_PEM" \
         --resolve "$BASE_DOMAIN:$ANTRA_PORT:127.0.0.1" \
         "$(browser_url)" 2>/dev/null)"
 if [ "$code" = "200" ]; then
-    ok "curl against the same URL: 200 (TLS itself is sound)"
+    ok "curl against the same URL with --cacert: 200 (Antra's own TLS is sound)"
 else
     bad "curl against $(browser_url): got '$code', expected 200 — Antra's own TLS is broken, not just a browser store"
 fi

@@ -17,7 +17,10 @@
 > - **No GitHub Actions upgrade** for now (the Node 20 deprecation warnings
 >   on `actions/checkout@v4` etc.) — revisit only if a workflow breaks.
 > - **The manual Safari + Firefox pass on `docs/mvp.md` is not planned** and
->   must not be re-added to "Still owed" unprompted.
+>   must not be re-added to "Still owed" unprompted. The browser check cannot
+>   replace it on macOS: `antra trust` cannot install there at all, so that leg
+>   only proves `curl --cacert`. Measured, not assumed — see "Answered by the
+>   first CI run" below.
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
@@ -114,25 +117,41 @@ and A2 are **built**. v0.6.4 carries the lot.
 | **Linux: Chrome warns after `antra trust`** | **OPEN, by decision.** Every Linux user of Chrome and Firefox — the product's headline promise | `antra trust` installs the CA into the system store (`/usr/local/share/ca-certificates`), which `curl` uses but Chrome and Firefox on Linux do not: they read `~/.pki/nssdb`. A first run on a Linux box shows `ERR_CERT_AUTHORITY_INVALID` in the two most common browsers while every machine-checked path says fine. The maintainer chose on 2026-10-01 to keep the Phase 6 exclusion ("No Firefox NSS store modification"), so this ships as a known gap. The fix, if ever wanted, is what mkcert does: also add the CA via `certutil -d sql:$HOME/.pki/nssdb -A -t "C,,"` (`libnss3-tools`), behind the existing consent prompt, undone by `trust --remove`. `.github/scripts/check-browsers.sh` asserts it on every run as an **expected** failure carrying that reason, so it stays visible; lifting the exclusion turns the same assertion into a real pass. |
 | **`antra trust --remove --yes` ignores `--yes`** | **FIXED.** Anyone uninstalling by script | `src/cli/trust.rs` matched `--remove` before reading `--yes`, so the command always took the interactive path, read EOF, printed "Skipped. CA remains trusted." and exited 0. `remove_ca_noninteractive()` already existed and was correct — only `antra clean` called it. The routing is now a pure `action_for()` with five unit tests, three confirmed to fail against an inverted `if yes`. An end-to-end test was written and then **deleted**: in a hermetic home there is no `ca.pem`, so both paths exit 0 before the prompt and it passed against the broken code. |
 | **The installer prints raw `\033[…m`** | **FIXED.** Every new user, on first contact | Ten lines in `install.sh` printed `${BOLD}` through plain `echo`, which does not interpret backslash escapes, so a new user saw the literal text `\033[1mTrusting the CA\033[0m` in the trust prompt and the quick-start block. Reported 2026-09-07, unfixed through four releases. A `say()` helper using `printf %b` now does what `info`/`ok`/`header` already did. `tests/installer_output.sh` covers it; its counters are `t_`-prefixed because `install.sh` defines its own `ok`, and an unprefixed helper here was being silently replaced by the installer's, printing green ticks while counting nothing. |
-| **A1 — automated browser check** | **BUILT** | `.github/workflows/browser.yml` + `.github/scripts/check-browsers.sh`, on push and PR, macOS + Ubuntu. The script stands up the daemon, an upstream and a route itself, and refuses to ask a browser anything until the route serves 200 over TLS — an earlier draft assumed both and reported a bare 503, which reads exactly like broken TLS. Linux Chrome/Firefox are expected failures by decision; macOS, WebKit and the curl check on every OS are strict. Safari proper is its own line, skipped with the reason (safaridriver needs Remote Automation). **The first CI run is the real test of it** — see the open question below. |
+| **A1 — automated browser check** | **BUILT, first CI run done** | `.github/workflows/browser.yml` + `.github/scripts/check-browsers.sh`, on push and PR, macOS + Ubuntu. The script stands up the daemon, an upstream and a route itself, and refuses to ask a browser anything until the route serves 200 over TLS — an earlier draft assumed both and reported a bare 503, which reads exactly like broken TLS. **The first run on a real runner found two things:** the script had no exec bit, and trust cannot be installed on a macOS runner at all, so that leg can only assert `curl --cacert`. See the table below. |
 | **A2 — fresh "stranger" test** | **DONE** | `tests/user-test-2026-10-01.md`, against the released v0.6.3 binary on macOS. The product works: real HTTPS at a stable URL, a correct 301, a clean Ctrl+C, an honest `doctor`. Three new findings, filed below. |
 | **Then: one release** | **TODO** | v0.6.4 carries the installer fix, the `trust --remove --yes` fix, C17 and the two new checks. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. |
 
-### Open question the next session should settle first
+### Answered by the first CI run, 2026-10-01: trust works on Linux, not on macOS
 
-**Does `antra trust` work on a GitHub macOS runner?** It failed on a real Mac
-during the A1 work — `antra trust --user-level` returned *Failed to install to
-user keychain (exit code: 1)*. The browser workflow falls back to the system
-store via `sudo`, so it should still work, but that fallback is untested. The
-first run of the **Browsers** workflow answers it. If `sudo antra trust` also
-fails on a runner, the macOS browser assertions cannot be trusted and the
-fallback needs a different approach. Record the answer here.
+| Runner | `antra trust --user-level` | `sudo antra trust --yes` | Result |
+|---|---|---|---|
+| `ubuntu-latest` | not supported on this platform | ✅ **CA is trusted** | The browser check is meaningful here |
+| `macos-latest` | ❌ *Failed to install to user keychain* | ❌ *Could not install CA automatically* | Trust cannot be installed at all |
+
+So the **macOS leg of the Browsers workflow cannot prove anything about Antra's
+certificates.** The system keychain needs a GUI authorisation dialog, and a
+runner has no GUI; the same failure happens on a real Mac, so it is not a runner
+artefact. The script therefore checks whether the CA is actually trusted and
+says so as its own line, and attributes every browser failure to the right
+cause — "no CA trust in this environment" rather than ROADMAP C19. Conflating
+the two would have reported the NSS bug in two places when it exists in one.
+
+The macOS leg is kept for the one strict assertion that survives it:
+`curl --cacert` against the live route, which validates Antra's certificate and
+the proxy's TLS with no trust store involved. That is the same ground
+`e2e_securetransport.rs` covers, so the macOS job is not redundant — it is just
+honest about what it cannot reach.
+
+**If you want a real macOS browser assertion**, it needs a trust store the
+runner can write. Cheapest option: `security add-trusted-cert` into a temporary
+keychain and point `HOME` at it. Not done here, and not needed for v0.6.4.
 
 ### From A2, not yet filed
 
 | Finding | Why it matters |
 |---|---|
 | **`antra run` auto-assigns a port, then blames the user** | For a server that hardcodes `listen(3000)` and ignores `process.env.PORT` — ordinary Node — Antra registers 4000, prints the URL as though ready, and the 503 says *"is your server running?"* when it is running, on 3000. The port warning scrolls past, everything after it reads as success, and the one-flag fix is never repeated where it is actually needed. Details and repro in `tests/user-test-2026-10-01.md`. |
+| **`antra trust` cannot install on a Mac without a GUI** | `antra trust --user-level` fails with *Failed to install to user keychain* and `sudo antra trust` with *Could not install CA automatically* — on a real Mac and on a runner. Found 2026-10-01. If this also happens for a user at a normal desk it is a first-run blocker, and it needs a real session to tell; the A2 test could not reach it because the trust flow was never completed by hand. Worth checking on a Mac with a real login before v0.6.4, and it is the one finding here that A1's design cannot resolve. |
 | **A stale route survives a hard kill** | After `SIGKILL` rather than Ctrl+C, `antra list` keeps showing the route and `doctor` counts it as active. `antra prune` exists for exactly this; nothing points a user at it. |
 | **The installer's download did not finish once** | The v0.6.3 installer stalled on *Downloading antra-aarch64-apple-darwin (v0.6.3)* for several minutes on the A2 test machine. Not verified as a bug — possibly that machine's network — and CI's Release Check installs the same script successfully. Worth one clean run from a fresh `HOME` before v0.6.4. |
 
@@ -228,10 +247,11 @@ are the most expensive lessons in this codebase:
     bash .github/scripts/check-browsers.sh
   ```
 
-  It stands up its own daemon, upstream and route. Without Playwright installed
-  it reports the browsers as EXPECTED_FAIL rather than passing — a green run
-  with no Playwright does **not** mean the browsers were checked, and the
-  summary line always prints both counts so you can tell.
+  It stands up its own daemon, upstream and route. Read three things in the
+  output, not the exit code: whether the CA is **trusted in this environment**
+  (if not, every browser line is expected-fail and says why), whether
+  Playwright was found, and the final count. A green run with no Playwright does
+  **not** mean the browsers were checked. Only `curl --cacert` is strict.
 
 - Do **not** run `cargo test` in two worktrees at once without checking C11
   first. The harnesses are namespaced per worktree now, but a stale

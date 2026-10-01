@@ -14,11 +14,19 @@ name: Browsers
 # never seen a failure.
 #
 # Linux Chrome and Firefox are EXPECTED to fail today, by decision — Phase 6
-# excludes NSS store modification (AGENT.md). The script records those as
-# expected failures with the reason, and they do not fail the job: a
+# excludes NSS store modification (AGENT.md, ROADMAP C19). The script records
+# those as expected failures with the reason, and they do not fail the job: a
 # permanently red job would be ignored. The moment someone lifts the exclusion,
-# the same assertion turns into a real pass. macOS and WebKit, and the curl
-# check on every OS, are strict.
+# the same assertion turns into a real pass.
+#
+# **The macOS leg cannot prove anything about Antra's certificates.** `antra
+# trust` fails there in both modes (see the Trust step), so the script reports
+# "the CA is NOT trusted here" and every browser result is an expected failure
+# for that reason. The leg is kept because it still runs the strict
+# `curl --cacert` assertion, which validates the certificate and the proxy's
+# TLS without needing a trust store — the same ground e2e_securetransport.rs
+# covers. Its browser lines record the real finding: trust installation on
+# macOS is unprovable in CI, and separately unprovable on a real Mac.
 
 on:
   push:
@@ -70,23 +78,39 @@ jobs:
           set -uo pipefail
           export HOME="$ANTRA_BROWSER_HOME"
           mkdir -p "$HOME"
-          # Trust is the thing under test, so it runs the way a user would —
-          # and every outcome is reported rather than swallowed, because whether
-          # it works on a runner is a finding, not a reason to skip the check.
+          # Trust is the thing under test, so it runs the way a user would.
+          # Every outcome is reported rather than swallowed, because whether it
+          # works on a runner is a finding, not a reason to skip.
           #
-          # macOS: `trust --user-level` targets the login keychain and needs no
-          # sudo, but it can fail on a runner ("Failed to install to user
-          # keychain") — observed on a real Mac during this work. The system
-          # store via sudo is the fallback, and Chrome/Safari/Playwright's
-          # WebKit all read it.
+          # Measured on GitHub runners, 2026-10-01:
+          #   ubuntu-latest  `sudo antra trust --yes` works. `CA is trusted`.
+          #   macos-latest    NEITHER path works. `trust --user-level` returns
+          #                   "Failed to install to user keychain", and
+          #                   `sudo antra trust --yes` returns "Could not install
+          #                   CA automatically" — the system keychain is not
+          #                   writable without a GUI authorisation dialog, and a
+          #                   runner has no GUI. The same failure happens on a
+          #                   real Mac (observed while writing this).
+          #
+          # So the macOS job cannot install trust at all, and its browser
+          # assertions are expected failures for that reason. They are NOT
+          # evidence about C19 (the Linux NSS gap) — they are evidence that
+          # trust could not be established. The distinction matters: without it
+          # a macOS browser failure would be misread as the NSS bug.
           echo "== antra trust --user-level =="
           "$PWD/target/debug/antra" trust --user-level </dev/null || true
           if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
             echo "== user-level trust did not take; trying the system store =="
-            sudo "$PWD/target/debug/antra" trust --yes </dev/null || true
+            sudo -n "$PWD/target/debug/antra" trust --yes </dev/null || true
           fi
           echo "== antra trust --status =="
           "$PWD/target/debug/antra" trust --status </dev/null || true
+          if "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
+            echo "ANTRA_TRUST=ok" >> "$GITHUB_ENV"
+          else
+            echo "ANTRA_TRUST=unavailable" >> "$GITHUB_ENV"
+            echo "::warning title=CA not trusted on this runner::Browsers will fail for that reason, not because of Antra's TLS. See the comment in this step."
+          fi
 
       - name: Run the browser check
         shell: bash
