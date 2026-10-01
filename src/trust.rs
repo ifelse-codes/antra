@@ -797,6 +797,9 @@ pub fn remove_ca() -> Result<()> {
     Ok(())
 }
 
+/// Remove the CA without prompting. Backs `antra trust --remove --yes` and
+/// `antra clean`, so a script can guarantee the CA is gone rather than asking
+/// a question nobody is there to answer.
 pub(crate) fn remove_ca_noninteractive() -> Result<()> {
     let Some(cert) = load_existing_ca()? else {
         println!(

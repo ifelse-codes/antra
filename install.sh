@@ -34,6 +34,10 @@ ok()    { printf "${GREEN}✓${RESET} %s\n" "$1"; }
 warn()  { printf "${YELLOW}⚠${RESET} %s\n" "$1"; }
 err()   { printf "${RED}✗${RESET} %s\n" "$1" >&2; }
 header(){ printf "\n${BOLD}%s${RESET}\n\n" "$1"; }
+# A styled line of prose. `echo` does not expand the \033 escapes in the colour
+# variables above, so those lines printed the literal text "\033[1m" at the
+# user. printf's %b does, which is what the helpers above rely on too.
+say()   { printf "%b\n" "$1"; }
 
 # ── Detect platform ───────────────────────────────────────────────────────────
 
@@ -218,18 +222,18 @@ ask_trust() {
     echo "  Antra generates a local CA certificate to serve HTTPS for"
     echo "  domains like https://myapp.localhost and https://myapp.test."
     echo ""
-    echo "  ${BOLD}Trusting the CA${RESET} means HTTPS works with zero browser warnings — forever."
+    say "  ${BOLD}Trusting the CA${RESET} means HTTPS works with zero browser warnings — forever."
     echo ""
     if [ "$(uname -s)" = "Darwin" ]; then
-        echo "  ${DIM}On macOS this uses your login keychain — no sudo needed.${RESET}"
+        say "  ${DIM}On macOS this uses your login keychain — no sudo needed.${RESET}"
         trust_prompt="  Install CA into your login keychain (no sudo)? [Y/n] "
         trust_hint="antra trust --user-level"
     else
-        echo "  ${DIM}This requires admin privileges (sudo).${RESET}"
+        say "  ${DIM}This requires admin privileges (sudo).${RESET}"
         trust_prompt="  Install CA into system trust store? [Y/n] "
         trust_hint="antra trust"
     fi
-    echo "  ${DIM}The CA is local-only. Nothing is sent anywhere.${RESET}"
+    say "  ${DIM}The CA is local-only. Nothing is sent anywhere.${RESET}"
     echo ""
 
     # Detect TTY availability
@@ -320,21 +324,21 @@ main() {
     echo ""
     ok "$( "$installed_path" --version 2>/dev/null || echo "antra ${version}" ) is ready!"
     echo ""
-    echo "  ${BOLD}Quick start:${RESET}"
+    say "  ${BOLD}Quick start:${RESET}"
     echo ""
     echo "    antra run --domain myapp.localhost -- pnpm dev"
     echo ""
-    echo "  ${DIM}Open https://myapp.localhost in your browser. Done.${RESET}"
+    say "  ${DIM}Open https://myapp.localhost in your browser. Done.${RESET}"
     echo ""
 
     ask_trust "$installed_path"
 
     header "NEXT STEPS"
-    echo "  1. Run ${BOLD}antra doctor${RESET} to verify everything works"
-    echo "  2. Run ${BOLD}antra run --domain myapp.localhost -- <your-dev-command>${RESET}"
-    echo "  3. Open ${BOLD}https://myapp.localhost${RESET}"
+    say "  1. Run ${BOLD}antra doctor${RESET} to verify everything works"
+    say "  2. Run ${BOLD}antra run --domain myapp.localhost -- <your-dev-command>${RESET}"
+    say "  3. Open ${BOLD}https://myapp.localhost${RESET}"
     echo ""
-    echo "  ${DIM}Docs: https://github.com/${REPO}${RESET}"
+    say "  ${DIM}Docs: https://github.com/${REPO}${RESET}"
     echo ""
 }
 

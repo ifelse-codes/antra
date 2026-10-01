@@ -1,0 +1,201 @@
+name: Browsers
+
+# Does a real browser load an Antra URL with no certificate warning?
+#
+# Nothing checked this until now. tests/e2e_securetransport.rs asks Apple's
+# TLS stack through /usr/bin/curl, which is how a malformed root CA that broke
+# Safari was caught — but a TLS stack is not a browser. Chrome and Firefox on
+# Linux read their own trust store (~/.pki/nssdb) and never consult the system
+# one `antra trust` writes, so curl passes while the browser shows
+# ERR_CERT_AUTHORITY_INVALID. Only a browser can report that.
+#
+# The check runs on push and pull_request, not only on demand: the value is in
+# catching the regression, and a workflow nobody runs is a workflow that has
+# never seen a failure.
+#
+# Linux Chrome and Firefox are EXPECTED to fail today, by decision — Phase 6
+# excludes NSS store modification (AGENT.md, ROADMAP C19). The script records
+# those as expected failures with the reason, and they do not fail the job: a
+# permanently red job would be ignored. The moment someone lifts the exclusion,
+# the same assertion turns into a real pass.
+#
+# **The macOS leg cannot prove anything about Antra's certificates.** `antra
+# trust` fails there in both modes (see the Trust step), so the script reports
+# "the CA is NOT trusted here" and every browser result is an expected failure
+# for that reason. The leg is kept because it still runs the strict
+# `curl --cacert` assertion, which validates the certificate and the proxy's
+# TLS without needing a trust store — the same ground e2e_securetransport.rs
+# covers. Its browser lines record the real finding: trust installation on
+# macOS is unprovable in CI, and separately unprovable on a real Mac.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  browsers:
+    name: browsers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      # A short hermetic HOME, for the same reason the e2e job uses one: the
+      # daemon's Unix socket path must fit the 104-byte sun_path limit, and on
+      # macOS the derived path is $HOME/Library/Application Support/antra/
+      # daemon.sock — a deeper home leaves the daemon unstartable.
+      ANTRA_BROWSER_HOME: /tmp/ab-ci
+      # High free-range ports; 443 needs root and 8443 is often taken.
+      ANTRA_PORT: "18997"
+      ANTRA_HTTP_PORT: "18996"
+      ANTRA_BROWSER_UPSTREAM: "18477"
+      ANTRA_BROWSER_DOMAIN: browser.localhost
+      # An explicit browsers path. Playwright defaults to $HOME/.cache, and
+      # this job runs the check under a hermetic HOME, so the browsers
+      # installed during setup (where HOME is still the runner's) were
+      # invisible to the check ("Executable doesn't exist at
+      # /tmp/ab-ci/.cache/ms-playwright/..."). Pinning the path decouples the
+      # two HOMEs.
+      PLAYWRIGHT_BROWSERS_PATH: /tmp/pw-browsers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build
+
+      - name: Install Playwright browsers
+        # The driver only. The browsers it launches are the point — Chromium
+        # on Linux uses NSS, which is the store under test.
+        #
+        # NODE_PATH is required, not decoration. `npm install -g` puts
+        # playwright in the global prefix, and node's `require.resolve` does
+        # not search there, so check-browsers.sh reported "no Playwright driver"
+        # and skipped every browser — a green job that drove no browser at all.
+        run: |
+          npm install -g playwright
+          npx playwright install --with-deps chromium firefox webkit
+          # Export before verifying, and verify with the variable set in this
+          # shell. `>> "$GITHUB_ENV"` only reaches *later* steps, so the first
+          # version of this check asserted `require.resolve` with NODE_PATH
+          # still unset and failed with MODULE_NOT_FOUND — while the install
+          # itself had been fine all along.
+          export NODE_PATH="$(npm root -g)"
+          echo "NODE_PATH=$NODE_PATH" >> "$GITHUB_ENV"
+          node -e 'require.resolve("playwright"); console.log("playwright resolves OK")'
+
+      - name: Trust the CA
+        shell: bash
+        run: |
+          # This step reports; it must never fail the job. GitHub runs
+          # `shell: bash` as `bash -e -o pipefail`, and a reporting step that
+          # aborts halfway leaves the job red for a reason that has nothing to
+          # do with the check — which is how the previous two runs of this
+          # workflow died: the exec bit, then a sudo that returned non-zero
+          # after doing its job. `set +e` restores "report and continue";
+          # check-browsers.sh decides pass or fail, and it distinguishes
+          # "trusted", "not trusted" and "could not tell" itself.
+          set +e
+          set -uo pipefail
+          export HOME="$ANTRA_BROWSER_HOME"
+          mkdir -p "$HOME"
+          # Trust is the thing under test, so it runs the way a user would.
+          # Every outcome is reported rather than swallowed, because whether it
+          # works on a runner is a finding, not a reason to skip.
+          #
+          # Measured on GitHub runners, 2026-10-01:
+          #   ubuntu-latest  `sudo antra trust --yes` works. `CA is trusted`.
+          #   macos-latest    NEITHER path works. `trust --user-level` returns
+          #                   "Failed to install to user keychain", and
+          #                   `sudo antra trust --yes` returns "Could not install
+          #                   CA automatically" — the system keychain is not
+          #                   writable without a GUI authorisation dialog, and a
+          #                   runner has no GUI. The same failure happens on a
+          #                   real Mac (observed while writing this).
+          #
+          # So the macOS job cannot install trust at all, and its browser
+          # assertions are expected failures for that reason. They are NOT
+          # evidence about C19 (the Linux NSS gap) — they are evidence that
+          # trust could not be established. The distinction matters: without it
+          # a macOS browser failure would be misread as the NSS bug.
+          echo "== antra trust --user-level =="
+          "$PWD/target/debug/antra" trust --user-level </dev/null || true
+          if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
+            echo "== user-level trust did not take; trying the system store =="
+            # Order matters more than flags here, and getting it wrong took four
+            # runs to see. `antra trust` does two separate things: it mints
+            # ca.pem under $HOME, and it installs that certificate into the
+            # system trust store, which on Linux needs root. Only the second
+            # needs sudo.
+            #
+            # So: mint first, as the runner, with no sudo. The system-store
+            # install will fail (or be skipped) and that is fine — the CA now
+            # exists, owned by the runner, where the daemon and the check can
+            # both read it. Then run the same command under sudo, which finds
+            # the CA that is already there and installs *that*.
+            #
+            # `sudo -n env HOME=... <cmd>`, and the `env` is the whole point.
+            # Five wrong orders, all measured on ubuntu-latest:
+            #   plain `sudo`    HOME becomes root's, CA in /root/.config/antra.
+            #                    The store is right; the check's home is empty.
+            #   `sudo -H`       identical — -H sets HOME to the *target* user,
+            #                    which for sudo is root.
+            #   `sudo -E`       needs SETENV in sudoers, which GitHub's runners
+            #                    do not grant. sudo refuses to run at all, and
+            #                    `|| true` swallowed the refusal, so the log
+            #                    showed trust succeeding and no CA anywhere.
+            #   no sudo at all  `trust --yes` unprivileged fails *before*
+            #                    minting ("Could not install CA
+            #                    automatically"), so no CA is written.
+            #   chown only      fixes ownership but not HOME, so it changed
+            #                    nothing on its own.
+            #
+            # Minting and installing are not separable: the non-interactive
+            # path writes the CA only once it has somewhere to put it, so it
+            # must be one privileged run. `env HOME=` sets the child user's home
+            # without needing SETENV, and the chown hands the result back.
+            sudo -n env HOME="$ANTRA_BROWSER_HOME" \
+              "$PWD/target/debug/antra" trust --yes </dev/null
+            trust_rc=$?
+            echo "   sudo antra trust --yes exited $trust_rc"
+            sudo -n chown -R "$(id -u):$(id -g)" "$ANTRA_BROWSER_HOME" 2>&1 | sed 's/^/   chown: /'
+          fi
+          echo "== where the CA ended up =="
+          find "$HOME" -name ca.pem -type f 2>&1 | sed 's/^/   /'
+          ls -ld "$HOME/.config/antra" 2>&1 | sed 's/^/   /'
+          echo "== antra trust --status =="
+          "$PWD/target/debug/antra" trust --status </dev/null || true
+          if "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
+            echo "ANTRA_TRUST=ok" >> "$GITHUB_ENV"
+          else
+            echo "ANTRA_TRUST=unavailable" >> "$GITHUB_ENV"
+            echo "::warning title=CA not trusted on this runner::Browsers will fail for that reason, not because of Antra's TLS. See the comment in this step."
+          fi
+
+      - name: Run the browser check
+        shell: bash
+        # The script brings up the daemon, the upstream and the route itself,
+        # and refuses to ask a browser anything until the route serves 200 over
+        # TLS. A browser failure therefore cannot be blamed on missing setup.
+        #
+        # Exit codes: 0 = checked and clean, 1 = a failure. There is
+        # deliberately no "could not run" code that stays green: a run that
+        # verified nothing must not look like a pass, and a warning annotation
+        # on a green job is the easiest thing in a CI list to miss.
+        run: .github/scripts/check-browsers.sh
+
+      - name: Upload the check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-check-${{ matrix.os }}
+          path: /tmp/ab-ci
+          retention-days: 7
