@@ -76,7 +76,13 @@ jobs:
         run: |
           npm install -g playwright
           npx playwright install --with-deps chromium firefox webkit
-          echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+          # Export before verifying, and verify with the variable set in this
+          # shell. `>> "$GITHUB_ENV"` only reaches *later* steps, so the first
+          # version of this check asserted `require.resolve` with NODE_PATH
+          # still unset and failed with MODULE_NOT_FOUND — while the install
+          # itself had been fine all along.
+          export NODE_PATH="$(npm root -g)"
+          echo "NODE_PATH=$NODE_PATH" >> "$GITHUB_ENV"
           node -e 'require.resolve("playwright"); console.log("playwright resolves OK")'
 
       - name: Trust the CA
