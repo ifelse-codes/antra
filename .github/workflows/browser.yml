@@ -110,37 +110,36 @@ jobs:
           "$PWD/target/debug/antra" trust --user-level </dev/null || true
           if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
             echo "== user-level trust did not take; trying the system store =="
-            # -E, and the reason matters: the CA must be minted in the RUNNER's
-            # home, because that is the home the daemon will serve certificates
-            # from and the one check-browsers.sh reads.
+            # Order matters more than flags here, and getting it wrong took four
+            # runs to see. `antra trust` does two separate things: it mints
+            # ca.pem under $HOME, and it installs that certificate into the
+            # system trust store, which on Linux needs root. Only the second
+            # needs sudo.
             #
-            # Two wrong turns are recorded here. Plain `sudo` resets HOME to
-            # root's, so the CA was minted in /root/.config/antra and installed
-            # from there — the store was right and the check's home had nothing.
-            # Then `sudo -H` was tried, which is the same mistake stated
-            # explicitly: -H sets HOME to the *target* user's, which for sudo is
-            # root. -E is what carries the caller's HOME through.
-            sudo -n -E "$PWD/target/debug/antra" trust --yes </dev/null || true
-          fi
-          # Whatever happened above, find out where the CA actually is and make
-          # the runner's home agree with the trust store. Reported, never
-          # silent.
-          runner_ca="$HOME/.config/antra/ca.pem"
-          if [ ! -f "$runner_ca" ]; then
-            for d in /root/.config/antra /root/Library/Application\ Support/antra; do
-              if sudo -n test -f "$d/ca.pem" 2>/dev/null; then
-                echo "::notice::CA was minted under root ($d); copying it to the runner's home"
-                mkdir -p "$HOME/.config/antra"
-                sudo -n cp "$d/ca.pem" "$runner_ca" 2>/dev/null || true
-                sudo -n cp "$d/ca-key.pem" "$HOME/.config/antra/ca-key.pem" 2>/dev/null || true
-                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra" 2>/dev/null || true
-                break
-              fi
-            done
+            # So: mint first, as the runner, with no sudo. The system-store
+            # install will fail (or be skipped) and that is fine — the CA now
+            # exists, owned by the runner, where the daemon and the check can
+            # both read it. Then run the same command under sudo, which finds
+            # the CA that is already there and installs *that*.
+            #
+            # The three wrong orders, all measured on ubuntu-latest:
+            #   plain `sudo`   HOME becomes root's, so the CA is minted in
+            #                   /root/.config/antra. The store is right; the
+            #                   check's home has nothing.
+            #   `sudo -H`      identical — -H sets HOME to the *target* user,
+            #                   which for sudo is root.
+            #   `sudo -E`      HOME is carried through, so the CA lands in the
+            #                   runner's home — but it is written by root, in a
+            #                   0700 root-owned directory. The runner can no
+            #                   longer stat it, and both `find` and the script's
+            #                   `-f` failed with EACCES behind a 2>/dev/null, so
+            #                   the log showed nothing at all.
+            "$PWD/target/debug/antra" trust --yes </dev/null || true
+            sudo -n "$PWD/target/debug/antra" trust --yes </dev/null || true
           fi
           echo "== where the CA ended up =="
-          find "$HOME" -name ca.pem -type f 2>/dev/null | sed 's/^/   /'
-          sudo -n find /root -name ca.pem -type f 2>/dev/null | sed 's/^/   (root) /'
+          find "$HOME" -name ca.pem -type f 2>&1 | sed 's/^/   /'
+          ls -ld "$HOME/.config/antra" 2>&1 | sed 's/^/   /'
           echo "== antra trust --status =="
           "$PWD/target/debug/antra" trust --status </dev/null || true
           if "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
