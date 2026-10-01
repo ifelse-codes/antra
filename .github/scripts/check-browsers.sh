@@ -57,24 +57,37 @@ http.createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => console.log('upstream on ' + port));
 JS
 
-# Where Antra keeps the CA. This is `dirs::config_dir()/antra`, which is
-# $HOME/Library/Application Support/antra on macOS and $HOME/.config/antra on
-# Linux — NOT $HOME/.config/antra on macOS, which is the assumption that broke
-# the first CI run: the script searched the macOS path, fell back to a Linux
-# path, and exited with "no ca.pem" on a runner where the CA was sitting in the
-# Linux directory the whole time. So: check the platform's own path first, and
-# search as a last resort rather than guessing.
+# Where Antra keeps the CA: `dirs::config_dir()/antra`. That is
+# $HOME/Library/Application Support/antra on macOS, and on Linux
+# $XDG_CONFIG_HOME/antra when XDG_CONFIG_HOME is set, else $HOME/.config/antra.
+# Two earlier versions got this wrong by hardcoding one platform's path, which
+# is why the first Ubuntu run reported "no ca.pem" with the CA sitting right
+# there. The rule here: ask the environment, never assume, and search as a last
+# resort. Note the searches keep stderr — a 0700 root-owned directory produces
+# a permission error, and hiding that is how an empty result came to be read as
+# "no CA was created" when the truth was "you cannot look in there".
 find_ca_pem() {
     case "$(uname -s)" in
-        Darwin) echo "$HOMEDIR/Library/Application Support/antra/ca.pem" ;;
-        *)      echo "$HOMEDIR/.config/antra/ca.pem" ;;
+        Darwin)
+            echo "$HOMEDIR/Library/Application Support/antra/ca.pem"
+            ;;
+        *)
+            if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+                echo "$XDG_CONFIG_HOME/antra/ca.pem"
+            else
+                echo "$HOMEDIR/.config/antra/ca.pem"
+            fi
+            ;;
     esac
 }
 
 CA_PEM="$(find_ca_pem)"
 if [ ! -f "$CA_PEM" ]; then
-    found="$(find "$HOMEDIR" -name ca.pem -type f 2>/dev/null | head -1)"
-    [ -n "$found" ] && CA_PEM="$found"
+    found="$(find "$HOMEDIR" -name ca.pem -type f 2>&1 | head -1)"
+    case "$found" in
+        /*) CA_PEM="$found" ;;                 # an absolute path: a real hit
+        *)  [ -n "$found" ] && echo "   find said: $found" >&2 ;;
+    esac
 fi
 
 browser_url() {

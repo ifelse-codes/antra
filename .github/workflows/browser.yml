@@ -122,30 +122,31 @@ jobs:
             # both read it. Then run the same command under sudo, which finds
             # the CA that is already there and installs *that*.
             #
-            # The four wrong orders, all measured on ubuntu-latest:
-            #   plain `sudo`    HOME becomes root's, so the CA is minted in
-            #                    /root/.config/antra. The store is right; the
-            #                    check's home has nothing.
+            # `sudo -n env HOME=... <cmd>`, and the `env` is the whole point.
+            # Five wrong orders, all measured on ubuntu-latest:
+            #   plain `sudo`    HOME becomes root's, CA in /root/.config/antra.
+            #                    The store is right; the check's home is empty.
             #   `sudo -H`       identical — -H sets HOME to the *target* user,
             #                    which for sudo is root.
-            #   `sudo -E`       HOME carried through, so the CA is in the right
-            #                    place, but written by root into a 0700
-            #                    root-owned dir: the runner cannot stat it, and
-            #                    both `find` and the script's `-f` hit EACCES
-            #                    behind a 2>/dev/null.
-            #   no sudo at all  `trust --yes` without root fails *before*
+            #   `sudo -E`       needs SETENV in sudoers, which GitHub's runners
+            #                    do not grant. sudo refuses to run at all, and
+            #                    `|| true` swallowed the refusal, so the log
+            #                    showed trust succeeding and no CA anywhere.
+            #   no sudo at all  `trust --yes` unprivileged fails *before*
             #                    minting ("Could not install CA
-            #                    automatically"), so no CA is written at all —
-            #                    the check then found nothing and the sudo run
-            #                    that followed was the only one that minted one,
-            #                    as root again.
+            #                    automatically"), so no CA is written.
+            #   chown only      fixes ownership but not HOME, so it changed
+            #                    nothing on its own.
             #
-            # What works: mint under sudo with -E so the CA lands in the
-            # runner's home, then hand the directory back to the runner. The
-            # store install and the mint happen in the same privileged run,
-            # which is why the "mint separately" idea could not work.
-            sudo -n -E "$PWD/target/debug/antra" trust --yes </dev/null || true
-            sudo -n chown -R "$(id -u):$(id -g)" "$ANTRA_BROWSER_HOME" 2>/dev/null || true
+            # Minting and installing are not separable: the non-interactive
+            # path writes the CA only once it has somewhere to put it, so it
+            # must be one privileged run. `env HOME=` sets the child user's home
+            # without needing SETENV, and the chown hands the result back.
+            sudo -n env HOME="$ANTRA_BROWSER_HOME" \
+              "$PWD/target/debug/antra" trust --yes </dev/null
+            trust_rc=$?
+            echo "   sudo antra trust --yes exited $trust_rc"
+            sudo -n chown -R "$(id -u):$(id -g)" "$ANTRA_BROWSER_HOME" 2>&1 | sed 's/^/   chown: /'
           fi
           echo "== where the CA ended up =="
           find "$HOME" -name ca.pem -type f 2>&1 | sed 's/^/   /'
