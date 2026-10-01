@@ -148,8 +148,18 @@ measured:
 
 `antra trust` on a macOS runner: `--user-level` returns *Failed to install to
 user keychain*, and the privileged run cannot write the system keychain
-without a GUI authorisation dialog. The same pair of failures reproduces on a
-real Mac, so it is not a runner artefact — see **C20**.
+without a GUI authorisation dialog. **Settled by hand on 2026-10-01 (C20
+closed): on a real Mac with a real login it works** — `--status` reports
+`CA is trusted via your login keychain` and `--user-level` is idempotent. The
+failure is specific to a headless runner, so nothing here affects users. That
+is also why this leg can only assert `curl --cacert`.
+
+The same hand-run surfaced **C22**, which no automated check would have caught:
+`antra trust --user-level` printed *already trusted via your login keychain* and
+then, two lines later, *✓ Current Antra CA is absent from all applicable trust
+stores*. Both true, different certificates — the rotation cleanup shares a
+helper with `trust --remove` whose message was hardcoded. Fixed; the helper now
+names the certificate it removed.
 
 **If you want a real macOS browser assertion**, it needs a trust store the
 runner can write. Cheapest option: `security add-trusted-cert` into a temporary
@@ -160,7 +170,6 @@ keychain and point `HOME` at it. Not done here, and not needed for v0.6.4.
 | Finding | Why it matters |
 |---|---|
 | **`antra run` auto-assigns a port, then blames the user** | For a server that hardcodes `listen(3000)` and ignores `process.env.PORT` — ordinary Node — Antra registers 4000, prints the URL as though ready, and the 503 says *"is your server running?"* when it is running, on 3000. The port warning scrolls past, everything after it reads as success, and the one-flag fix is never repeated where it is actually needed. Details and repro in `tests/user-test-2026-10-01.md`. |
-| **`antra trust` cannot install on a Mac without a GUI** | `antra trust --user-level` fails with *Failed to install to user keychain* and `sudo antra trust` with *Could not install CA automatically* — on a real Mac and on a runner. Found 2026-10-01. If this also happens for a user at a normal desk it is a first-run blocker, and it needs a real session to tell; the A2 test could not reach it because the trust flow was never completed by hand. Worth checking on a Mac with a real login before v0.6.4, and it is the one finding here that A1's design cannot resolve. |
 | **A stale route survives a hard kill** | After `SIGKILL` rather than Ctrl+C, `antra list` keeps showing the route and `doctor` counts it as active. `antra prune` exists for exactly this; nothing points a user at it. |
 | **The installer's download did not finish once** | The v0.6.3 installer stalled on *Downloading antra-aarch64-apple-darwin (v0.6.3)* for several minutes on the A2 test machine. Not verified as a bug — possibly that machine's network — and CI's Release Check installs the same script successfully. Worth one clean run from a fresh `HOME` before v0.6.4. |
 
