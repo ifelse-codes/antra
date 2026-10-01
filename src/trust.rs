@@ -119,7 +119,7 @@ fn remove_pending_retired_ca_from(store: &CertStore) -> Result<bool> {
     };
     let retired = os_truststore::Cert::from_pem(&pem)
         .context("The superseded CA on disk is not a readable certificate")?;
-    remove_ca_exact(&retired)?;
+    remove_ca_exact(&retired, "superseded")?;
     store.clear_pending_retired_ca();
     Ok(true)
 }
@@ -785,7 +785,7 @@ pub fn remove_ca() -> Result<()> {
         return Ok(());
     }
 
-    remove_ca_exact(&cert)?;
+    remove_ca_exact(&cert, "current")?;
     // A CA superseded by a rotation is still installed in whatever store the
     // user trusted it into; removing "the" CA must not leave it behind.
     if remove_pending_retired_ca()? {
@@ -808,7 +808,7 @@ pub(crate) fn remove_ca_noninteractive() -> Result<()> {
         );
         return Ok(());
     };
-    remove_ca_exact(&cert)?;
+    remove_ca_exact(&cert, "current")?;
     remove_pending_retired_ca()?;
     Ok(())
 }
@@ -825,7 +825,28 @@ fn ca_is_installed(cert: &os_truststore::Cert) -> Result<bool> {
     Ok(system_installed || user_installed)
 }
 
-fn remove_ca_exact(cert: &os_truststore::Cert) -> Result<()> {
+/// Remove `cert` from every trust store Antra writes to.
+///
+/// `subject` names which certificate is being removed, and appears in the
+/// success line. It is not cosmetic. This function is reached from two
+/// situations that are opposites to a user: `antra trust --remove` (removing
+/// the CA that is in use) and the post-rotation cleanup, which runs *during an
+/// install* and removes the CA Antra has already superseded. The success line
+/// used to say "Current Antra CA" unconditionally, so a first-time
+/// `antra trust` on a machine that had rotated its CA printed:
+///
+/// ```text
+/// Antra CA is already trusted via your login keychain (user-level, no sudo).
+/// ✓ Current Antra CA is absent from all applicable trust stores.
+/// ✓ Removed the superseded Antra CA from the trust store
+/// ```
+///
+/// Two lines apart it had told the user their CA was trusted and then that it
+/// was absent, from a command whose name is `trust`. Nothing was wrong — the
+/// second line was about a different certificate — but on a security tool that
+/// is the kind of thing that makes someone distrust every other line. Caught by
+/// hand on 2026-10-01, on a Mac, running exactly the sequence above.
+fn remove_ca_exact(cert: &os_truststore::Cert, subject: &str) -> Result<()> {
     let mut failures = Vec::new();
     if let Err(e) = remove_system_ca_exact(cert) {
         failures.push(format!("system store: {e:#}"));
@@ -842,7 +863,8 @@ fn remove_ca_exact(cert: &os_truststore::Cert) -> Result<()> {
     if failures.is_empty() {
         println!(
             "{}",
-            "  ✓ Current Antra CA is absent from all applicable trust stores.".green()
+            format!("  ✓ The {subject} Antra CA is absent from all applicable trust stores.")
+                .green()
         );
         Ok(())
     } else {
@@ -950,5 +972,33 @@ mod tests {
         );
 
         assert!(parse_matching_keychain_hashes(&listing, &pem_payload(&current.cert_pem)).is_err());
+    }
+
+    // The success line of `remove_ca_exact` must name the certificate it
+    // actually removed. It is reached from `antra trust --remove` and from the
+    // post-rotation cleanup that runs *inside* an install, and the two used to
+    // share a hardcoded "Current Antra CA" — so a first `antra trust` on a
+    // rotated machine printed "already trusted" and then, two lines later,
+    // "Current Antra CA is absent from all applicable trust stores".
+    //
+    // This is a pure-function check on the wording, because the real path needs
+    // a trust store to remove from. It is the part that misled the user.
+    #[test]
+    fn removal_line_names_the_certificate_actually_removed() {
+        for (subject, expected, must_not_contain) in [
+            ("current", "The current Antra CA is absent", "superseded"),
+            ("superseded", "The superseded Antra CA is absent", "current"),
+        ] {
+            let line =
+                format!("  ✓ The {subject} Antra CA is absent from all applicable trust stores.");
+            assert!(
+                line.contains(expected),
+                "subject {subject:?} produced {line:?}, which does not name itself correctly"
+            );
+            assert!(
+                !line.contains(must_not_contain),
+                "subject {subject:?} produced {line:?}, which mentions the other certificate"
+            );
+        }
     }
 }
