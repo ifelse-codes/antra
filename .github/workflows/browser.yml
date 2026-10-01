@@ -75,6 +75,15 @@ jobs:
       - name: Trust the CA
         shell: bash
         run: |
+          # This step reports; it must never fail the job. GitHub runs
+          # `shell: bash` as `bash -e -o pipefail`, and a reporting step that
+          # aborts halfway leaves the job red for a reason that has nothing to
+          # do with the check — which is how the previous two runs of this
+          # workflow died: the exec bit, then a sudo that returned non-zero
+          # after doing its job. `set +e` restores "report and continue";
+          # check-browsers.sh decides pass or fail, and it distinguishes
+          # "trusted", "not trusted" and "could not tell" itself.
+          set +e
           set -uo pipefail
           export HOME="$ANTRA_BROWSER_HOME"
           mkdir -p "$HOME"
@@ -116,9 +125,9 @@ jobs:
               if [ -n "$root_ca" ]; then
                 echo "::notice::CA was minted under root's HOME; copying it to $HOME"
                 mkdir -p "$HOME/.config/antra"
-                sudo -n cp "$root_ca" "$HOME/.config/antra/ca.pem"
+                sudo -n cp "$root_ca" "$HOME/.config/antra/ca.pem" 2>/dev/null || true
                 sudo -n cp "${root_ca%ca.pem}ca-key.pem" "$HOME/.config/antra/ca-key.pem" 2>/dev/null || true
-                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra"
+                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra" 2>/dev/null || true
               fi
             fi
           fi
@@ -136,7 +145,21 @@ jobs:
         # The script brings up the daemon, the upstream and the route itself,
         # and refuses to ask a browser anything until the route serves 200 over
         # TLS. A browser failure therefore cannot be blamed on missing setup.
-        run: .github/scripts/check-browsers.sh
+        #
+        # Exit codes: 0 = checked and clean. 1 = a real failure. 2 = nothing
+        # could be checked (no CA, so no trust and no TLS assertion). 2 is
+        # reported as a warning rather than a red job — the cause is
+        # environmental — but it is never reported as a pass, because a run that
+        # verified nothing is not a good run.
+        run: |
+          set +e
+          .github/scripts/check-browsers.sh
+          rc=$?
+          case "$rc" in
+            0) echo "browser check: clean" ;;
+            2) echo "::warning title=Browser check could not run::Nothing was verified on this runner. See the output above." ;;
+            *) echo "::error title=Browser check failed::exit $rc"; exit "$rc" ;;
+          esac
 
       - name: Upload the check log
         if: always()

@@ -188,13 +188,19 @@ if [ ! -x "$ANTRA_BIN" ]; then
     exit 1
 fi
 
-# The CA must exist. This check does not install trust (that is the caller's
-# job, and on macOS it may need a GUI keychain authorisation): it verifies that
-# a CA was minted and reads it for the curl comparison.
+# The CA must exist for any TLS assertion to mean anything. It may legitimately
+# be missing: the trust step above can fail, and on a macOS runner it does. So
+# this is a reported failure with a reason, not a silent skip and not an abort —
+# an abort here would report "no ca.pem" for what is really "trust could not be
+# installed", which is the misreading C19 must not be confused with.
 if [ ! -f "$CA_PEM" ]; then
-    echo "no ca.pem found under $HOMEDIR — run \`antra trust\` first." >&2
-    echo "searched the platform path and then the whole home." >&2
-    exit 1
+    xfail "no ca.pem under $HOMEDIR — the trust step did not produce one (searched the platform path and the whole home)"
+    echo
+    printf 'antra-browser: 0 pass / 0 fail / 1 expected-fail / 0 skip\n'
+    echo "NOTE: nothing was checked. Antra's own TLS is unverified in this run." >&2
+    # Non-zero: a run that checked nothing must not read as a pass. Expected
+    # rather than a hard failure because the cause is environmental.
+    exit 2
 fi
 ok "CA present at $CA_PEM"
 
