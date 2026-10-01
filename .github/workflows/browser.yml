@@ -101,7 +101,26 @@ jobs:
           "$PWD/target/debug/antra" trust --user-level </dev/null || true
           if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
             echo "== user-level trust did not take; trying the system store =="
-            sudo -n "$PWD/target/debug/antra" trust --yes </dev/null || true
+            # -H explicitly. `sudo` resets HOME to root's, so without it the CA
+            # is minted into /root/.config/antra while the check looks in the
+            # runner's home: the system store gets the CA and the script then
+            # reports "no ca.pem found". Measured on ubuntu-latest, 2026-10-01.
+            # -E is deliberately not used: it would carry the hermetic HOME into
+            # root's trust config, which is not what is being tested.
+            sudo -n -H "$PWD/target/debug/antra" trust --yes </dev/null || true
+            # The CA is now in the system store, but if it was minted under
+            # root's home it is not the same file this run will serve. Copy it
+            # across so both sides describe one CA.
+            if [ ! -f "$HOME/.config/antra/ca.pem" ]; then
+              root_ca="$(sudo -n find /root/.config/antra -name ca.pem -type f 2>/dev/null | head -1)"
+              if [ -n "$root_ca" ]; then
+                echo "::notice::CA was minted under root's HOME; copying it to $HOME"
+                mkdir -p "$HOME/.config/antra"
+                sudo -n cp "$root_ca" "$HOME/.config/antra/ca.pem"
+                sudo -n cp "${root_ca%ca.pem}ca-key.pem" "$HOME/.config/antra/ca-key.pem" 2>/dev/null || true
+                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra"
+              fi
+            fi
           fi
           echo "== antra trust --status =="
           "$PWD/target/debug/antra" trust --status </dev/null || true
