@@ -1,0 +1,104 @@
+name: Browsers
+
+# Does a real browser load an Antra URL with no certificate warning?
+#
+# Nothing checked this until now. tests/e2e_securetransport.rs asks Apple's
+# TLS stack through /usr/bin/curl, which is how a malformed root CA that broke
+# Safari was caught — but a TLS stack is not a browser. Chrome and Firefox on
+# Linux read their own trust store (~/.pki/nssdb) and never consult the system
+# one `antra trust` writes, so curl passes while the browser shows
+# ERR_CERT_AUTHORITY_INVALID. Only a browser can report that.
+#
+# The check runs on push and pull_request, not only on demand: the value is in
+# catching the regression, and a workflow nobody runs is a workflow that has
+# never seen a failure.
+#
+# Linux Chrome and Firefox are EXPECTED to fail today, by decision — Phase 6
+# excludes NSS store modification (AGENT.md). The script records those as
+# expected failures with the reason, and they do not fail the job: a
+# permanently red job would be ignored. The moment someone lifts the exclusion,
+# the same assertion turns into a real pass. macOS and WebKit, and the curl
+# check on every OS, are strict.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  browsers:
+    name: browsers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      # A short hermetic HOME, for the same reason the e2e job uses one: the
+      # daemon's Unix socket path must fit the 104-byte sun_path limit, and on
+      # macOS the derived path is $HOME/Library/Application Support/antra/
+      # daemon.sock — a deeper home leaves the daemon unstartable.
+      ANTRA_BROWSER_HOME: /tmp/ab-ci
+      # High free-range ports; 443 needs root and 8443 is often taken.
+      ANTRA_PORT: "18997"
+      ANTRA_HTTP_PORT: "18996"
+      ANTRA_BROWSER_UPSTREAM: "18477"
+      ANTRA_BROWSER_DOMAIN: browser.localhost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build
+
+      - name: Install Playwright browsers
+        # The driver only. The browsers it launches are the point — Chromium
+        # on Linux uses NSS, which is the store under test.
+        run: |
+          npm install -g playwright
+          npx playwright install --with-deps chromium firefox webkit
+
+      - name: Trust the CA
+        shell: bash
+        run: |
+          set -uo pipefail
+          export HOME="$ANTRA_BROWSER_HOME"
+          mkdir -p "$HOME"
+          # Trust is the thing under test, so it runs the way a user would —
+          # and every outcome is reported rather than swallowed, because whether
+          # it works on a runner is a finding, not a reason to skip the check.
+          #
+          # macOS: `trust --user-level` targets the login keychain and needs no
+          # sudo, but it can fail on a runner ("Failed to install to user
+          # keychain") — observed on a real Mac during this work. The system
+          # store via sudo is the fallback, and Chrome/Safari/Playwright's
+          # WebKit all read it.
+          echo "== antra trust --user-level =="
+          "$PWD/target/debug/antra" trust --user-level </dev/null || true
+          if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
+            echo "== user-level trust did not take; trying the system store =="
+            sudo "$PWD/target/debug/antra" trust --yes </dev/null || true
+          fi
+          echo "== antra trust --status =="
+          "$PWD/target/debug/antra" trust --status </dev/null || true
+
+      - name: Run the browser check
+        shell: bash
+        # The script brings up the daemon, the upstream and the route itself,
+        # and refuses to ask a browser anything until the route serves 200 over
+        # TLS. A browser failure therefore cannot be blamed on missing setup.
+        run: .github/scripts/check-browsers.sh
+
+      - name: Upload the check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-check-${{ matrix.os }}
+          path: /tmp/ab-ci
+          retention-days: 7
