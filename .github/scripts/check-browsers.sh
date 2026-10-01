@@ -57,8 +57,25 @@ http.createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => console.log('upstream on ' + port));
 JS
 
-CA_PEM="$HOMEDIR/Library/Application Support/antra/ca.pem"
-[ -f "$CA_PEM" ] || CA_PEM="$HOMEDIR/.config/antra/ca.pem"
+# Where Antra keeps the CA. This is `dirs::config_dir()/antra`, which is
+# $HOME/Library/Application Support/antra on macOS and $HOME/.config/antra on
+# Linux — NOT $HOME/.config/antra on macOS, which is the assumption that broke
+# the first CI run: the script searched the macOS path, fell back to a Linux
+# path, and exited with "no ca.pem" on a runner where the CA was sitting in the
+# Linux directory the whole time. So: check the platform's own path first, and
+# search as a last resort rather than guessing.
+find_ca_pem() {
+    case "$(uname -s)" in
+        Darwin) echo "$HOMEDIR/Library/Application Support/antra/ca.pem" ;;
+        *)      echo "$HOMEDIR/.config/antra/ca.pem" ;;
+    esac
+}
+
+CA_PEM="$(find_ca_pem)"
+if [ ! -f "$CA_PEM" ]; then
+    found="$(find "$HOMEDIR" -name ca.pem -type f 2>/dev/null | head -1)"
+    [ -n "$found" ] && CA_PEM="$found"
+fi
 
 browser_url() {
     # The proxy is on ANTRA_PORT; scheme is https because that is the promise.
@@ -172,10 +189,11 @@ if [ ! -x "$ANTRA_BIN" ]; then
 fi
 
 # The CA must exist. This check does not install trust (that is the caller's
-# job, and on macOS it may need a keychain prompt): it verifies that a CA was
-# minted and reads it for the curl comparison.
+# job, and on macOS it may need a GUI keychain authorisation): it verifies that
+# a CA was minted and reads it for the curl comparison.
 if [ ! -f "$CA_PEM" ]; then
-    echo "no ca.pem at $CA_PEM — run \`antra trust\` first" >&2
+    echo "no ca.pem found under $HOMEDIR — run \`antra trust\` first." >&2
+    echo "searched the platform path and then the whole home." >&2
     exit 1
 fi
 ok "CA present at $CA_PEM"
