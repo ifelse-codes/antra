@@ -10,6 +10,8 @@
 > --remove --yes`, A1, A2, C17). The maintainer's calls, not to be
 > re-litigated:
 > - **One release next**: v0.6.4, carrying all of it. Then GTM.
+>   The code is **merged to `main`** (#49) and green; it is unreleased, so a
+>   user running `curl | bash` today still gets v0.6.3 with the raw-escape bug.
 > - **The Linux Chrome/Firefox certificate warning is accepted for now**
 >   (decision, 2026-10-01): Phase 6's "No Firefox NSS store modification"
 >   exclusion stands. Do not reopen it without being asked. The gap is
@@ -27,6 +29,11 @@
 > workflow's first CI run.**
 
 Repo: `main` is the default branch; work in a feature branch.
+
+**Status as of 2026-10-01:** the launch-readiness session is **merged** (#49,
+`f3a957c`) and `main` is green — CI 9/9, Browsers 2/2, Deploy Landing deployed
+the fixed installer and the live site serves it. Everything below is either
+unreleased, open by decision, or Session 2 work.
 
 ## Orientation — 60 seconds
 
