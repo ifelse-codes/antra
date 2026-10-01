@@ -110,27 +110,37 @@ jobs:
           "$PWD/target/debug/antra" trust --user-level </dev/null || true
           if ! "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
             echo "== user-level trust did not take; trying the system store =="
-            # -H explicitly. `sudo` resets HOME to root's, so without it the CA
-            # is minted into /root/.config/antra while the check looks in the
-            # runner's home: the system store gets the CA and the script then
-            # reports "no ca.pem found". Measured on ubuntu-latest, 2026-10-01.
-            # -E is deliberately not used: it would carry the hermetic HOME into
-            # root's trust config, which is not what is being tested.
-            sudo -n -H "$PWD/target/debug/antra" trust --yes </dev/null || true
-            # The CA is now in the system store, but if it was minted under
-            # root's home it is not the same file this run will serve. Copy it
-            # across so both sides describe one CA.
-            if [ ! -f "$HOME/.config/antra/ca.pem" ]; then
-              root_ca="$(sudo -n find /root/.config/antra -name ca.pem -type f 2>/dev/null | head -1)"
-              if [ -n "$root_ca" ]; then
-                echo "::notice::CA was minted under root's HOME; copying it to $HOME"
-                mkdir -p "$HOME/.config/antra"
-                sudo -n cp "$root_ca" "$HOME/.config/antra/ca.pem" 2>/dev/null || true
-                sudo -n cp "${root_ca%ca.pem}ca-key.pem" "$HOME/.config/antra/ca-key.pem" 2>/dev/null || true
-                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra" 2>/dev/null || true
-              fi
-            fi
+            # -E, and the reason matters: the CA must be minted in the RUNNER's
+            # home, because that is the home the daemon will serve certificates
+            # from and the one check-browsers.sh reads.
+            #
+            # Two wrong turns are recorded here. Plain `sudo` resets HOME to
+            # root's, so the CA was minted in /root/.config/antra and installed
+            # from there — the store was right and the check's home had nothing.
+            # Then `sudo -H` was tried, which is the same mistake stated
+            # explicitly: -H sets HOME to the *target* user's, which for sudo is
+            # root. -E is what carries the caller's HOME through.
+            sudo -n -E "$PWD/target/debug/antra" trust --yes </dev/null || true
           fi
+          # Whatever happened above, find out where the CA actually is and make
+          # the runner's home agree with the trust store. Reported, never
+          # silent.
+          runner_ca="$HOME/.config/antra/ca.pem"
+          if [ ! -f "$runner_ca" ]; then
+            for d in /root/.config/antra /root/Library/Application\ Support/antra; do
+              if sudo -n test -f "$d/ca.pem" 2>/dev/null; then
+                echo "::notice::CA was minted under root ($d); copying it to the runner's home"
+                mkdir -p "$HOME/.config/antra"
+                sudo -n cp "$d/ca.pem" "$runner_ca" 2>/dev/null || true
+                sudo -n cp "$d/ca-key.pem" "$HOME/.config/antra/ca-key.pem" 2>/dev/null || true
+                sudo -n chown -R "$(id -u):$(id -g)" "$HOME/.config/antra" 2>/dev/null || true
+                break
+              fi
+            done
+          fi
+          echo "== where the CA ended up =="
+          find "$HOME" -name ca.pem -type f 2>/dev/null | sed 's/^/   /'
+          sudo -n find /root -name ca.pem -type f 2>/dev/null | sed 's/^/   (root) /'
           echo "== antra trust --status =="
           "$PWD/target/debug/antra" trust --status </dev/null || true
           if "$PWD/target/debug/antra" trust --status </dev/null 2>&1 | grep -q "CA is trusted"; then
@@ -146,20 +156,11 @@ jobs:
         # and refuses to ask a browser anything until the route serves 200 over
         # TLS. A browser failure therefore cannot be blamed on missing setup.
         #
-        # Exit codes: 0 = checked and clean. 1 = a real failure. 2 = nothing
-        # could be checked (no CA, so no trust and no TLS assertion). 2 is
-        # reported as a warning rather than a red job — the cause is
-        # environmental — but it is never reported as a pass, because a run that
-        # verified nothing is not a good run.
-        run: |
-          set +e
-          .github/scripts/check-browsers.sh
-          rc=$?
-          case "$rc" in
-            0) echo "browser check: clean" ;;
-            2) echo "::warning title=Browser check could not run::Nothing was verified on this runner. See the output above." ;;
-            *) echo "::error title=Browser check failed::exit $rc"; exit "$rc" ;;
-          esac
+        # Exit codes: 0 = checked and clean, 1 = a failure. There is
+        # deliberately no "could not run" code that stays green: a run that
+        # verified nothing must not look like a pass, and a warning annotation
+        # on a green job is the easiest thing in a CI list to miss.
+        run: .github/scripts/check-browsers.sh
 
       - name: Upload the check log
         if: always()

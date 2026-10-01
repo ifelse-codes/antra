@@ -194,13 +194,19 @@ fi
 # an abort here would report "no ca.pem" for what is really "trust could not be
 # installed", which is the misreading C19 must not be confused with.
 if [ ! -f "$CA_PEM" ]; then
-    xfail "no ca.pem under $HOMEDIR — the trust step did not produce one (searched the platform path and the whole home)"
+    # This must be a hard failure, not an expected one. It was briefly exit 2
+    # (a warning, job still green) and that produced the worst result in this
+    # workflow's history so far: a green job that verified nothing at all,
+    # because the trust step had quietly failed and the run reported success.
+    # A check that cannot run is a broken check, and a maintainer scanning a
+    # list of green jobs would have no way to tell this one apart from a real
+    # pass. The distinction that matters is not "who caused it" but "did
+    # anything get verified" — and here, nothing did.
+    bad "no ca.pem under $HOMEDIR — the trust step did not produce one (searched the platform path and the whole home)"
     echo
-    printf 'antra-browser: 0 pass / 0 fail / 1 expected-fail / 0 skip\n'
-    echo "NOTE: nothing was checked. Antra's own TLS is unverified in this run." >&2
-    # Non-zero: a run that checked nothing must not read as a pass. Expected
-    # rather than a hard failure because the cause is environmental.
-    exit 2
+    printf 'antra-browser: 0 pass / 1 fail / 0 expected-fail / 0 skip\n'
+    echo "NOTHING WAS CHECKED. Antra's own TLS is unverified in this run." >&2
+    exit 1
 fi
 ok "CA present at $CA_PEM"
 
