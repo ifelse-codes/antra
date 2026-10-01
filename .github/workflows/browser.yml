@@ -122,20 +122,30 @@ jobs:
             # both read it. Then run the same command under sudo, which finds
             # the CA that is already there and installs *that*.
             #
-            # The three wrong orders, all measured on ubuntu-latest:
-            #   plain `sudo`   HOME becomes root's, so the CA is minted in
-            #                   /root/.config/antra. The store is right; the
-            #                   check's home has nothing.
-            #   `sudo -H`      identical — -H sets HOME to the *target* user,
-            #                   which for sudo is root.
-            #   `sudo -E`      HOME is carried through, so the CA lands in the
-            #                   runner's home — but it is written by root, in a
-            #                   0700 root-owned directory. The runner can no
-            #                   longer stat it, and both `find` and the script's
-            #                   `-f` failed with EACCES behind a 2>/dev/null, so
-            #                   the log showed nothing at all.
-            "$PWD/target/debug/antra" trust --yes </dev/null || true
-            sudo -n "$PWD/target/debug/antra" trust --yes </dev/null || true
+            # The four wrong orders, all measured on ubuntu-latest:
+            #   plain `sudo`    HOME becomes root's, so the CA is minted in
+            #                    /root/.config/antra. The store is right; the
+            #                    check's home has nothing.
+            #   `sudo -H`       identical — -H sets HOME to the *target* user,
+            #                    which for sudo is root.
+            #   `sudo -E`       HOME carried through, so the CA is in the right
+            #                    place, but written by root into a 0700
+            #                    root-owned dir: the runner cannot stat it, and
+            #                    both `find` and the script's `-f` hit EACCES
+            #                    behind a 2>/dev/null.
+            #   no sudo at all  `trust --yes` without root fails *before*
+            #                    minting ("Could not install CA
+            #                    automatically"), so no CA is written at all —
+            #                    the check then found nothing and the sudo run
+            #                    that followed was the only one that minted one,
+            #                    as root again.
+            #
+            # What works: mint under sudo with -E so the CA lands in the
+            # runner's home, then hand the directory back to the runner. The
+            # store install and the mint happen in the same privileged run,
+            # which is why the "mint separately" idea could not work.
+            sudo -n -E "$PWD/target/debug/antra" trust --yes </dev/null || true
+            sudo -n chown -R "$(id -u):$(id -g)" "$ANTRA_BROWSER_HOME" 2>/dev/null || true
           fi
           echo "== where the CA ended up =="
           find "$HOME" -name ca.pem -type f 2>&1 | sed 's/^/   /'
