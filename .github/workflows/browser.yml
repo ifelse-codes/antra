@@ -68,9 +68,16 @@ jobs:
       - name: Install Playwright browsers
         # The driver only. The browsers it launches are the point — Chromium
         # on Linux uses NSS, which is the store under test.
+        #
+        # NODE_PATH is required, not decoration. `npm install -g` puts
+        # playwright in the global prefix, and node's `require.resolve` does
+        # not search there, so check-browsers.sh reported "no Playwright driver"
+        # and skipped every browser — a green job that drove no browser at all.
         run: |
           npm install -g playwright
           npx playwright install --with-deps chromium firefox webkit
+          echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+          node -e 'require.resolve("playwright"); console.log("playwright resolves OK")'
 
       - name: Trust the CA
         shell: bash

@@ -229,10 +229,19 @@ if ! start_stack; then
 fi
 ok "daemon, upstream and route are live ($BASE_DOMAIN -> 127.0.0.1:$UPSTREAM_PORT)"
 
+# The driver is not optional. It was `skip` for a while, and the first Ubuntu
+# run used that to go green having launched no browser at all: `npm install -g`
+# does not put playwright on node's module path, `require.resolve` failed, the
+# three browser lines became expected-failures, and 0 pass / 0 fail looked
+# fine. A check that cannot ask its question must fail, not skip.
 if have_playwright; then
     ok "Playwright available"
+    driver_state=present
 else
-    skip_it "Playwright not installed (npm i -g playwright && npx playwright install)"
+    bad "Playwright is not resolvable by node — no browser can be asked anything"
+    echo "   fix: npm install -g playwright && npx playwright install --with-deps chromium firefox webkit" >&2
+    echo "   and: echo NODE_PATH=\$(npm root -g) — a global install is not on node's module path" >&2
+    driver_state=missing
 fi
 
 # Whether the CA is actually trusted *in this environment*. This is the single
@@ -255,8 +264,8 @@ fi
 
 for b in chrome firefox; do
     url="$(browser_url)"
-    if ! have_playwright; then
-        xfail "$b: no Playwright driver, so the browser was never asked"
+    if [ "$driver_state" = "missing" ]; then
+        bad "$b: never asked — no Playwright driver"
         continue
     fi
     result="$(probe "$b" "$url")"
@@ -282,7 +291,7 @@ done
 # WebKit stands in for Safari. Not the same engine as Safari proper, so it is
 # reported separately and never counted as a Safari pass.
 url="$(browser_url)"
-if have_playwright; then
+if [ "$driver_state" = "present" ]; then
     result="$(probe webkit "$url")"
     case "$result" in
         OK*)   ok "WebKit loaded $(browser_url) with no certificate error (${result#OK })" ;;
@@ -293,7 +302,7 @@ if have_playwright; then
                fi ;;
     esac
 else
-    xfail "WebKit: no Playwright driver"
+    bad "WebKit: never asked — no Playwright driver"
 fi
 
 # Safari proper, through safaridriver. Kept as a distinct line so a future
