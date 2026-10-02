@@ -5,13 +5,14 @@
 >
 >
 > **Direction (maintainer, 2026-09-30): make Antra "good to market", then
-> release once, then GTM.** `v0.6.3` is released. The launch-readiness work
-> below is **done on `main` and unreleased** (installer escapes, `trust
-> --remove --yes`, A1, A2, C17). The maintainer's calls, not to be
-> re-litigated:
-> - **One release next**: v0.6.4, carrying all of it. Then GTM.
->   The code is **merged to `main`** (#49) and green; it is unreleased, so a
->   user running `curl | bash` today still gets v0.6.3 with the raw-escape bug.
+> release once, then GTM.** `v0.6.3` is released. The launch-readiness work is
+> **done and merged to `main`, and unreleased**: C17, C18 (installer escapes,
+> `trust --remove --yes`, A1, A2), C22 and **C23**. The maintainer's calls, not
+> to be re-litigated:
+> - **One release next**: v0.6.4, carrying all of it — including **C23**, which
+>   broke the upgrade path. Then GTM. The code is merged (#49, #51, #52, #53)
+>   and `main` is green, but it is unreleased: a user running `curl | bash`
+>   today still gets v0.6.3, with the raw-escape bug *and* the CA-rotation bug.
 > - **The Linux Chrome/Firefox certificate warning is accepted for now**
 >   (decision, 2026-10-01): Phase 6's "No Firefox NSS store modification"
 >   exclusion stands. Do not reopen it without being asked. The gap is
@@ -25,8 +26,12 @@
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
-> **Start with "Still owed" — the next thing is v0.6.4, and the browser
-> workflow's first CI run.**
+> **Start here.** Two things before cutting v0.6.4, both in "Still owed":
+> **Chrome and Firefox have never been opened** (the default browser and
+> Safari's own error page are verified warning-free; those two are not), and
+> **C23 has no end-to-end test** — every suite here mints a fresh CA and never
+> rotates one, which is exactly why that bug survived. Then release, and state
+> the C19 Linux gap in the notes.
 
 Repo: `main` is the default branch; work in a feature branch.
 
@@ -125,7 +130,9 @@ and A2 are **built**. v0.6.4 carries the lot.
 | **The installer prints raw `\033[…m`** | **FIXED.** Every new user, on first contact | Ten lines in `install.sh` printed `${BOLD}` through plain `echo`, which does not interpret backslash escapes, so a new user saw the literal text `\033[1mTrusting the CA\033[0m` in the trust prompt and the quick-start block. Reported 2026-09-07, unfixed through four releases. A `say()` helper using `printf %b` now does what `info`/`ok`/`header` already did. `tests/installer_output.sh` covers it; its counters are `t_`-prefixed because `install.sh` defines its own `ok`, and an unprefixed helper here was being silently replaced by the installer's, printing green ticks while counting nothing. |
 | **A1 — automated browser check** | **BUILT, GREEN AND VERIFYING** | `.github/workflows/browser.yml` + `.github/scripts/check-browsers.sh`, on push and PR, macOS + Ubuntu. The script stands up the daemon, an upstream and a route itself, and refuses to ask a browser anything until the route serves 200 over TLS. It needed six CI runs to be trustworthy — see the table below and ROADMAP C21 for how it was green while launching no browser at all. |
 | **A2 — fresh "stranger" test** | **DONE** | `tests/user-test-2026-10-01.md`, against the released v0.6.3 binary on macOS. The product works: real HTTPS at a stable URL, a correct 301, a clean Ctrl+C, an honest `doctor`. Three new findings, filed below. |
-| **Then: one release** | **TODO** | v0.6.4 carries the installer fix, the `trust --remove --yes` fix, C17 and the two new checks. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. |
+| **C23 — a CA rotation broke every domain already opened** | **FIXED, untested end-to-end** | Merged in #52. Two causes: a running daemon never reloaded the CA, and leaf certs on disk were never checked against it. Both mutation-verified, and a unit test covers the purge. What is missing is a test that rotates the CA under a **live** daemon and asserts HTTPS still works — every suite here builds a fresh CA and never rotates one, which is precisely why this survived. This is the first thing to add after the release. |
+| **Chrome and Firefox on macOS** | Never actually opened | The default browser rendered `https://check.localhost:8443/` warning-free, and Antra's own 503 page over HTTPS confirmed it again — an untrusted cert shows a browser page, not ours. But the run stopped there: Firefox is not installed on that machine, and Chrome was never opened. NSS browsers are the C19 class, so these are the two most likely to surprise. Open both and report the exact warning text. |
+| **Then: one release** | **TODO** | v0.6.4 carries C17, C18, C22 and C23. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. Worth stating C23 explicitly too — it is an upgrade-path fix, so existing users need to know it is in this release. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. |
 
 ### The browser check is green and actually verifying (2026-10-01)
 
@@ -190,6 +197,12 @@ CA and never rotates one, so the entire class of "upgrading breaks it" was
 untested — including the browser check added in #49, which would not have
 caught it. If one thing gets added before v0.6.5, make it a test that rotates
 the CA underneath a live daemon and asserts HTTPS still works.
+
+**How it was found, because the method matters more than the fix.** Not by a
+suite, and not by the browser check: by a person reading one line of a manual
+run — `over TLS through antra: FAILED` — for a domain that had been opened
+before. Six of the eight findings this session came from someone reading actual
+output rather than from a green build.
 
 ### From A2, not yet filed
 
