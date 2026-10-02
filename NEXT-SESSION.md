@@ -30,10 +30,10 @@
 
 Repo: `main` is the default branch; work in a feature branch.
 
-**Status as of 2026-10-01:** the launch-readiness session is **merged** (#49,
-`f3a957c`) and `main` is green — CI 9/9, Browsers 2/2, Deploy Landing deployed
-the fixed installer and the live site serves it. Everything below is either
-unreleased, open by decision, or Session 2 work.
+**Status as of 2026-10-02:** the launch-readiness session is **merged** — #49,
+#51 and #52 are on `main` (`57f3428`), `main` is green (CI 9/9, Browsers 2/2),
+and Deploy Landing has published the fixed installer. **Still unreleased:** no
+user has any of it. v0.6.4 carries C17, C18, C22 and **C23**.
 
 ## Orientation — 60 seconds
 
@@ -164,6 +164,32 @@ names the certificate it removed.
 **If you want a real macOS browser assertion**, it needs a trust store the
 runner can write. Cheapest option: `security add-trusted-cert` into a temporary
 keychain and point `HOME` at it. Not done here, and not needed for v0.6.4.
+
+### C23 — the upgrade path was broken, and no check would have caught it
+
+Found 2026-10-01 by reading one line of a manual run: `over TLS through antra:
+FAILED`. `check.localhost` was a domain that had been used *before* on that
+machine. A CA rotation had happened earlier, and the leaf certificate cached on
+disk was still signed by the **retired** CA.
+
+**Why it is the worst-shaped bug in this project.** A user upgrades to a
+CA-rotating release, runs `antra trust`, it **succeeds** — and then every domain
+they had already opened warns in the browser. Re-running `antra trust` cannot
+fix it, because the rotation is the thing that already succeeded. The only cure
+was deleting `~/.config/antra/certs` and restarting the daemon. Domains first
+seen *after* the rotation worked fine, and that asymmetry is what makes it read
+as "`antra trust` is broken".
+
+Fixed in #52, two independent causes, both verified by mutation. Details and
+evidence in ROADMAP C23. The uncomfortable part: `antra doctor` already
+detected this and said *"Daemon is serving a retired CA — restart it"*. The
+diagnosis shipped; the fix never did.
+
+**The gap this exposes in the tests.** Every suite in this repo builds a fresh
+CA and never rotates one, so the entire class of "upgrading breaks it" was
+untested — including the browser check added in #49, which would not have
+caught it. If one thing gets added before v0.6.5, make it a test that rotates
+the CA underneath a live daemon and asserts HTTPS still works.
 
 ### From A2, not yet filed
 
