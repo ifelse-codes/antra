@@ -43,6 +43,22 @@ impl CertStore {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
             .join("antra");
+        Self::at(&config_dir)
+    }
+
+    /// Create a CertStore rooted at an explicit directory, running the same
+    /// start-up work as `new()` — including purging leaves signed by a retired
+    /// CA.
+    ///
+    /// Split out from `new()` because `new()` resolves the path from the
+    /// environment, which in a test is the developer's real `~/.config/antra`.
+    /// Without this, a test that wants a store in a temp dir has to build the
+    /// struct literally — and that silently skips `ensure_leaf_version`, which
+    /// is the whole of the C23 fix. The first version of `tests/ca_rotation.rs`
+    /// did exactly that and failed with `BadSignature` for reasons that had
+    /// nothing to do with the code under test. A test that cannot reach the
+    /// real start-up path will happily test a store that cannot occur.
+    pub fn at(config_dir: &Path) -> Result<Self> {
         let certs_dir = config_dir.join("certs");
         std::fs::create_dir_all(&certs_dir)?;
         // The CA on disk, if there is one yet. Passing it in lets
@@ -53,7 +69,7 @@ impl CertStore {
         let existing_ca = std::fs::read_to_string(config_dir.join("ca.pem")).ok();
         ensure_leaf_version(&certs_dir, existing_ca.as_deref())?;
         Ok(Self {
-            config_dir,
+            config_dir: config_dir.to_path_buf(),
             certs_dir,
         })
     }
