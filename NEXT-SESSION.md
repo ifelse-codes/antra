@@ -26,7 +26,7 @@
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
-> **Start here.** One thing before cutting v0.6.4, in "Still owed":
+> **Start here.** The v0.6.4 blocker list below is all closed; GTM is next.
 > **Chrome and Firefox have never been opened** — the default browser and
 > Safari's own error page are verified warning-free, those two are not.
 > (Firefox is not installed on the machine that did the manual pass, so it is a
@@ -36,11 +36,15 @@
 
 Repo: `main` is the default branch; work in a feature branch.
 
-**Status as of 2026-10-02:** the launch-readiness session is **merged and
-finished** — #49, #51, #52 and #55 are on `main` (`9fb5b3f`), `main` is green
-(CI 9/9, Browsers 2/2), no open PRs, and Deploy Landing has published the fixed
-installer. **Still unreleased:** no user has any of it. v0.6.4 carries C17,
-C18, C22 and **C23**, and C23 now has the end-to-end test it shipped without.
+**Status as of 2026-10-02 (evening):** v0.6.4 is **published and checked**
+— Release Check green on all five legs (Homebrew macOS/Linux, curl installer
+macOS/Linux, live site). The launch-readiness work (#49, #51, #52, #55) is in
+users' hands, C23 included. Chrome on macOS verified warning-free by hand
+(see the table row below); Firefox is not installed on this machine, the Linux
+NSS gap (C19) stands by decision and is asserted on every CI run. Direction
+now shifts to GTM. Remaining follow-ups, none blocking: the three A2 findings
+(`antra run` port auto-assign blames the user; stale route after SIGKILL;
+one clean installer download from a fresh `HOME`).
 
 ## Orientation — 60 seconds
 
@@ -133,8 +137,8 @@ and A2 are **built**. v0.6.4 carries the lot.
 | **A1 — automated browser check** | **BUILT, GREEN AND VERIFYING** | `.github/workflows/browser.yml` + `.github/scripts/check-browsers.sh`, on push and PR, macOS + Ubuntu. The script stands up the daemon, an upstream and a route itself, and refuses to ask a browser anything until the route serves 200 over TLS. It needed six CI runs to be trustworthy — see the table below and ROADMAP C21 for how it was green while launching no browser at all. |
 | **A2 — fresh "stranger" test** | **DONE** | `tests/user-test-2026-10-01.md`, against the released v0.6.3 binary on macOS. The product works: real HTTPS at a stable URL, a correct 301, a clean Ctrl+C, an honest `doctor`. Three new findings, filed below. |
 | **C23 — a CA rotation broke every domain already opened** | **FIXED and now covered** | Fix in #52, end-to-end test in #55. Two causes: a running daemon never reloaded the CA, and leaf certs on disk were never checked against it. Both mutation-verified, plus two tests that rotate the CA through the real HTTPS server — one per cause, each confirmed to fail against its own cause and pass against the other, and the first also asserts the retired CA no longer verifies so a cache that never noticed anything cannot pass it. The blind spot that hid this is now covered: something in CI rotates the CA underneath a live daemon. |
-| **Chrome and Firefox on macOS** | Never actually opened | The default browser rendered `https://check.localhost:8443/` warning-free, and Antra's own 503 page over HTTPS confirmed it again — an untrusted cert shows a browser page, not ours. But the run stopped there: Firefox is not installed on that machine, and Chrome was never opened. NSS browsers are the C19 class, so these are the two most likely to surprise. Open both and report the exact warning text. |
-| **Then: one release** | **TODO** | v0.6.4 carries C17, C18, C22 and C23. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. Worth stating C23 explicitly too — it is an upgrade-path fix, so existing users need to know it is in this release. Follow **Releasing** below. The notes **must** state the Linux Chrome/Firefox gap and the `certutil` workaround: the installer says "zero browser warnings — forever", and on Linux Chrome that is not yet true. |
+| **Chrome and Firefox on macOS** | **Chrome: verified clean, 2026-10-02.** Firefox: not installed here — measured gap | System Google Chrome (Playwright `channel:"chrome"`, visible) loaded `https://chrome-probe.localhost:18999/` with **no certificate warning** (`OK 200`). Preconditions asserted first: `antra trust --status` → trusted via login keychain (fingerprint `A9:48…` matches on-disk `ca.pem`), and `curl --cacert` 200 before the browser was asked. No trust-store writes — the user's already-trusted CA was used. A CA-key mismatch seen mid-verification was NOT a product bug: a stale daemon started under a hermetic throwaway `HOME` owned the port with its own throwaway CA. Firefox is not installed on this machine, so the macOS Firefox side is a measured gap, not a pass; the Linux NSS gap (C19) stands and is asserted on every CI run by `check-browsers.sh`. |
+| **Then: one release** | **DONE — v0.6.4 published 2026-10-02** | All Releasing steps executed: #57 merged (11/11 checks green), tag `v0.6.4` pushed, release published (draft publish confirmed taken), Release Notes applied, formula hashes read from the release's own `.sha256` assets, formula updated in this repo **and the tap** (`ifelse-codes/homebrew-antra`), pinned-version examples bumped, Deploy Landing re-deployed and live site serves the v0.6.4 pin. **Release Check: all five legs green** — Homebrew macOS/Linux, curl installer macOS/Linux, live site. The notes state the Linux Chromium/Firefox gap with the `certutil` workaround and call out C23 as the upgrade-path fix. |
 
 ### The browser check is green and actually verifying (2026-10-01)
 
