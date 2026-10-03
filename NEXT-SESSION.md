@@ -5,14 +5,9 @@
 >
 >
 > **Direction (maintainer, 2026-09-30): make Antra "good to market", then
-> release once, then GTM.** `v0.6.3` is released. The launch-readiness work is
-> **done and merged to `main`, and unreleased**: C17, C18 (installer escapes,
-> `trust --remove --yes`, A1, A2), C22 and **C23**. The maintainer's calls, not
-> to be re-litigated:
-> - **One release next**: v0.6.4, carrying all of it — including **C23**, which
->   broke the upgrade path. Then GTM. The code is merged (#49, #51, #52, #53)
->   and `main` is green, but it is unreleased: a user running `curl | bash`
->   today still gets v0.6.3, with the raw-escape bug *and* the CA-rotation bug.
+> release once, then GTM.** The release happened: **v0.6.4 is published**
+> (2026-10-02) and carries the launch-readiness work — C17, C18, C22, C23.
+> The maintainer's calls, not to be re-litigated:
 > - **The Linux Chrome/Firefox certificate warning is accepted for now**
 >   (decision, 2026-10-01): Phase 6's "No Firefox NSS store modification"
 >   exclusion stands. Do not reopen it without being asked. The gap is
@@ -26,25 +21,27 @@
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
-> **Start here.** The v0.6.4 blocker list below is all closed; GTM is next.
-> **Chrome and Firefox have never been opened** — the default browser and
-> Safari's own error page are verified warning-free, those two are not.
-> (Firefox is not installed on the machine that did the manual pass, so it is a
-> gap rather than a pass; it is an NSS browser on macOS too, the same class as
-> C19.) C23's missing end-to-end test has since been added in #55, so that item
-> is closed. Then release, and state the C19 Linux gap in the notes.
+> **Start here.** All three A2 follow-ups are fixed, **unreleased**, on the
+> branch `claude/dazzling-mayer-mo3zyz` (2026-10-03) — merge it if it is not
+> already on `main`: **C24** (a server with a hardcoded port now gets its
+> route moved to where it really listens, and the 503 names that port instead
+> of asking whether the server runs), **C25** (the daemon reaps routes whose
+> process was hard-killed) and **C26** (`tests/installer_output.sh` has its own
+> CI job; the installer ran clean from a fresh `HOME` on Linux). Both product
+> fixes hit the **first run of every new user** with an ordinary Node server,
+> so they are worth shipping before GTM traffic arrives: the next step is a
+> **v0.6.5** release (Releasing, below — the tag needs a person), then GTM.
 
 Repo: `main` is the default branch; work in a feature branch.
 
-**Status as of 2026-10-02 (evening):** v0.6.4 is **published and checked**
-— Release Check green on all five legs (Homebrew macOS/Linux, curl installer
-macOS/Linux, live site). The launch-readiness work (#49, #51, #52, #55) is in
-users' hands, C23 included. Chrome on macOS verified warning-free by hand
-(see the table row below); Firefox is not installed on this machine, the Linux
-NSS gap (C19) stands by decision and is asserted on every CI run. Direction
-now shifts to GTM. Remaining follow-ups, none blocking: the three A2 findings
-(`antra run` port auto-assign blames the user; stale route after SIGKILL;
-one clean installer download from a fresh `HOME`).
+**Status as of 2026-10-03:** v0.6.4 is published and checked — Release Check
+green on all five legs. C24, C25 and C26 are done on the branch above with
+the gates green (fmt, clippy on Linux **and Windows** via a mingw
+cross-check, 500 Rust tests passing, the four shell suites, the installer
+suite) and every new test mutation-checked. Chrome on macOS is verified
+warning-free by hand; Firefox is not installed on that machine, and the
+Linux NSS gap (C19) stands by decision and is asserted on every CI run.
+Nothing is owed before the v0.6.5 release except merging and tagging.
 
 ## Orientation — 60 seconds
 
@@ -75,16 +72,18 @@ difference is Antra never leaves your machine.
 
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings     # warnings are errors
-    ./target/debug/antra --version                 # 0.6.3
+    ./target/debug/antra --version                 # 0.6.4
 
 Full test commands, including the two traps that cost real time, are under
 **Gates** at the bottom of this file.
 
 ## Where things stand
 
-`v0.6.3` is published, the landing site serves it, and both install paths
-were checked on GitHub's macOS and Linux runners (**Release Check**): Homebrew
-and `curl | bash`, latest and pinned, all report `antra 0.6.3`. v0.6.2 shipped
+`v0.6.4` is published (2026-10-02), the landing site serves it, and both
+install paths were checked on GitHub's macOS and Linux runners (**Release
+Check**): Homebrew and `curl | bash`, latest and pinned, all report
+`antra 0.6.4`. v0.6.4 carried the launch-readiness fixes (C17, C18, C22,
+C23); v0.6.2 shipped
 the Linux fixes (C14, C15); v0.6.3 the macOS service fix (C16), which the
 **Service (macOS)** workflow now checks on a real Mac on every change to
 `service.rs`. Release mechanics are in the v0.6.2 and v0.6.3 sections of
@@ -97,8 +96,8 @@ release; **Releasing** step 5 now names the tap.
 
 The four shell e2e suites are green and **all four run in CI** on macOS and
 Ubuntu (206 passing / 0 failing / 9 skipped when last counted, at v0.6.1). The
-Rust suite is at 421 passing, and since C15 it passes in full in the IPv6-less
-claude.ai cloud container too.
+Rust suite is at 500 passing (2026-10-03, with C24/C25), and since C15 it
+passes in full in the IPv6-less claude.ai cloud container too.
 They were at 86 passing / 128 failing before this work, and the four suites had
 never run in CI at all.
 
@@ -220,13 +219,13 @@ run — `over TLS through antra: FAILED` — for a domain that had been opened
 before. Six of the eight findings this session came from someone reading actual
 output rather than from a green build.
 
-### From A2, not yet filed
+### From A2 — all three closed (2026-10-03, unreleased)
 
-| Finding | Why it matters |
+| Finding | Outcome |
 |---|---|
-| **`antra run` auto-assigns a port, then blames the user** | For a server that hardcodes `listen(3000)` and ignores `process.env.PORT` — ordinary Node — Antra registers 4000, prints the URL as though ready, and the 503 says *"is your server running?"* when it is running, on 3000. The port warning scrolls past, everything after it reads as success, and the one-flag fix is never repeated where it is actually needed. Details and repro in `tests/user-test-2026-10-01.md`. |
-| **A stale route survives a hard kill** | After `SIGKILL` rather than Ctrl+C, `antra list` keeps showing the route and `doctor` counts it as active. `antra prune` exists for exactly this; nothing points a user at it. |
-| **The installer's download did not finish once** | The v0.6.3 installer stalled on *Downloading antra-aarch64-apple-darwin (v0.6.3)* for several minutes on the A2 test machine. Not verified as a bug — possibly that machine's network — and CI's Release Check installs the same script successfully. Worth one clean run from a fresh `HOME` before v0.6.4. |
+| **`antra run` auto-assigns a port, then blames the user** | **C24.** Reproduced on v0.6.4 with a silent `listen(3000)` server: 503 for every one of 12 polls, and the 503's own fix said `--port 4000`. Now the route moves to 3000 by itself after 5 s (and back, if the assigned port answers later) and the terminal prints the `--port 3000` to use next time; a 503 that still happens names the port the server really holds. |
+| **A stale route survives a hard kill** | **C25.** Reproduced on v0.6.4: listed and counted active 9 s after `kill -9`. The daemon now removes it within 5 s; `list` and `doctor` say *process exited* and point at `antra prune` meanwhile, or forever against an older daemon. |
+| **The installer's download did not finish once** | **C26, Linux only.** The live installer from a fresh `HOME` finished in 1.9 s with a hash equal to the release's own. The A2 stall was on macOS and is still unexplained; the cloud container cannot reach the landing domain, so the run used the byte-identical `install.sh` from `main`. |
 
 To reproduce the Chrome finding by hand in the cloud container: Chromium is at
 `/opt/pw-browsers`, Playwright is global (`NODE_PATH=/opt/node22/lib/node_modules
@@ -313,10 +312,22 @@ are the most expensive lessons in this codebase:
   bash tests/installer_output.sh
   ```
 
-  It is **not** in the E2E CI job yet. Wire it in when the browser workflow
-  settles; it is the only check that would catch the installer's colour
-  escaping again, and that bug survived four releases precisely because nothing
-  ran it.
+  CI runs it as its own job, **Installer Output** (C26), under `/bin/bash` on
+  macOS and Ubuntu — on macOS that is bash 3.2, what a `curl | bash` user
+  gets. It is the only check that would catch the installer's colour escaping
+  again, a bug that survived four releases because nothing ran it.
+
+- Clippy for Windows, from Linux, when you touch `cfg` code: the CI clippy
+  job runs on Windows too, and dead-code lints differ per platform.
+
+  ```bash
+  apt-get install -y gcc-mingw-w64-x86-64-posix   # ring needs a C compiler
+  rustup target add x86_64-pc-windows-gnu
+  cargo clippy --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+  ```
+
+  macOS still cannot be cross-checked this way (`ring`'s build script); swap
+  a `cfg` to compile the macOS branch on Linux instead, as `AGENT.md` says.
 
 - The browser check, if you touch trust, TLS or the installer:
 
