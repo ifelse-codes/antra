@@ -236,7 +236,10 @@ async fn run_inner(args: RunArgs) -> Result<()> {
 
     maybe_prompt_trust(args.no_trust_prompt, args.yes);
 
-    // 1. Determine port
+    // 1. Determine port. `auto_assigned` marks the one case that is a pure
+    // guess: no --port, nothing in the command. Only then is the server
+    // checked for actually listening there (see `confirm_auto_port`).
+    let mut auto_assigned = false;
     let port = match args.port {
         Some(p) => {
             // A port was resolved before spawn — explicitly by the user, or
@@ -305,6 +308,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
                 output::print_warning(
                     "Tip: Use --port to specify the port your server listens on.",
                 );
+                auto_assigned = true;
                 detected
             }
         }
@@ -507,8 +511,23 @@ async fn run_inner(args: RunArgs) -> Result<()> {
     println!();
 
     // Start port watcher if stdout is captured (carries owner PID forward)
+    let current_port = std::sync::Arc::new(std::sync::atomic::AtomicU16::new(port));
     if let Some(stdout) = child_stdout {
-        port_watcher::watch_port_changes(stdout, domain.clone(), port, child_pid);
+        port_watcher::watch_port_changes(
+            stdout,
+            domain.clone(),
+            std::sync::Arc::clone(&current_port),
+            child_pid,
+        );
+    }
+    if auto_assigned {
+        port_watcher::confirm_auto_port(
+            domain.clone(),
+            port,
+            std::sync::Arc::clone(&current_port),
+            child_pid,
+            args.command.join(" "),
+        );
     }
 
     // 7. Wait for child or signal.

@@ -104,11 +104,14 @@ pub async fn forward_request(
         )
     })?
     .map_err(|e| {
-        anyhow::anyhow!(
-            "Connection to {}:{} refused — is your server running? ({e})",
-            route.host,
-            route.port
-        )
+        // Say what failed, not why: the 503 page works out the why from the
+        // route's owner, and "is your server running?" was false for a server
+        // running on a port other than the route's.
+        if e.is_connect() {
+            anyhow::anyhow!("Could not connect to {}:{} ({e})", route.host, route.port)
+        } else {
+            anyhow::anyhow!("Request to {}:{} failed ({e})", route.host, route.port)
+        }
     })?;
 
     // Stream the upstream body verbatim — never collect(). Buffering broke
