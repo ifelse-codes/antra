@@ -69,6 +69,25 @@ jobs:
         run: cargo test --lib --bin antra --test cert_store --test cert_strict --test cli_utils --test config_project --test ipc_handlers --test ipc_protocol --test proxy_headers --test proxy_websocket --test routing_registry --test upstream_dual_stack --test util_port -- --test-threads=1 --skip test_cert_cache_resolve
         timeout-minutes: 10
 
+  installer:
+    name: Installer Output (${{ matrix.os }})
+    # tests/installer_output.sh sources the real install.sh and checks that
+    # what a new user sees renders: the raw `\033[1m` text survived four
+    # releases because nothing ran this. Seconds, no Rust, no ports — so its
+    # own job, not a step behind the ~15-minute suites. `/bin/bash`, not
+    # `bash`: on macOS that is the stock 3.2 a `curl | bash` user gets, while
+    # `bash` on the runner's PATH may be a newer Homebrew one.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer output
+        run: /bin/bash --version | head -1 && /bin/bash tests/installer_output.sh
+
   e2e-shell:
     name: E2E Shell Suites (${{ matrix.os }})
     # All four suites now run here.
