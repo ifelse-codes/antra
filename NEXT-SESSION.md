@@ -37,8 +37,9 @@ Repo: `main` is the default branch; work in a feature branch.
 **Status as of 2026-10-03:** v0.6.4 is published and checked — Release Check
 green on all five legs. C24, C25 and C26 are done on the branch above with
 the gates green (fmt, clippy on Linux **and Windows** via a mingw
-cross-check, 500 Rust tests passing, the four shell suites, the installer
-suite) and every new test mutation-checked. Chrome on macOS is verified
+cross-check, 500 Rust tests passing, the four shell suites at 210 pass /
+0 fail / 6 skip, the installer suite at 8/0) and every new test
+mutation-checked. Chrome on macOS is verified
 warning-free by hand; Firefox is not installed on that machine, and the
 Linux NSS gap (C19) stands by decision and is asserted on every CI run.
 Nothing is owed before the v0.6.5 release except merging and tagging.
@@ -299,8 +300,18 @@ are the most expensive lessons in this codebase:
     H="/tmp/ah-$(basename "$f" .sh)"; rm -rf "$H"; mkdir -p "$H"
     HOME="$H" ANTRA_PORT=18999 ANTRA_HTTP_PORT=18998 ANTRA_TIMEOUT=20 \
       bash "$f" || echo "FAILED: $f"
+    HOME="$H" ./target/debug/antra proxy stop >/dev/null 2>&1   # see below
   done
   ```
+
+  **Stop each suite's daemon before the next one.** No suite stops its own,
+  and with a `HOME` per suite the next one cannot reach it: it keeps
+  18999/18998, the next suite's daemon falls back to 19999, and the one
+  after finds both taken — *Failed to register route: Daemon not running*,
+  3 failures each in `e2e_portless_parity` and `e2e_portless_simple`
+  (2026-10-03). Requests from the later suites keep the orphan's idle timer
+  from ever firing. CI does not hit this because its four suites share one
+  `HOME`, and so one daemon.
 
   Expect roughly 20 minutes for all four. They are also wired into CI, so if CI
   is green you can lean on that instead of running them locally.
