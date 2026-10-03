@@ -88,6 +88,44 @@ impl RouteRegistry {
         Ok(())
     }
 
+    /// Remove managed routes whose owner process has exited, and return them.
+    ///
+    /// `antra run` unregisters its route when its child exits or on Ctrl+C,
+    /// but a `SIGKILL` or a closed terminal gives it no chance to: the route
+    /// then outlived its process, `antra list` and `doctor` kept counting it
+    /// as live, and it held the daemon's idle shutdown off forever. Static
+    /// routes (`alias`, `add`) have no owner and are never touched. `alive`
+    /// is a parameter so the rule can be tested without real processes.
+    pub fn reap_dead_owners(&self, alive: impl Fn(u32) -> bool) -> Vec<Route> {
+        // Probe outside the write lock: on Windows `alive` spawns `tasklist`.
+        let suspects: Vec<(String, u32)> = self
+            .list()
+            .into_iter()
+            .filter(|r| r.managed)
+            .filter_map(|r| r.pid.map(|pid| (r.domain, pid)))
+            .filter(|(_, pid)| !alive(*pid))
+            .collect();
+        if suspects.is_empty() {
+            return Vec::new();
+        }
+        let (reaped, snapshot) = {
+            let mut routes = self.routes.write().unwrap_or_else(|e| e.into_inner());
+            let mut reaped = Vec::new();
+            for (domain, pid) in suspects {
+                // Only if it is still the same owner: `antra run` may have
+                // re-registered the domain for a new process since the probe.
+                if routes.get(&domain).is_some_and(|r| r.pid == Some(pid)) {
+                    reaped.extend(routes.remove(&domain));
+                }
+            }
+            (reaped, persist_snapshot(&routes))
+        };
+        if !reaped.is_empty() {
+            self.maybe_persist(&snapshot);
+        }
+        reaped
+    }
+
     pub fn lookup(&self, domain: &str) -> Option<Route> {
         let routes = self.routes.read().ok()?;
         routes.get(domain).cloned()
@@ -143,6 +181,56 @@ mod tests {
         let statics: Vec<_> = snap.iter().filter(|e| !e.managed).collect();
         assert_eq!(statics.len(), 1);
         assert_eq!(statics[0].domain, "static.localhost");
+    }
+
+    fn registry_with(routes: &[Route]) -> RouteRegistry {
+        let registry = RouteRegistry::new_ephemeral();
+        for r in routes {
+            registry.register(r.clone()).unwrap();
+        }
+        registry
+    }
+
+    #[test]
+    fn reaper_removes_only_managed_routes_with_a_dead_owner() {
+        let registry = registry_with(&[
+            route("dead.localhost", 4000, Some(111), true),
+            route("live.localhost", 4001, Some(222), true),
+            route("static.localhost", 3000, None, false),
+            // Legacy unmanaged route that happens to carry a pid: static.
+            route("legacy.localhost", 3001, Some(111), false),
+        ]);
+        let reaped = registry.reap_dead_owners(|pid| pid != 111);
+        let reaped: Vec<_> = reaped.iter().map(|r| r.domain.as_str()).collect();
+        assert_eq!(reaped, vec!["dead.localhost"]);
+        let mut left: Vec<_> = registry.list().into_iter().map(|r| r.domain).collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec!["legacy.localhost", "live.localhost", "static.localhost"]
+        );
+    }
+
+    #[test]
+    fn reaper_with_every_owner_alive_changes_nothing() {
+        let registry = registry_with(&[route("live.localhost", 4001, Some(222), true)]);
+        assert!(registry.reap_dead_owners(|_| true).is_empty());
+        assert_eq!(registry.list().len(), 1);
+    }
+
+    #[test]
+    fn reaper_spares_a_domain_taken_over_since_the_probe() {
+        // The probe runs outside the lock. If `antra run` re-registers the
+        // domain for a new process in between, the new route must survive.
+        let registry = registry_with(&[route("app.localhost", 4000, Some(111), true)]);
+        let reaped = registry.reap_dead_owners(|pid| {
+            registry
+                .register(route("app.localhost", 4002, Some(333), true))
+                .unwrap();
+            pid != 111
+        });
+        assert!(reaped.is_empty());
+        assert_eq!(registry.lookup("app.localhost").unwrap().pid, Some(333));
     }
 
     #[test]

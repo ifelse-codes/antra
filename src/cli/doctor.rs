@@ -170,10 +170,27 @@ pub fn execute() -> Result<()> {
         // Get route count
         if let Ok(resp) = send_command_sync(IpcPayload::ListRoutes) {
             if let IpcPayload::RoutesList(list) = resp.payload {
+                // A route whose process died is not active, and counting it
+                // as one is a false all-clear.
+                let exited = list
+                    .routes
+                    .iter()
+                    .filter(|r| super::list::route_owner_exited(r))
+                    .count();
                 println!(
                     "    {}",
-                    format!("{} active route(s)", list.routes.len()).dimmed()
+                    format!("{} active route(s)", list.routes.len() - exited).dimmed()
                 );
+                if exited > 0 {
+                    println!(
+                        "    {} {} route(s) whose process has exited",
+                        "⚠".yellow().bold(),
+                        exited
+                    );
+                    warnings.push(format!(
+                        "{exited} route(s) belong to a process that has exited — remove them with `antra prune`"
+                    ));
+                }
             }
         }
 

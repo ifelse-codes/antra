@@ -179,7 +179,7 @@ pub enum Commands {
         domain: String,
     },
 
-    /// Kill orphaned dev servers from crashed sessions
+    /// Remove routes whose process has exited
     Prune,
 
     /// Manage /etc/hosts entries for Safari compatibility
