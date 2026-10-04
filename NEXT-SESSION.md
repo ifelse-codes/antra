@@ -27,10 +27,13 @@
 > checked** — Release Check green on all five legs (Homebrew macOS/Linux,
 > `curl | bash` macOS/Linux, live site). **Next is GTM**, which is not code
 > work: a demo, a launch post, the comparison against ngrok/mkcert/portless.
-> Code work from here is only what GTM turns up — new user reports, or the
-> owed items below. Two cheap things worth doing before launch traffic: one
-> `curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
-> is still unexplained), and opening Firefox once on a Mac (never done).
+Code work from here is only what GTM turns up — new user reports, or the
+owed items below. Two cheap things worth doing before launch traffic: one
+`curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
+is still unexplained), and opening Firefox once on a Mac (never done).
+
+> **GTM prompt:** [`NEXT-GTM.md`](NEXT-GTM.md) is the ready-to-feed prompt file
+> (2026-10-04). Next session: load `/skill:darshan-npt`, then work the lanes there.
 
 > **New on 2026-10-04 — read before any GTM work.**
 > - **C27 shipped in v0.6.6.** A first run used to print
