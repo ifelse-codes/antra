@@ -8,9 +8,16 @@
 > `SKILL.md` from `~/.omp/agent/skills/darshan-npt/`) like the user did this
 > session — the agent should read the skill first and follow it for every reply.
 
-## ✅ STATUS 2026-10-04 — all three lanes drafted
+## ✅ STATUS 2026-10-04 — session closed: lanes finalized, shipped, committed
 
 Read this first, then the job below it.
+
+**This session (closed 2026-10-04):** the three lanes are done and committed on
+branch `gtm/launch-final` (not pushed). Launch post voice-reviewed; comparison
+with portless shipped to `README.md` + `landing/index.html` + the post; runbook
+reviewed (Check 2 closed). `LICENSE` added. Bonus: `antra-intro.html` (animated
+product intro) + `antra-intro-demo.mp4`. Remaining: Check 1 (one manual
+`curl | bash` on a real Mac) and the push/PR — a person presses go.
 
 `launch/` now holds the three deliverables, drafted and fact-checked:
 
@@ -39,10 +46,9 @@ into it and removed.
    adoption. Antra's honest edge: language-agnostic (no Node 24 required), one
    native binary, no sudo for trust on macOS, MIT. **Do not write a
    comparison that omits portless or claims Antra invented the idea.**
-2. **No `LICENSE` file exists.** `Cargo.toml` declares MIT, the README shows an
-   MIT badge, and the GitHub API reports `"license": null`. One-file fix, not
-   yet made — it is a legal-branding gap that matters the moment a stranger
-   looks, so it needs a maintainer decision on the copyright line.
+2. **LICENSE — done.** Added 2026-10-04: MIT, `Copyright (c) 2026 ifelse-codes`.
+   (Was: no `LICENSE` file though `Cargo.toml`/README said MIT, and the GitHub
+   API reported `"license": null`.)
 
 **Check 2 (Firefox on a Mac) is DONE and green — both legs.** The automated leg
 ran against the real `HOME` so the CA was the trusted one: `8 pass / 0 fail /
@@ -54,9 +60,9 @@ than by eye. **C19 is Linux-only. This Mac is done; nothing is owed here.**
 ## One job
 
 **Get Antra to market.** The product is done (v0.6.6, published 2026-10-04);
-this session is GTM, not code. Draft the three launch materials below and let
-the user pick them apart in short rounds. Do the bulk; hand only voice-level
-review to the user.
+the launch materials are drafted, voice-reviewed and shipped. What remains:
+run **Check 1** (one manual `curl | bash` on a real Mac — see the runbook) and,
+when a person is ready to go live, push branch `gtm/launch-final`.
 
 ## Project state (so you don't re-derive it)
 
@@ -86,9 +92,9 @@ review to the user.
    opening Firefox once on a Mac. **The Firefox half is now closed and green;
    only the installer half is outstanding.**
 
-All three are drafted as of 2026-10-04. What remains is **voice-level review by
-the user**, plus the two open items in the STATUS block at the top: the
-LICENSE file, and Check 1's manual run.
+All three are finalized as of 2026-10-04. What remains: **Check 1** (one manual
+`curl | bash` on a real Mac), and the push/PR of branch `gtm/launch-final`.
+LICENSE is done.
 
 ## How to interact this session
 

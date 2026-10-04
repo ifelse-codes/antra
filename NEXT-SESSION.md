@@ -36,6 +36,14 @@
 > **GTM prompt:** [`NEXT-GTM.md`](NEXT-GTM.md) is the ready-to-feed prompt file
 > (2026-10-04). Next session: load `/skill:darshan-npt`, then work the lanes there.
 
+> **Session close 2026-10-04 (this session):** GTM lanes finalized and committed
+> on branch `gtm/launch-final` (not pushed). Launch post voice-reviewed; the
+> comparison — naming portless honestly — shipped to `README.md`,
+> `landing/index.html` and the post; `LICENSE` added (MIT, ifelse-codes); runbook
+> reviewed (Check 2 closed; Check 1 still owed — one manual `curl | bash` on a
+> real Mac). Bonus: `antra-intro.html` (animated product intro) and
+> `antra-intro-demo.mp4`. Next: run Check 1, then push/PR when ready to go live.
+
 > **New on 2026-10-04 — read before any GTM work.**
 > - **C27 shipped in v0.6.6.** A first run used to print
 >   `https://myapp.localhost:8443` (no root, no port 443), while every page
