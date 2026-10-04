@@ -5,8 +5,9 @@
 >
 >
 > **Direction (maintainer, 2026-09-30): make Antra "good to market", then
-> release once, then GTM.** The release happened: **v0.6.4 is published**
-> (2026-10-02) and carries the launch-readiness work — C17, C18, C22, C23.
+> release, then GTM.** Done: **v0.6.5 is published** (2026-10-04) and carries
+> the launch-readiness work (C17, C18, C22, C23 in v0.6.4) plus the A2
+> first-run fixes (C24, C25, C26).
 > The maintainer's calls, not to be re-litigated:
 > - **The Linux Chrome/Firefox certificate warning is accepted for now**
 >   (decision, 2026-10-01): Phase 6's "No Firefox NSS store modification"
@@ -21,28 +22,24 @@
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
-> **Start here.** All three A2 follow-ups are fixed, **unreleased**, on the
-> branch `claude/dazzling-mayer-mo3zyz` (2026-10-03) — merge it if it is not
-> already on `main`: **C24** (a server with a hardcoded port now gets its
-> route moved to where it really listens, and the 503 names that port instead
-> of asking whether the server runs), **C25** (the daemon reaps routes whose
-> process was hard-killed) and **C26** (`tests/installer_output.sh` has its own
-> CI job; the installer ran clean from a fresh `HOME` on Linux). Both product
-> fixes hit the **first run of every new user** with an ordinary Node server,
-> so they are worth shipping before GTM traffic arrives: the next step is a
-> **v0.6.5** release (Releasing, below — the tag needs a person), then GTM.
+> **Start here.** The product side is done: **v0.6.5 is published and
+> checked** — Release Check green on all five legs (Homebrew macOS/Linux,
+> `curl | bash` macOS/Linux, live site). **Next is GTM**, which is not code
+> work: a demo, a launch post, the comparison against ngrok/mkcert/portless.
+> Code work from here is only what GTM turns up — new user reports, or the
+> owed items below. Two cheap things worth doing before launch traffic: one
+> `curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
+> is still unexplained), and opening Firefox once on a Mac (never done).
 
 Repo: `main` is the default branch; work in a feature branch.
 
-**Status as of 2026-10-03:** v0.6.4 is published and checked — Release Check
-green on all five legs. C24, C25 and C26 are done on the branch above with
-the gates green (fmt, clippy on Linux **and Windows** via a mingw
-cross-check, 500 Rust tests passing, the four shell suites at 210 pass /
-0 fail / 6 skip, the installer suite at 8/0) and every new test
-mutation-checked. Chrome on macOS is verified
-warning-free by hand; Firefox is not installed on that machine, and the
+**Status as of 2026-10-04:** v0.6.5 is published (#58 fixes, #59 bump, #60
+formula + pins; tap: ifelse-codes/homebrew-antra#3). Every asset was checked
+three ways (`.sha256` asset, GitHub's digest, a fresh download) with sizes;
+the published Linux binary reports `antra 0.6.5` and passes the C24 repro.
+Release Notes set the description from `docs/releases/v0.6.5.md`, Deploy
+Landing put the v0.6.5 pin live, and Release Check passed all five legs. The
 Linux NSS gap (C19) stands by decision and is asserted on every CI run.
-Nothing is owed before the v0.6.5 release except merging and tagging.
 
 ## Orientation — 60 seconds
 
@@ -73,18 +70,18 @@ difference is Antra never leaves your machine.
 
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings     # warnings are errors
-    ./target/debug/antra --version                 # 0.6.4
+    ./target/debug/antra --version                 # 0.6.5
 
 Full test commands, including the two traps that cost real time, are under
 **Gates** at the bottom of this file.
 
 ## Where things stand
 
-`v0.6.4` is published (2026-10-02), the landing site serves it, and both
+`v0.6.5` is published (2026-10-04), the landing site serves it, and both
 install paths were checked on GitHub's macOS and Linux runners (**Release
 Check**): Homebrew and `curl | bash`, latest and pinned, all report
-`antra 0.6.4`. v0.6.4 carried the launch-readiness fixes (C17, C18, C22,
-C23); v0.6.2 shipped
+`antra 0.6.5`. v0.6.5 carried the A2 first-run fixes (C24, C25, C26); v0.6.4
+the launch-readiness fixes (C17, C18, C22, C23); v0.6.2 shipped
 the Linux fixes (C14, C15); v0.6.3 the macOS service fix (C16), which the
 **Service (macOS)** workflow now checks on a real Mac on every change to
 `service.rs`. Release mechanics are in the v0.6.2 and v0.6.3 sections of
