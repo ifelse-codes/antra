@@ -40,7 +40,9 @@
 >   ports. It also fixes the old hint `sudo antra proxy start`, which on Linux
 >   put the daemon's socket under `/root`. Branch
 >   `claude/peaceful-curie-x1xkz8`; details and evidence in ROADMAP C27.
-> - **Next, in order:** (1) the maintainer's Mac run below; (2) open a PR,
+> - **Next, in order:** (1) ~~the maintainer's Mac run below~~ — done
+>   2026-10-04: no-port URL loaded, daemon ran as the user, second run asked
+>   nothing (step 6 not reported); (2) open a PR,
 >   CI green on all three platforms; (3) release v0.6.6 (**Releasing**
 >   below); (4) GTM.
 > - **The Mac run** — the one thing the cloud container could not do (no

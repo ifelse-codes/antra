@@ -41,8 +41,9 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ## Unreleased — C27: ask once, then serve on port 443 (2026-10-04)
 
-**Built on `claude/peaceful-curie-x1xkz8`; the macOS run is the
-maintainer's** (checklist in `NEXT-SESSION.md`). Found while preparing GTM:
+**Built on `claude/peaceful-curie-x1xkz8`; checked on the maintainer's
+Mac on 2026-10-04** with a real `sudo` prompt: no-port URL loaded, daemon ran
+as the user, a second run asked nothing. Found while preparing GTM:
 without root the daemon falls back to 8443, so a stranger's first run printed
 `https://myapp.localhost:8443` under a README promising no port. The first
 daemon start in a terminal now asks `Use port 443? [Y/n]`, runs `sudo` once,
