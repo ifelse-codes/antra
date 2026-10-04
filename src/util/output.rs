@@ -48,7 +48,7 @@ pub fn print_route_url(domain: &str) {
             println!(
                 "  {} To use port 443: {}",
                 "ℹ".cyan(),
-                "sudo antra proxy start".bold()
+                "antra proxy stop && sudo antra proxy start".bold()
             );
             println!("  → {}", route_url(domain));
         } else {

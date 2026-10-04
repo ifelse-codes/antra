@@ -7,6 +7,8 @@ pub mod hosts;
 pub mod list;
 pub mod logs;
 pub mod open;
+#[cfg(unix)]
+mod port443;
 pub mod proxy;
 pub mod prune;
 pub mod run;
@@ -46,6 +48,12 @@ pub(crate) fn ensure_daemon() -> Result<bool> {
     }
 
     output::print_warning("Daemon not running, starting it...");
+
+    // Ask once to use port 443, so the URL has no port number (C27).
+    #[cfg(unix)]
+    if port443::maybe_start_on_443() {
+        return Ok(false);
+    }
 
     let exe = std::env::current_exe()?;
     // Same log the explicit `antra proxy start` writes, so a daemon started

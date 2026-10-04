@@ -117,6 +117,19 @@ pub async fn start_server(
     registry: Arc<RouteRegistry>,
     cert_cache: Arc<CertCache>,
 ) -> Result<()> {
+    // Bind both loopback stacks; fail fast if either is taken so the
+    // daemon falls back cleanly instead of half-listening.
+    let listeners = bind_loopback(port).await?;
+    serve(listeners, registry, cert_cache).await
+}
+
+/// Serve HTTPS on listeners that are already bound — by [`start_server`],
+/// or by the daemon before it gave up root (`platform::sudo`).
+pub async fn serve(
+    listeners: Vec<TcpListener>,
+    registry: Arc<RouteRegistry>,
+    cert_cache: Arc<CertCache>,
+) -> Result<()> {
     let state = Arc::new(ProxyState::new(registry));
 
     let provider = rustls::crypto::ring::default_provider();
@@ -131,9 +144,6 @@ pub async fn start_server(
 
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
-    // Bind both loopback stacks; fail fast if either is taken so the
-    // daemon falls back cleanly instead of half-listening.
-    let listeners = bind_loopback(port).await?;
     for listener in &listeners {
         if let Ok(addr) = listener.local_addr() {
             tracing::info!(%addr, "HTTPS proxy listening");

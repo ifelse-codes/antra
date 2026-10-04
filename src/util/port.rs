@@ -991,9 +991,19 @@ mod tests {
             "group {pgid} holds {port}, but the OS reported {ports:?}"
         );
         drop(held);
-        assert!(
-            !group_listening_ports(pgid).contains(&port),
-            "a released port must not be reported"
-        );
+        // Another test may spawn a child (`lsof`, `true`) while `held` is
+        // open. Until that child execs, it holds a copy of the socket inside
+        // this process group, so the group really does still hold the port
+        // for those milliseconds. A single check failed ~8% of runs under
+        // load (and on a GitHub runner); alone it never did. Give the child
+        // time to exec — a port that stays reported still fails.
+        let released = (0..50).any(|_| {
+            if !group_listening_ports(pgid).contains(&port) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            false
+        });
+        assert!(released, "a released port must not be reported");
     }
 }
