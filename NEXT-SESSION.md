@@ -5,9 +5,10 @@
 >
 >
 > **Direction (maintainer, 2026-09-30): make Antra "good to market", then
-> release, then GTM.** Done: **v0.6.5 is published** (2026-10-04) and carries
-> the launch-readiness work (C17, C18, C22, C23 in v0.6.4) plus the A2
-> first-run fixes (C24, C25, C26).
+> release, then GTM.** Done: **v0.6.6 is published** (2026-10-04) and carries
+> C27 (the first run asks once to use port 443, so the URL has no port), on
+> top of the launch-readiness work (C17, C18, C22, C23 in v0.6.4) and the A2
+> first-run fixes (C24, C25, C26 in v0.6.5).
 > The maintainer's calls, not to be re-litigated:
 > - **The Linux Chrome/Firefox certificate warning is accepted for now**
 >   (decision, 2026-10-01): Phase 6's "No Firefox NSS store modification"
@@ -22,7 +23,7 @@
 > - **Roadmap features** (LAN, monorepo, Tailscale/ngrok, …) only after
 >   launch, and only on customer demand.
 >
-> **Start here.** The product side is done: **v0.6.5 is published and
+> **Start here.** The product side is done: **v0.6.6 is published and
 > checked** — Release Check green on all five legs (Homebrew macOS/Linux,
 > `curl | bash` macOS/Linux, live site). **Next is GTM**, which is not code
 > work: a demo, a launch post, the comparison against ngrok/mkcert/portless.
@@ -32,43 +33,19 @@
 > is still unexplained), and opening Firefox once on a Mac (never done).
 
 > **New on 2026-10-04 — read before any GTM work.**
-> - **C27 is merged (#63), not released:** a first run used to print
+> - **C27 shipped in v0.6.6.** A first run used to print
 >   `https://myapp.localhost:8443` (no root, no port 443), while every page
->   about Antra shows the URL with no port. The maintainer chose to fix the
->   product: the first daemon start now asks `Use port 443? [Y/n]`, runs
->   `sudo` once, and the daemon drops to the user right after opening the
->   ports. It also fixes the old hint `sudo antra proxy start`, which on Linux
->   put the daemon's socket under `/root`. Details and evidence in ROADMAP C27.
-> - **Next, in order:** (1) ~~the maintainer's Mac run below~~ — done
->   2026-10-04: no-port URL loaded, daemon ran as the user, second run asked
->   nothing; step 6 (`proxy stop` without `sudo`) was not reported, so it was
->   checked in the container instead (ROADMAP C27); (2) ~~PR, CI green~~ —
->   #63, CI and Browsers green on `main`; (3) **release v0.6.6** — the bump
->   and `docs/releases/v0.6.6.md` are on `claude/keen-maxwell-0d7tsf`; merge
->   it, then **a person pushes the tag** and the rest of **Releasing** below
->   follows; (4) GTM.
-> - **In the v0.6.6 post-release PR (with the formula and pins), fix the
->   landing copy too.** `landing/index.html` still says clean URLs need
->   `sudo antra proxy start`; from v0.6.6 the first run asks instead. Not in
->   the bump PR, because merging under `landing/` deploys at once and v0.6.5
->   would still be what people install.
+>   about Antra shows the URL with no port. The first daemon start now asks
+>   `Use port 443? [Y/n]`, runs `sudo` once, and the daemon drops to the user
+>   right after opening the ports. Checked on the maintainer's Mac with a real
+>   password prompt, and the published Linux binary in the container. The
+>   landing page says so too (#65). Details and evidence in ROADMAP C27.
 > - **Open PR #62 (GTM drafts, from another tool's session)** adds
 >   `launch/` and says two things not recorded here yet: Firefox on a Mac was
 >   checked clean (both the automated check and the real app), and the repo
 >   has **no `LICENSE` file** although `Cargo.toml` and the README say MIT —
 >   the copyright line is the maintainer's call. It predates C27, so its
->   drafts still describe v0.6.5.
-> - **The Mac run** — the one thing the cloud container could not do (no
->   macOS, and no real `sudo` password prompt):
->   1. `antra proxy stop`, then build the branch: `cargo build --release`
->   2. `./target/release/antra run --domain hello.localhost -- python3 -m http.server 8123`
->      → expect the question; press Enter; type the Mac password
->   3. Expect `→ https://hello.localhost` with **no port**, and the page to
->      load in Chrome/Safari with no warning
->   4. `ps -o user= -p $(cat ~/Library/Application\ Support/antra/daemon.pid)`
->      → your username, **not root**
->   5. Ctrl+C, run step 2 again → no question, no password
->   6. `antra proxy stop` works **without** sudo
+>   drafts still describe v0.6.5 and a `:8443` first run.
 > - **portless has caught up** (HTTPS by default, auto-trust, 443 via
 >   `sudo`, Windows, LAN/Tailscale/ngrok sharing). What is left to Antra: no
 >   Node, asks before changing anything, and the messy cases (C23–C25).
@@ -77,12 +54,17 @@
 
 Repo: `main` is the default branch; work in a feature branch.
 
-**Status as of 2026-10-04:** v0.6.5 is published (#58 fixes, #59 bump, #60
-formula + pins; tap: ifelse-codes/homebrew-antra#3). Every asset was checked
-three ways (`.sha256` asset, GitHub's digest, a fresh download) with sizes;
-the published Linux binary reports `antra 0.6.5` and passes the C24 repro.
-Release Notes set the description from `docs/releases/v0.6.5.md`, Deploy
-Landing put the v0.6.5 pin live, and Release Check passed all five legs. The
+**Status as of 2026-10-04:** v0.6.6 is published (#63 fix, #64 bump, #65
+formula + pins + landing copy; tap: ifelse-codes/homebrew-antra#4). Every
+asset was checked three ways (`.sha256` asset, GitHub's digest, a fresh
+download) with sizes; the published Linux binary reports `antra 0.6.6`, and
+its first-run path, replayed as root with `SUDO_UID=1000`, ran the daemon on
+443 as the user and served HTTPS 200. Release Notes set the description from
+`docs/releases/v0.6.6.md`, Deploy Landing put the v0.6.6 pin and the new
+port-443 copy live, and Release Check passed all five legs. Homebrew on
+Linux needed one re-run: its first attempt died with `Broken pipe` inside
+`brew` right after tapping, before the formula was read; the re-run
+installed 0.6.6 cleanly, as macOS had from the same tap. The
 Linux NSS gap (C19) stands by decision and is asserted on every CI run.
 
 ## Orientation — 60 seconds
@@ -114,17 +96,18 @@ difference is Antra never leaves your machine.
 
     cargo fmt --all -- --check
     cargo clippy --all-targets -- -D warnings     # warnings are errors
-    ./target/debug/antra --version                 # 0.6.5
+    ./target/debug/antra --version                 # 0.6.6
 
 Full test commands, including the two traps that cost real time, are under
 **Gates** at the bottom of this file.
 
 ## Where things stand
 
-`v0.6.5` is published (2026-10-04), the landing site serves it, and both
+`v0.6.6` is published (2026-10-04), the landing site serves it, and both
 install paths were checked on GitHub's macOS and Linux runners (**Release
 Check**): Homebrew and `curl | bash`, latest and pinned, all report
-`antra 0.6.5`. v0.6.5 carried the A2 first-run fixes (C24, C25, C26); v0.6.4
+`antra 0.6.6`. v0.6.6 carried C27 (ask once, then serve on port 443);
+v0.6.5 the A2 first-run fixes (C24, C25, C26); v0.6.4
 the launch-readiness fixes (C17, C18, C22, C23); v0.6.2 shipped
 the Linux fixes (C14, C15); v0.6.3 the macOS service fix (C16), which the
 **Service (macOS)** workflow now checks on a real Mac on every change to
