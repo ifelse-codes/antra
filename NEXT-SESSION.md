@@ -31,6 +31,28 @@
 > `curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
 > is still unexplained), and opening Firefox once on a Mac (never done).
 
+> **New on 2026-10-04 — read before any GTM work.** Two findings from
+> preparing the launch, both in `docs/gtm/comparison.md`:
+> - **A first run does not get the URL the README promises (ROADMAP C27).**
+>   Without root the daemon cannot bind 443 and falls back to 8443, so a
+>   stranger sees `https://myapp.localhost:8443`. Measured on Linux as a
+>   non-root user; expected on macOS (non-root may bind < 1024 only on
+>   `0.0.0.0`, and the daemon binds loopback), not measured there. **The
+>   maintainer chose to fix the product before launch:** ask once on first
+>   run, then hold 443. Not built — C27 lists the design points, including
+>   a suspicion that `sudo antra proxy start` puts the socket under `/root`
+>   on Linux. Verify that first.
+> - **portless has caught up** (HTTPS by default, auto-trust, 443 via
+>   `sudo`, Windows, LAN/Tailscale/ngrok sharing). What is left to Antra: no
+>   Node, asks before changing anything, and the messy cases (C23–C25). The
+>   README's comparison table is out of date and leaves portless out.
+>
+> Building C27 in the claude.ai cloud container needs a way to run the
+> elevated path: the session that found it was refused (by the session's
+> own permission check) when it tried to give a test user `sudo` rights.
+> Ask the maintainer how they want it tested — on their Mac, or with that
+> permission granted — before starting.
+
 Repo: `main` is the default branch; work in a feature branch.
 
 **Status as of 2026-10-04:** v0.6.5 is published (#58 fixes, #59 bump, #60
