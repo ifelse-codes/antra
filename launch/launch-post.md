@@ -1,27 +1,18 @@
 # Launch post — draft v1
 
-> Voice is yours to change. Marked lines `EDIT:` are the ones I'd expect you to
-> rewrite. Facts are drawn from `README.md`, `landing/index.html` and the
-> published v0.6.6 binary; nothing here is aspirational.
-> Companion doc: [`comparison.md`](comparison.md).
+> Voice review applied 2026-10-04. Decisions: headline = the command itself;
+> title = "Your local app, at a real HTTPS URL"; the comparison — naming the
+> direct competitor honestly — ships in the post, the README and the landing
+> page; demo = capture script (see `demo-capture.sh` + `demo-shot-list.md`).
+> Facts drawn from `README.md`, `landing/index.html` and the published v0.6.6
+> binary; nothing here is aspirational. Companion doc:
+> [`comparison.md`](comparison.md) — source of truth for the tables.
 
 ---
 
-## Headline options
+# `antra run --domain myapp.localhost -- pnpm dev` → https://myapp.localhost
 
-1. `antra run --domain myapp.localhost -- pnpm dev` → https://myapp.localhost
-2. Your dev server deserves a real URL
-3. Stop typing `:5173`
-
-EDIT: pick one. Option 1 is the command itself as the headline — it is the
-strongest thing in the repo because it *is* the product.
-
----
-
-# Draft
-
-**EDIT (title):** Stable HTTPS domains for local development. No ports, no
-`/etc/hosts`, no certificate warnings.
+**Your local app, at a real HTTPS URL — no ports, no `/etc/hosts`, no warnings.**
 
 ---
 
@@ -101,6 +92,13 @@ a Cloudflare Tunnel — Antra never sends traffic off your machine and does not
 tunnel. If you want a browser-free certificate to hand to one specific server,
 use [mkcert](https://github.com/FiloSottile/mkcert).
 
+If you're comparing against tools that do the same job, be aware of
+[portless](https://github.com/vercel-labs/portless) — it ships HTTP/2,
+framework-aware flag injection, LAN mode and monorepo workspaces today, and it
+needs Node 24+. Antra's answer is one native binary that runs for *any*
+language and asks before it changes anything. Full side-by-side, sourced and
+dated: [`comparison.md`](comparison.md).
+
 If you want your app to feel like production on your laptop, this is the whole
 product.
 
@@ -114,14 +112,14 @@ antra run --domain myapp.localhost -- pnpm dev
 
 MIT. macOS, Linux, Windows. v0.6.6.
 
-EDIT: add a terminal recording or a 20-second GIF here. The command and the URL
-side by side is the whole pitch and a still image doesn't show it.
+> **Demo placeholder** — record a ~20-second loop using `launch/demo-capture.sh`
+> (set up) and `launch/demo-shot-list.md` (exact shots + timings). The command
+> and the URL side by side is the whole pitch; a still image can't show it.
 
-EDIT: decide whether to name portless in public. See `comparison.md` — it's a
-direct, honest comparison and the maintainer may prefer to claim the space
-rather than name a competitor. My read: name them in the README and the docs,
-stay quiet in the post. A reader who compares and finds the comparison missing
-loses more trust than one who never heard of them.
+> **Competitor naming — decided: name them honestly.** The comparison table —
+> which names the direct competitor — ships in the post, the README and the
+> landing page. `comparison.md` is the source of truth; keep the three tables in
+> sync when a number moves.
 
 ---
 

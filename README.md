@@ -362,19 +362,24 @@ If a feature needs a signup, it does not belong here.
 
 ## Antra vs the usual suspects
 
-| | `localhost:port` | mkcert + Caddy | ngrok | Antra |
-|---|---|---|---|---|
-| Stable local domain | | Manual | Random / paid | `.localhost` / `.test` |
-| HTTPS without warnings | | Manual | Yes | `antra trust` once |
-| Hosts file | n/a | You edit it | No | Only for `.test` / custom |
-| WebSocket / HMR | Yes | Config-dependent | Yes | Transparent |
-| Offline | Yes | Yes | No | Yes |
-| Language-agnostic | Yes | Yes | Yes | Yes |
-| Multi-app routing | DIY | Config file | Extra tunnels | `antra run` × N |
-| Cloud account | No | No | Yes | No |
-| One-command UX | | | Close | **Yes** |
+| | `localhost:port` | mkcert + Caddy | ngrok | portless | Antra |
+|---|---|---|---|---|---|
+| Stable local HTTPS URL | — | Manual | ✗ (public) | ✓ | ✓ |
+| No browser warning | — | Manual | ✓ | ✓ | ✓ (Linux: one `certutil` line) |
+| Works offline | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Traffic stays on your machine | ✓ | ✓ | ✗ | ✓ | ✓ |
+| No cloud account | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Any language / runtime | ✓ | ✓ | ✓ | ✗ (Node 24+) | ✓ |
+| Runtime to install | — | Caddy | ngrok | Node 24+ | none |
+| HMR / WebSocket | ✓ | Config-dependent | ✓ | ✓ | ✓ |
+| Multi-app routing | DIY | Config file | Extra tunnels | ✓ | `antra run` × N |
+| Monorepo / LAN / phone | DIY | Config file | ✓ | ✓ | Roadmap |
+| HTTP/2 | — | ✓ | ✓ | ✓ | ✗ |
+| Asks before changing your machine | n/a | n/a | n/a | ✗ | ✓ |
 
-Use ngrok when someone on another network needs your app. Use Antra when *you* need your app to feel like production on your laptop.
+Use ngrok (or a Cloudflare Tunnel) when someone on another network needs your
+app. Use Antra when *you* need your app to feel like production on your laptop —
+one native binary, any language, and it asks before it changes anything.
 
 ---
 
