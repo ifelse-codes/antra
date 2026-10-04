@@ -24,7 +24,7 @@ differences that are left are below, and they are real.
 | One command per app | `antra run --domain app.localhost -- pnpm dev` | `portless app pnpm dev` | `caddy reverse-proxy --from app.localhost --to :3000` | No (certs only) | `ngrok http 3000` |
 | Picks the app's port for you | Yes | Yes (4000–4999) | No — you pass it | n/a | No |
 | HTTPS with no warning | After a `[Y/n]` prompt | Yes, trusts CA on first run | Yes, trusts CA on first use | Yes (`mkcert -install`) | Yes (public cert) |
-| URL without a port | Yes after one `[Y/n]` + password; drops root right after (C27, unreleased) | Yes, auto-`sudo` | Yes, needs rights for 443 | n/a | Yes |
+| URL without a port | Yes after one `[Y/n]` + password; drops root right after (C27, v0.6.6) | Yes, auto-`sudo` | Yes, needs rights for 443 | n/a | Yes |
 | Chrome/Firefox on Linux | Warn (C19, by decision) | README names the system store only — likely the same gap (not tested) | Not checked | **Yes** (NSS) | Yes |
 | Server that ignores `PORT` | Finds the real port, moves the route (C24) | Injects `--port` for known frameworks | n/a | n/a | n/a |
 | Route after `kill -9` | Removed within 5 s (C25) | Not documented; `prune` for orphans | n/a | n/a | n/a |
@@ -64,7 +64,7 @@ differences that are left are below, and they are real.
 
 | Gap | Honest answer |
 |---|---|
-| URL had `:8443` unless you used `sudo` (C27) | Built 2026-10-04, unreleased: asks once, then serves on 443 as you. Ship v0.6.6 before launch. |
+| URL had `:8443` unless you used `sudo` (C27) | Shipped in v0.6.6 (2026-10-04): asks once, then serves on 443 as you. |
 | Chrome/Firefox on Linux warn (C19) | By decision. Workaround in the release notes (`certutil`). mkcert covers this; portless's README suggests it does not. |
 | No LAN / Tailscale / public sharing | Out of scope until users ask. Point to ngrok/Cloudflare Tunnel. |
 | No monorepo or worktree routing | Same. |
