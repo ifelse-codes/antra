@@ -27,10 +27,11 @@
 > checked** — Release Check green on all five legs (Homebrew macOS/Linux,
 > `curl | bash` macOS/Linux, live site). **Next is GTM**, which is not code
 > work: a demo, a launch post, the comparison against ngrok/mkcert/portless.
-Code work from here is only what GTM turns up — new user reports, or the
-owed items below. Two cheap things worth doing before launch traffic: one
-`curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
-is still unexplained), and opening Firefox once on a Mac (never done).
+> Code work from here is only what GTM turns up — new user reports, or the
+> owed items below. One cheap thing worth doing before launch traffic: one
+> `curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
+> is still unexplained; `launch/mac-checks-runbook.md`, Check 1). Firefox on
+> a Mac is done: checked clean on 2026-10-04 (#62).
 
 > **GTM prompt:** [`NEXT-GTM.md`](NEXT-GTM.md) is the ready-to-feed prompt file
 > (2026-10-04). Next session: load `/skill:darshan-npt`, then work the lanes there.
@@ -43,17 +44,17 @@ is still unexplained), and opening Firefox once on a Mac (never done).
 >   right after opening the ports. Checked on the maintainer's Mac with a real
 >   password prompt, and the published Linux binary in the container. The
 >   landing page says so too (#65). Details and evidence in ROADMAP C27.
-> - **Open PR #62 (GTM drafts, from another tool's session)** adds
->   `launch/` and says two things not recorded here yet: Firefox on a Mac was
->   checked clean (both the automated check and the real app), and the repo
->   has **no `LICENSE` file** although `Cargo.toml` and the README say MIT —
->   the copyright line is the maintainer's call. It predates C27, so its
->   drafts still describe v0.6.5 and a `:8443` first run.
+> - **The GTM drafts are in `launch/` (#62, merged; updated for v0.6.6
+>   after).** Launch post, comparison, Mac checks runbook. Two facts from
+>   them: Firefox on a Mac was checked clean (the automated check and the real
+>   app), and the repo has **no `LICENSE` file** although `Cargo.toml` and the
+>   README say MIT — the copyright line is the maintainer's call, and it is
+>   owed before launch.
 > - **portless has caught up** (HTTPS by default, auto-trust, 443 via
 >   `sudo`, Windows, LAN/Tailscale/ngrok sharing). What is left to Antra: no
 >   Node, asks before changing anything, and the messy cases (C23–C25).
->   `docs/gtm/comparison.md` has the table; the README's comparison table is
->   out of date and leaves portless out.
+>   `launch/comparison.md` has the table (the only comparison now); the
+>   README's comparison table is out of date and leaves portless out.
 
 Repo: `main` is the default branch; work in a feature branch.
 
@@ -164,7 +165,7 @@ and A2 are **built**. v0.6.4 carries the lot.
 | **A1 — automated browser check** | **BUILT, GREEN AND VERIFYING** | `.github/workflows/browser.yml` + `.github/scripts/check-browsers.sh`, on push and PR, macOS + Ubuntu. The script stands up the daemon, an upstream and a route itself, and refuses to ask a browser anything until the route serves 200 over TLS. It needed six CI runs to be trustworthy — see the table below and ROADMAP C21 for how it was green while launching no browser at all. |
 | **A2 — fresh "stranger" test** | **DONE** | `tests/user-test-2026-10-01.md`, against the released v0.6.3 binary on macOS. The product works: real HTTPS at a stable URL, a correct 301, a clean Ctrl+C, an honest `doctor`. Three new findings, filed below. |
 | **C23 — a CA rotation broke every domain already opened** | **FIXED and now covered** | Fix in #52, end-to-end test in #55. Two causes: a running daemon never reloaded the CA, and leaf certs on disk were never checked against it. Both mutation-verified, plus two tests that rotate the CA through the real HTTPS server — one per cause, each confirmed to fail against its own cause and pass against the other, and the first also asserts the retired CA no longer verifies so a cache that never noticed anything cannot pass it. The blind spot that hid this is now covered: something in CI rotates the CA underneath a live daemon. |
-| **Chrome and Firefox on macOS** | **Chrome: verified clean, 2026-10-02.** Firefox: not installed here — measured gap | System Google Chrome (Playwright `channel:"chrome"`, visible) loaded `https://chrome-probe.localhost:18999/` with **no certificate warning** (`OK 200`). Preconditions asserted first: `antra trust --status` → trusted via login keychain (fingerprint `A9:48…` matches on-disk `ca.pem`), and `curl --cacert` 200 before the browser was asked. No trust-store writes — the user's already-trusted CA was used. A CA-key mismatch seen mid-verification was NOT a product bug: a stale daemon started under a hermetic throwaway `HOME` owned the port with its own throwaway CA. Firefox is not installed on this machine, so the macOS Firefox side is a measured gap, not a pass; the Linux NSS gap (C19) stands and is asserted on every CI run by `check-browsers.sh`. |
+| **Chrome and Firefox on macOS** | **Chrome: verified clean, 2026-10-02. Firefox: verified clean, 2026-10-04** (#62: `check-browsers.sh` against the real `HOME`, 8 pass / 0 fail, and Firefox 157.0 loading a route with no warning; details in `launch/mac-checks-runbook.md`, Check 2) | System Google Chrome (Playwright `channel:"chrome"`, visible) loaded `https://chrome-probe.localhost:18999/` with **no certificate warning** (`OK 200`). Preconditions asserted first: `antra trust --status` → trusted via login keychain (fingerprint `A9:48…` matches on-disk `ca.pem`), and `curl --cacert` 200 before the browser was asked. No trust-store writes — the user's already-trusted CA was used. A CA-key mismatch seen mid-verification was NOT a product bug: a stale daemon started under a hermetic throwaway `HOME` owned the port with its own throwaway CA. Firefox is not installed on this machine, so the macOS Firefox side is a measured gap, not a pass; the Linux NSS gap (C19) stands and is asserted on every CI run by `check-browsers.sh`. |
 | **Then: one release** | **DONE — v0.6.4 published 2026-10-02** | All Releasing steps executed: #57 merged (11/11 checks green), tag `v0.6.4` pushed, release published (draft publish confirmed taken), Release Notes applied, formula hashes read from the release's own `.sha256` assets, formula updated in this repo **and the tap** (`ifelse-codes/homebrew-antra`), pinned-version examples bumped, Deploy Landing re-deployed and live site serves the v0.6.4 pin. **Release Check: all five legs green** — Homebrew macOS/Linux, curl installer macOS/Linux, live site. The notes state the Linux Chromium/Firefox gap with the `certutil` workaround and call out C23 as the upgrade-path fix. |
 
 ### The browser check is green and actually verifying (2026-10-01)

@@ -66,7 +66,7 @@ tell a stall from a slow run:**
 |---|---|---|
 | `fetch-installer` | ~0.5 s | installer is **12,593 bytes** |
 | `run-installer` | ~15 s | binary is ~8.8 MB; most of it is the GitHub download |
-| `antra --version` | `antra 0.6.5` | anything else means the wrong binary answered |
+| `antra --version` | `antra 0.6.6` (the latest; it was `0.6.5` when this baseline was measured) | anything else means the wrong binary answered |
 
 15 s is not a stall. If `run-installer` goes past ~60 s, that is the A2 stall.
 
@@ -104,7 +104,7 @@ Paste the whole output, including every `── phase ──` block and its `rea
 
 1. Did all three phases complete, or did one hang?
 2. `bytes:` — the installer's size (a partial fetch would show here)
-3. `antra --version` — should be `0.6.5`
+3. `antra --version` — should be `0.6.6`
 4. `antra doctor` — full output, especially any line about the CA or `:443`
 
 ### Step 1.5 — Clean up when you're done
@@ -241,22 +241,27 @@ antra alias ffprobe.localhost 18991
 ```
 
 **Read the URL it prints — do not assume the one in this document.** On this
-Mac it is `https://ffprobe.localhost:8443`, not `:443`, because ports 443 and 80
-are already held by macOS AirPlay Receiver:
+Mac, on v0.6.5, it was `https://ffprobe.localhost:8443`, not `:443`:
 
 ```
   ℹ Note: HTTPS on port 8443 (port 443 unavailable — needs sudo or is in use)
   → https://ffprobe.localhost:8443
 ```
 
-Two options, and either is fine for this check:
+**Correction (2026-10-04, after v0.6.6):** this was first put down to AirPlay
+Receiver holding 443 and 80. Almost certainly it was not: AirPlay Receiver is
+known for ports 5000 and 7000, and v0.6.5's note covered two causes. The likely
+one is the first, *needs sudo*: on macOS a non-root process cannot open a port
+below 1024 on `127.0.0.1`. The maintainer's C27 run got
+`https://hello.localhost`, no port, after one password. (If AirPlay was
+switched off in between, that run does not settle it; `sudo lsof -iTCP:443
+-sTCP:LISTEN` would.) That is ROADMAP C27,
+shipped in v0.6.6: the first proxy start now asks `Use port 443? [Y/n]`.
 
-- **Use the `:8443` URL as printed.** No sudo, no system change. A port in the
-  URL does not change what the browser does with the certificate, which is what
-  is under test.
-- **Free 443** (System Settings → General → AirDrop & Handoff → AirPlay Receiver
-  off) and then `sudo antra proxy start` for the clean `:443` URL. Worth doing
-  once, because a launch demo should not have a port in it.
+Either URL is fine for this check. A port in the URL does not change what the
+browser does with the certificate, which is what is under test. For a launch
+demo, use the no-port URL: on v0.6.6, `antra proxy stop`, then any `antra run`
+asks once.
 
 ### Step 2.3 — Open it in Firefox ✅ done, clean
 
