@@ -198,23 +198,6 @@ rather than filled in from memory.
 - **"Real HTTPS for any local dev server. One binary. Asks before it changes anything."**
 - **"Stop typing `localhost:5173`."** — the README's own hook, still good.
 
-## Where the old table is wrong
-
-The README and the landing page both carry a comparison table with an **empty
-cell** under `localhost:port` → "One-command UX", and no portless column at all.
-Two problems:
-
-1. **The direct competitor is missing.** portless does the same job, has 12,642
-   stars, and was created 2026-02-15 — after Antra's `docs/research/portless.md`
-   first noted it. A reader who tries both will find Antra's table did not
-   mention the alternative.
-2. **"Stable local domain: Random / paid" for ngrok** is right but misleading in
-   context — it suggests ngrok can't do stable domains, when the real difference
-   is that ngrok's are *public* domains.
-
-A replacement table is at the bottom of this file. It should be one table, and it
-should include portless.
-
 ## What I did not verify
 
 - Cloudflare Tunnel pricing/limits — omitted rather than recalled.

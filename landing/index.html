@@ -352,58 +352,106 @@ port = 5173</code></pre>
         <th>localhost:port</th>
         <th>mkcert + Caddy</th>
         <th>ngrok</th>
+        <th>portless</th>
         <th>Antra</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>Stable local domain</td>
+        <td>Stable local HTTPS URL</td>
         <td class="cross">—</td>
         <td>Manual</td>
-        <td>Random / paid</td>
-        <td class="check">.localhost / .test</td>
+        <td class="cross">✗ public</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
       </tr>
       <tr>
-        <td>HTTPS without warnings</td>
+        <td>No browser warning</td>
         <td class="cross">—</td>
         <td>Manual</td>
-        <td class="check">Yes</td>
-        <td class="check">antra trust once</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="check">✓ <span style="color:var(--text-muted)">(Linux: one <code>certutil</code> line)</span></td>
       </tr>
       <tr>
-        <td>Hosts file edits</td>
-        <td>n/a</td>
-        <td>You edit it</td>
-        <td class="check">No</td>
-        <td class="check">No for .localhost — only .test & Safari (<code>hosts sync</code>)</td>
+        <td>Works offline</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="cross">✗</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
       </tr>
       <tr>
-        <td>WebSocket / HMR</td>
-        <td class="check">Yes</td>
+        <td>Traffic stays on your machine</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="cross">✗</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+      </tr>
+      <tr>
+        <td>No cloud account</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="cross">✗</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+      </tr>
+      <tr>
+        <td>Any language / runtime</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="cross">✗ Node 24+</td>
+        <td class="check">✓</td>
+      </tr>
+      <tr>
+        <td>Runtime to install</td>
+        <td class="cross">—</td>
+        <td>Caddy</td>
+        <td>ngrok</td>
+        <td>Node 24+</td>
+        <td class="check">none</td>
+      </tr>
+      <tr>
+        <td>HMR / WebSocket</td>
+        <td class="check">✓</td>
         <td>Config-dependent</td>
-        <td class="check">Yes</td>
-        <td class="check">Transparent</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
       </tr>
       <tr>
         <td>Multi-app routing</td>
         <td>DIY</td>
         <td>Config file</td>
         <td>Extra tunnels</td>
-        <td class="check">antra run x N</td>
+        <td class="check">✓</td>
+        <td class="check">antra run × N</td>
       </tr>
       <tr>
-        <td>Cloud account</td>
-        <td class="check">No</td>
-        <td class="check">No</td>
-        <td class="cross">Yes</td>
-        <td class="check">No</td>
+        <td>Monorepo / LAN / phone</td>
+        <td>DIY</td>
+        <td>Config file</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td>Roadmap</td>
+      </tr>
+      <tr>
+        <td>HTTP/2</td>
+        <td class="cross">—</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="check">✓</td>
+        <td class="cross">✗</td>
       </tr>
       <tr class="highlight-row">
-        <td>One-command UX</td>
-        <td class="cross">—</td>
-        <td class="cross">—</td>
-        <td>Close</td>
-        <td class="check">Yes</td>
+        <td>Asks before changing your machine</td>
+        <td>n/a</td>
+        <td>n/a</td>
+        <td>n/a</td>
+        <td class="cross">✗</td>
+        <td class="check">✓</td>
       </tr>
     </tbody>
   </table>
