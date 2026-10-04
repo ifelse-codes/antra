@@ -83,7 +83,7 @@ pub fn execute() -> Result<()> {
             }
         };
 
-        if is_pid_alive(pid) {
+        if crate::platform::is_pid_alive(pid) {
             println!(
                 "  {} {} (PID {} alive)",
                 "✓".green(),
@@ -132,18 +132,4 @@ pub fn execute() -> Result<()> {
     println!();
 
     Ok(())
-}
-
-/// Check if a PID is alive using signal 0.
-#[cfg(unix)]
-fn is_pid_alive(pid: u32) -> bool {
-    use nix::sys::signal::kill;
-    use nix::unistd::Pid;
-    kill(Pid::from_raw(pid as i32), None).is_ok()
-}
-
-#[cfg(not(unix))]
-fn is_pid_alive(_pid: u32) -> bool {
-    // Fallback: assume alive on non-Unix
-    true
 }

@@ -96,7 +96,7 @@ test_prune_help() {
     
     output=$($ANTRA_BIN prune --help 2>&1 || true)
     
-    if echo "$output" | grep -q "Kill orphaned dev servers"; then
+    if echo "$output" | grep -q "Remove routes whose process has exited"; then
         log_pass "Prune help shows description"
     else
         log_fail "Prune help shows description"

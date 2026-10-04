@@ -39,6 +39,54 @@ The user opens `https://myapp.localhost` and their app loads. No ports to rememb
 
 ---
 
+## Session — 2026-10-03: the A2 follow-ups (C24–C26), unreleased
+
+**The three findings from the 2026-10-01 stranger test are closed** on branch
+`claude/dazzling-mayer-mo3zyz`. Each was reproduced against the released
+v0.6.4 binary first, in the cloud container, and then against the fix.
+
+- **C24 — a hardcoded-port server.** `antra run` auto-assigned 4000 to a
+  `listen(3000)` server and its 503 asked "is your server running?". After an
+  auto-assign, `port_watcher::confirm_auto_port` asks the OS which ports the
+  child's process group holds and moves the route (503 → 200 in ~5 s, no
+  flag), moving it back if the assigned port answers later; the 503 page
+  asks the route's owner instead of the user.
+- **C25 — a route outliving a hard kill.** The daemon reaps managed routes
+  whose owner PID is dead every 5 s; `list`/`doctor` flag them meanwhile.
+- **C26 — `tests/installer_output.sh` runs in CI**, as its own job under
+  `/bin/bash` (bash 3.2 on macOS). The live installer ran clean from a fresh
+  `HOME` on Linux in 1.9 s.
+
+**Do not redo blindly:**
+- **A zombie answers signal 0.** `kill(pid, 0)` succeeds until the parent
+  reaps it. The child of a SIGKILLed `antra run` is reparented, and the cloud
+  container's init (`process_api`) reaps lazily — seconds — so a dead server
+  read as *running*. `platform::is_pid_alive` reads `/proc/<pid>/stat` on
+  Linux for that reason. It also treats **EPERM as alive**: it means the
+  process exists and is someone else's.
+- **`lsof` ORs its selectors unless given `-a`.** `lsof -g <pgid> -iTCP
+  -sTCP:LISTEN` lists every TCP listener on the machine; `-a` makes it the
+  group's. Verified in the container against a `setsid` server.
+- **Do not shorten `AUTO_PORT_GRACE` below 5 s.** A dev command that starts
+  an API before the app shows the API's port first; with a 2 s grace the
+  route was pinned to the API. The move-back covers a slow app; the grace
+  keeps the common case from flapping at all.
+- **Process-group lookups need the child to lead its group.** `antra run`
+  spawns with `process_group(0)`, so `pgid == child pid` and `npm → node`
+  descendants are covered. Anything that spawns differently breaks
+  `group_listening_ports`.
+- **The landing domain is unreachable from the cloud container** (the proxy
+  answers 403), GitHub is not. To run the live installer there, fetch
+  `install.sh` from `raw.githubusercontent.com/.../main/` — it is
+  byte-identical to `landing/install.sh`, which `tests/installer_output.sh`
+  asserts.
+- **Clippy for Windows runs from Linux** with `gcc-mingw-w64-x86-64-posix` and
+  the `x86_64-pc-windows-gnu` target (see Gates in `NEXT-SESSION.md`). Use it
+  after touching `cfg` code: dead-code lints differ per platform and CI runs
+  clippy on Windows.
+
+---
+
 ## Release — v0.6.3 (2026-09-30)
 
 **One macOS fix, no behaviour change on Linux or Windows.**
@@ -335,7 +383,7 @@ for f in tests/e2e_*.sh; do bash "$f"; done
 | 9 | Configuration | ✅ DONE | antra.toml parsing, `antra dev` command, CLI flag overrides |
 | 10 | Cross-Platform Hardening | ✅ DONE | Windows fixes, platform abstractions, CI/CD, release workflow |
 
-**Current state:** Phases (0-10) are implemented and `v0.6.4` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 421 passing. ROADMAP C4–C17 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. C16 (the launchd plist relaunching `proxy start` every 10 s) is fixed in v0.6.3, verified on a macOS runner. C17 (the busy-port advice named a fix that does not work, and Flask ignored `--port`) shipped in v0.6.4, as did C18 (installer colour codes, `trust --remove --yes`), C22 and **C23** — `v0.6.4` is the release that finally carries the launch-readiness fixes to users. The manual Safari + Firefox pass on `docs/mvp.md` is deliberately not planned (maintainer, 2026-09-30) and must not be re-added to the owed list unprompted; its machine-checkable half is covered by `tests/e2e_securetransport.rs` and, for real browsers, by `.github/scripts/check-browsers.sh`, which is green on both platforms and **does** reproduce the Linux gap on every run (Chrome `ERR_CERT_AUTHORITY_INVALID`, Firefox `SEC_ERROR_UNKNOWN_ISSUER`). It is also deployed-safe: `landing/install.sh` went out with the fix and the live site serves it. **Open by decision:** `antra trust` writes only the system trust store, so Chrome and Firefox on Linux still warn, because Phase 6 excludes NSS modification (ROADMAP C19). **Closed (C20):** `antra trust` installs under `sudo` on a Linux runner but fails on `macos-latest` in both paths — **settled by hand on 2026-10-01 (C20): it works on a real Mac with a real login**, so the failure is specific to a headless runner and affects no user. That hand-run also surfaced **C22**, a message bug no automated check would catch: `antra trust --user-level` printed *already trusted* and then *✓ Current Antra CA is absent*, because the post-rotation cleanup shares a removal helper with `trust --remove` whose success line was hardcoded to say "Current". The helper now names the certificate it removed. **C23, fixed in #52, is the one that mattered:** a CA rotation left HTTPS broken for every domain a user had already opened, *after* a successful `antra trust`, because a running daemon never reloaded the CA and leaf certificates on disk were never checked against the current one. Found by a person reading one line of a manual run; no suite in this repo would have caught it, because they all build a fresh CA and never rotate one. `tests/ca_rotation.rs` (in #55) now covers that class — it rotates the CA underneath a live daemon through the real HTTPS server, one test per cause. **Read C21 before touching the browser check:** it went green five times while launching no browser, and each cause was an assumption about the environment standing in for an observation.
+**Current state:** Phases (0-10) are implemented and `v0.6.4` is published. The four shell e2e suites are green and all four now run in CI on macOS and Ubuntu; they went from 86 passing / 128 failing assertions to 206 / 0 / 9 skipped, and the Rust suite is at 421 passing. ROADMAP C4–C17 are done; C14 (`antra service install` on Linux) and C15 (the daemon on a host without IPv6) shipped in v0.6.2, and C13 turned out to be a test waiting for a spawn line on runners without pnpm. C16 (the launchd plist relaunching `proxy start` every 10 s) is fixed in v0.6.3, verified on a macOS runner. C17 (the busy-port advice named a fix that does not work, and Flask ignored `--port`) shipped in v0.6.4, as did C18 (installer colour codes, `trust --remove --yes`), C22 and **C23** — `v0.6.4` is the release that finally carries the launch-readiness fixes to users. The manual Safari + Firefox pass on `docs/mvp.md` is deliberately not planned (maintainer, 2026-09-30) and must not be re-added to the owed list unprompted; its machine-checkable half is covered by `tests/e2e_securetransport.rs` and, for real browsers, by `.github/scripts/check-browsers.sh`, which is green on both platforms and **does** reproduce the Linux gap on every run (Chrome `ERR_CERT_AUTHORITY_INVALID`, Firefox `SEC_ERROR_UNKNOWN_ISSUER`). It is also deployed-safe: `landing/install.sh` went out with the fix and the live site serves it. **Open by decision:** `antra trust` writes only the system trust store, so Chrome and Firefox on Linux still warn, because Phase 6 excludes NSS modification (ROADMAP C19). **Closed (C20):** `antra trust` installs under `sudo` on a Linux runner but fails on `macos-latest` in both paths — **settled by hand on 2026-10-01 (C20): it works on a real Mac with a real login**, so the failure is specific to a headless runner and affects no user. That hand-run also surfaced **C22**, a message bug no automated check would catch: `antra trust --user-level` printed *already trusted* and then *✓ Current Antra CA is absent*, because the post-rotation cleanup shares a removal helper with `trust --remove` whose success line was hardcoded to say "Current". The helper now names the certificate it removed. **C23, fixed in #52, is the one that mattered:** a CA rotation left HTTPS broken for every domain a user had already opened, *after* a successful `antra trust`, because a running daemon never reloaded the CA and leaf certificates on disk were never checked against the current one. Found by a person reading one line of a manual run; no suite in this repo would have caught it, because they all build a fresh CA and never rotate one. `tests/ca_rotation.rs` (in #55) now covers that class — it rotates the CA underneath a live daemon through the real HTTPS server, one test per cause. **Unreleased, 2026-10-03:** the three A2 follow-ups — C24 (a hardcoded-port server gets its route moved to where it really listens, and an honest 503), C25 (the daemon reaps routes whose process was hard-killed) and C26 (the installer suite in CI); the Rust suite is at 500 passing. Next: merge, release v0.6.5, then GTM. **Read C21 before touching the browser check:** it went green five times while launching no browser, and each cause was an assumption about the environment standing in for an observation.
 
 ### Landing Page
 

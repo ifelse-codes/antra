@@ -12,6 +12,11 @@ use crate::ipc::server::socket_path;
 use crate::routing::registry::RouteRegistry;
 use crate::routing::types::{Protocol, Route};
 
+/// How often the daemon looks for routes whose owner process has died.
+/// Signal 0 per managed route on Unix; `tasklist` on Windows, hence not
+/// every second.
+const REAP_INTERVAL: Duration = Duration::from_secs(5);
+
 /// Default idle timeout (10 minutes)
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -367,6 +372,30 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
                 );
                 let _ = idle_tx.send(true);
                 break;
+            }
+        }
+    });
+
+    // Reap managed routes whose owner died without unregistering (SIGKILL,
+    // a closed terminal). Without this they stayed in `antra list`, counted
+    // as live in `doctor`, and kept the idle shutdown above from ever firing.
+    let reap_registry = Arc::clone(&registry);
+    tokio::spawn(async move {
+        let mut reap_interval = tokio::time::interval(REAP_INTERVAL);
+        loop {
+            reap_interval.tick().await;
+            let registry = Arc::clone(&reap_registry);
+            let reaped = tokio::task::spawn_blocking(move || {
+                registry.reap_dead_owners(crate::platform::is_pid_alive)
+            })
+            .await
+            .unwrap_or_default();
+            for route in reaped {
+                tracing::info!(
+                    domain = %route.domain,
+                    pid = ?route.pid,
+                    "Removed route: its process exited without unregistering"
+                );
             }
         }
     });

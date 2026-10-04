@@ -242,17 +242,53 @@ pub fn named_pipe_path() -> String {
 ///
 /// Unix: signal-0 probe. Windows: `tasklist /FI "PID eq <pid>"` — avoids new
 /// native deps and works for any process the caller can see. Used by route
-/// restore (drop stale managed routes) and `--force` kill paths. Infrequent
-/// calls only; never on the proxy hot path.
+/// restore and the daemon's reaper (drop stale managed routes) and `--force`
+/// kill paths. Infrequent calls only; never on the proxy hot path.
 #[cfg(unix)]
 pub fn is_pid_alive(pid: u32) -> bool {
+    // `kill(0, …)` and a negative pid address process *groups*, so neither
+    // can say anything about one process — and reading a group as "alive"
+    // would keep a dead route forever.
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    if raw == 0 {
+        return false;
+    }
     // nix is only a unix dependency.
     #[allow(clippy::useless_conversion)]
     {
+        use nix::errno::Errno;
         use nix::sys::signal::kill;
         use nix::unistd::Pid;
-        kill(Pid::from_raw(pid as i32), None).is_ok()
+        // EPERM means the process exists and belongs to someone else — a
+        // `sudo antra run` child seen from a user-level daemon. Calling it
+        // dead would let the reaper delete a live route.
+        if !matches!(kill(Pid::from_raw(raw), None), Ok(()) | Err(Errno::EPERM)) {
+            return false;
+        }
     }
+    // A zombie still answers signal 0 until its parent reaps it. The child
+    // of a SIGKILLed `antra run` is reparented, and a container's init can
+    // take seconds to reap it — long enough to call a dead server running.
+    #[cfg(target_os = "linux")]
+    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{raw}/stat")) {
+        return !matches!(proc_stat_state(&stat), Some('Z' | 'X'));
+    }
+    true
+}
+
+/// The state letter in a `/proc/<pid>/stat` line (`R`, `S`, `Z`, …). The
+/// command name before it is parenthesised free text, so count from the
+/// last `)`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn proc_stat_state(stat: &str) -> Option<char> {
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .next()?
+        .chars()
+        .next()
 }
 
 /// Windows PID liveness via `tasklist`.
@@ -468,5 +504,62 @@ mod tests {
         std::fs::write(&blocker, "x").unwrap();
         let err = ensure_private_dir(&blocker.join("child")).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotADirectory);
+    }
+
+    #[test]
+    fn is_pid_alive_tells_live_from_dead() {
+        assert!(is_pid_alive(std::process::id()));
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // Reaped, so the pid is free. (It could be reused, but not this fast
+        // on any kernel that hands pids out sequentially.)
+        assert!(!is_pid_alive(pid));
+    }
+
+    /// An exited child its parent has not reaped yet is a zombie: signal 0
+    /// still succeeds, but nothing is running.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn is_pid_alive_calls_a_zombie_dead() {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        // Not reaped yet: wait for it to become a zombie, then ask.
+        let stat = format!("/proc/{pid}/stat");
+        for _ in 0..200 {
+            let state = std::fs::read_to_string(&stat)
+                .ok()
+                .and_then(|s| proc_stat_state(&s));
+            if state == Some('Z') {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!is_pid_alive(pid), "zombie {pid} reported alive");
+        child.wait().unwrap();
+    }
+
+    #[test]
+    fn proc_stat_state_reads_past_a_tricky_command_name() {
+        assert_eq!(proc_stat_state("8429 (sleep) Z 8427 8427"), Some('Z'));
+        assert_eq!(proc_stat_state("77 (node a) b) S 70 75"), Some('S'));
+        assert_eq!(proc_stat_state(""), None);
+    }
+
+    /// pid 1 always exists and, for anyone but root, answers signal 0 with
+    /// EPERM. That is "alive, not yours" — and the reaper must not delete a
+    /// `sudo antra run` route because of it. CI runs unprivileged, so this
+    /// is where the EPERM branch is exercised.
+    #[test]
+    fn is_pid_alive_counts_another_users_process_as_alive() {
+        assert!(is_pid_alive(1));
+    }
+
+    /// 0 and pids past `i32::MAX` address process groups in `kill(2)`, not
+    /// a process; reading one as alive would pin a dead route forever.
+    #[test]
+    fn is_pid_alive_rejects_group_addresses() {
+        assert!(!is_pid_alive(0));
+        assert!(!is_pid_alive(u32::MAX));
     }
 }

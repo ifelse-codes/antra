@@ -198,7 +198,7 @@ antra list     Active routes (domain, port, pid, uptime)
 antra open     Open a domain in the default browser
 antra alias    Map a domain to an already-running port
 antra remove   Drop a route / alias
-antra prune    Kill orphaned dev servers from crashed sessions
+antra prune    Remove routes whose process has exited
 antra hosts    Manage /etc/hosts entries for Safari compatibility
 antra service  Manage Antra as a system service
 antra trust    Install / status / remove the local CA
@@ -234,6 +234,13 @@ ANTRA_URL=https://myapp.localhost
 ```
 
 Point your framework at `HOST` + `PORT` and forget the rest.
+
+A server that ignores `PORT` — a hardcoded `listen(3000)` — still works: when
+Antra had to pick the port itself and nothing answers there, it finds the
+port your server really listens on (macOS and Linux), moves the route and
+prints the `--port` to use next time. If the process behind a route dies
+without cleaning up (`kill -9`, a closed terminal), the daemon drops its
+route within seconds.
 
 `antra run` is foreground: Ctrl-C stops the child and removes the route.
 For a background server you already started, use `antra alias` instead

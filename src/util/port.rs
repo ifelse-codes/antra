@@ -403,6 +403,131 @@ pub fn parse_lsof_holder(out: &str) -> Option<PortHolder> {
     None
 }
 
+/// TCP ports that processes in process group `pgid` are listening on.
+///
+/// `antra run` starts its child as the leader of a new process group, so
+/// this covers the whole tree the child starts (`npm` → `node`). Used when
+/// the route's port and the server's port disagree: a server with a
+/// hardcoded `listen(3000)` ignores the `PORT` Antra injected, and the only
+/// way to know where it went is to ask the OS. Best-effort and sorted: an
+/// empty list means "could not tell", never "nothing listens".
+#[cfg(target_os = "linux")]
+pub fn group_listening_ports(pgid: u32) -> Vec<u16> {
+    let mut listeners = std::collections::HashMap::new();
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(text) = std::fs::read_to_string(table) {
+            listeners.extend(parse_proc_net_tcp_listeners(&text));
+        }
+    }
+    let mut ports = Vec::new();
+    if listeners.is_empty() {
+        return ports;
+    }
+    let Ok(procs) = std::fs::read_dir("/proc") else {
+        return ports;
+    };
+    for entry in procs.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        let in_group = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| parse_proc_stat_pgrp(&stat))
+            == Some(pgid);
+        if !in_group {
+            continue;
+        }
+        let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+            continue;
+        };
+        for fd in fds.flatten() {
+            let Ok(target) = std::fs::read_link(fd.path()) else {
+                continue;
+            };
+            let inode = target
+                .to_str()
+                .and_then(|t| t.strip_prefix("socket:["))
+                .and_then(|t| t.strip_suffix(']'))
+                .and_then(|t| t.parse::<u64>().ok());
+            if let Some(port) = inode.and_then(|i| listeners.get(&i)) {
+                ports.push(*port);
+            }
+        }
+    }
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
+/// macOS and the BSDs: `lsof`, selected by process group (`-g`) and ANDed
+/// (`-a`) with listening TCP sockets. Without `-a`, lsof ORs its selectors
+/// and would list every TCP listener on the machine.
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn group_listening_ports(pgid: u32) -> Vec<u16> {
+    let Ok(out) = std::process::Command::new("lsof")
+        .args(["-nP", "-a", "-g"])
+        .arg(pgid.to_string())
+        .args(["-iTCP", "-sTCP:LISTEN", "-Fn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    parse_lsof_listen_ports(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(not(unix))]
+pub fn group_listening_ports(_pgid: u32) -> Vec<u16> {
+    Vec::new()
+}
+
+/// Listening sockets in a `/proc/net/tcp` or `tcp6` table, as inode → port.
+///
+/// A row is `sl local_address rem_address st … uid timeout inode`, with the
+/// address as `HEX_IP:HEX_PORT` and state `0A` meaning `LISTEN`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_proc_net_tcp_listeners(text: &str) -> Vec<(u64, u16)> {
+    text.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 || fields[3] != "0A" {
+                return None;
+            }
+            let port = u16::from_str_radix(fields[1].rsplit(':').next()?, 16).ok()?;
+            let inode = fields[9].parse::<u64>().ok()?;
+            (inode != 0).then_some((inode, port))
+        })
+        .collect()
+}
+
+/// The process group in a `/proc/<pid>/stat` line.
+///
+/// The command name sits in parentheses and may itself contain spaces or
+/// `)`, so fields are counted from the *last* `)`: state, ppid, pgrp.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_proc_stat_pgrp(stat: &str) -> Option<u32> {
+    let (_, rest) = stat.rsplit_once(')')?;
+    rest.split_whitespace().nth(2)?.parse().ok()
+}
+
+/// Ports in `lsof -F n` output: name lines like `n*:3000`,
+/// `n127.0.0.1:3000` or `n[::1]:3000`. Sorted, without duplicates — a
+/// server bound on both stacks shows up twice.
+#[cfg_attr(any(target_os = "linux", not(unix)), allow(dead_code))]
+pub fn parse_lsof_listen_ports(out: &str) -> Vec<u16> {
+    let mut ports: Vec<u16> = out
+        .lines()
+        .filter_map(|line| line.strip_prefix('n'))
+        .filter_map(|name| name.rsplit(':').next()?.parse().ok())
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
 /// Why a port a user asked for is taken, and what to do instead.
 ///
 /// Pure, so each case is tested: the advice this replaced was wrong in the
@@ -800,5 +925,75 @@ mod tests {
         // A bare trailing number is not a port pin (`webpack-dev-server
         // . --port` vs `echo 3001`), so only an explicit flag counts.
         assert_eq!(detect_port_from_script("vite 3001"), None);
+    }
+
+    #[test]
+    fn proc_net_tcp_keeps_only_listening_rows() {
+        // Real rows, trimmed: a LISTEN on 3000 (0x0BB8), an ESTABLISHED
+        // connection (01) that must not count, and a LISTEN with inode 0
+        // (a socket in TIME_WAIT-like limbo with no owner to match).
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+           0: 0100007F:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 41234 1 0000000000000000 100 0 0 10 0\n\
+           1: 0100007F:0FA0 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 41235 1 0000000000000000 20 4 30 10 -1\n\
+           2: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 0 1 0000000000000000 100 0 0 10 0\n";
+        assert_eq!(parse_proc_net_tcp_listeners(table), vec![(41234, 3000)]);
+    }
+
+    #[test]
+    fn proc_net_tcp6_rows_parse_the_same_way() {
+        let table = "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+           0: 00000000000000000000000001000000:0BB8 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 52000 1 0000000000000000 100 0 0 10 0\n";
+        assert_eq!(parse_proc_net_tcp_listeners(table), vec![(52000, 3000)]);
+    }
+
+    #[test]
+    fn proc_stat_pgrp_survives_a_command_name_with_spaces_and_parens() {
+        assert_eq!(
+            parse_proc_stat_pgrp("3853 (cat) R 3849 3853 3849 0 -1 4194304"),
+            Some(3853)
+        );
+        // `comm` is free text: counting fields from the first `)` would
+        // read the ppid of a process named `a) b` as its pgrp.
+        assert_eq!(
+            parse_proc_stat_pgrp("77 (node a) b) S 70 75 70 0 -1"),
+            Some(75)
+        );
+        assert_eq!(parse_proc_stat_pgrp("garbage"), None);
+    }
+
+    #[test]
+    fn lsof_listen_ports_cover_both_stacks_once() {
+        let out = "p4242\nf22\nn*:3000\nf23\nn[::1]:3000\nf24\nn127.0.0.1:9229\n";
+        assert_eq!(parse_lsof_listen_ports(out), vec![3000, 9229]);
+        assert_eq!(parse_lsof_listen_ports(""), Vec::<u16>::new());
+    }
+
+    /// Asks the real OS which ports this test's own process group listens
+    /// on, while it holds one. Linux reads `/proc`; macOS asks `lsof`.
+    #[cfg(unix)]
+    #[test]
+    fn group_listening_ports_finds_a_port_this_group_holds() {
+        #[cfg(not(target_os = "linux"))]
+        if std::process::Command::new("lsof")
+            .arg("-v")
+            .output()
+            .is_err()
+        {
+            eprintln!("skipping: lsof not installed");
+            return;
+        }
+        let held = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        let pgid = nix::unistd::getpgrp().as_raw() as u32;
+        let ports = group_listening_ports(pgid);
+        assert!(
+            ports.contains(&port),
+            "group {pgid} holds {port}, but the OS reported {ports:?}"
+        );
+        drop(held);
+        assert!(
+            !group_listening_ports(pgid).contains(&port),
+            "a released port must not be reported"
+        );
     }
 }
