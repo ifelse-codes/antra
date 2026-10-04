@@ -32,19 +32,32 @@
 > is still unexplained), and opening Firefox once on a Mac (never done).
 
 > **New on 2026-10-04 — read before any GTM work.**
-> - **C27 is built, not released:** a first run used to print
+> - **C27 is merged (#63), not released:** a first run used to print
 >   `https://myapp.localhost:8443` (no root, no port 443), while every page
 >   about Antra shows the URL with no port. The maintainer chose to fix the
 >   product: the first daemon start now asks `Use port 443? [Y/n]`, runs
 >   `sudo` once, and the daemon drops to the user right after opening the
 >   ports. It also fixes the old hint `sudo antra proxy start`, which on Linux
->   put the daemon's socket under `/root`. Branch
->   `claude/peaceful-curie-x1xkz8`; details and evidence in ROADMAP C27.
+>   put the daemon's socket under `/root`. Details and evidence in ROADMAP C27.
 > - **Next, in order:** (1) ~~the maintainer's Mac run below~~ — done
 >   2026-10-04: no-port URL loaded, daemon ran as the user, second run asked
->   nothing (step 6 not reported); (2) open a PR,
->   CI green on all three platforms; (3) release v0.6.6 (**Releasing**
->   below); (4) GTM.
+>   nothing; step 6 (`proxy stop` without `sudo`) was not reported, so it was
+>   checked in the container instead (ROADMAP C27); (2) ~~PR, CI green~~ —
+>   #63, CI and Browsers green on `main`; (3) **release v0.6.6** — the bump
+>   and `docs/releases/v0.6.6.md` are on `claude/keen-maxwell-0d7tsf`; merge
+>   it, then **a person pushes the tag** and the rest of **Releasing** below
+>   follows; (4) GTM.
+> - **In the v0.6.6 post-release PR (with the formula and pins), fix the
+>   landing copy too.** `landing/index.html` still says clean URLs need
+>   `sudo antra proxy start`; from v0.6.6 the first run asks instead. Not in
+>   the bump PR, because merging under `landing/` deploys at once and v0.6.5
+>   would still be what people install.
+> - **Open PR #62 (GTM drafts, from another tool's session)** adds
+>   `launch/` and says two things not recorded here yet: Firefox on a Mac was
+>   checked clean (both the automated check and the real app), and the repo
+>   has **no `LICENSE` file** although `Cargo.toml` and the README say MIT —
+>   the copyright line is the maintainer's call. It predates C27, so its
+>   drafts still describe v0.6.5.
 > - **The Mac run** — the one thing the cloud container could not do (no
 >   macOS, and no real `sudo` password prompt):
 >   1. `antra proxy stop`, then build the branch: `cargo build --release`
