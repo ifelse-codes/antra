@@ -16,7 +16,7 @@
 
 ## 2. Current standing work (until a release/ABL says otherwise)
 
-- **GTM, not code.** Product is done and published (v0.6.5). Run the lanes in
+- **GTM, not code.** Product is done and published (v0.6.6). Run the lanes in
   `NEXT-GTM.md`: launch post draft → comparison vs ngrok/mkcert/portless →
   Mac checks runbook. Produce in short rounds, hand voice-level review to user.
 - **On user-reported bugs/regressions only:** fix under the Gates in

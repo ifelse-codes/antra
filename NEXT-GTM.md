@@ -22,6 +22,12 @@ Read this first, then the job below it.
 - **`launch/mac-checks-runbook.md`** — **Check 2 closed and verified**;
   Check 1 is a ~1-minute block whose baseline is already measured.
 
+**Updated after v0.6.6 (2026-10-04):** all three now describe v0.6.6. The
+first run asks `Use port 443? [Y/n]` (C27), so the URL has no port; the post
+says so and the comparison's `sudo` rows are corrected. `launch/comparison.md`
+is now the only comparison: the separate `docs/gtm/comparison.md` was merged
+into it and removed.
+
 **Two findings the next session must not rediscover:**
 
 1. **The direct competitor is portless, not ngrok.** `vercel-labs/portless`
@@ -47,7 +53,7 @@ than by eye. **C19 is Linux-only. This Mac is done; nothing is owed here.**
 
 ## One job
 
-**Get Antra to market.** The product is done (v0.6.5, published 2026-10-04);
+**Get Antra to market.** The product is done (v0.6.6, published 2026-10-04);
 this session is GTM, not code. Draft the three launch materials below and let
 the user pick them apart in short rounds. Do the bulk; hand only voice-level
 review to the user.
@@ -57,11 +63,11 @@ review to the user.
 - **Antra**: native Rust CLI that fronts a local dev server with a stable HTTPS
   domain. One command: `antra run --domain myapp.localhost -- pnpm dev` →
   `https://myapp.localhost`. No ports, no `/etc/hosts`, no cert warnings.
-- **v0.6.5 published**, all 10 phases done, release-check green on 5 legs
+- **v0.6.6 published**, all 10 phases done, release-check green on 5 legs
   (Homebrew + `curl | bash` on macOS/Linux + live site).
-- **C1–C26 all done** — includes the CA-rotation fix (C23, worst bug), installer
-  (C18/C26), first-run fixes (C24–C26).
-- **Tests**: ~500 Rust passing; 4 shell e2e suites 206 passing / 0 failing /
+- **C1–C27 all done** — includes the CA-rotation fix (C23, worst bug), installer
+  (C18/C26), first-run fixes (C24–C26), and the port-443 question (C27).
+- **Tests**: 520 Rust passing; 4 shell e2e suites 206 passing / 0 failing /
   9 skipped, all in CI.
 - git `main` clean; only stray untracked `tests/fixtures/`.
 - Read `AGENT.md` ("do not redo blindly" section), `docs/security.md`,

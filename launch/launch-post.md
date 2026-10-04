@@ -2,7 +2,7 @@
 
 > Voice is yours to change. Marked lines `EDIT:` are the ones I'd expect you to
 > rewrite. Facts are drawn from `README.md`, `landing/index.html` and the
-> published v0.6.5 binary; nothing here is aspirational.
+> published v0.6.6 binary; nothing here is aspirational.
 > Companion doc: [`comparison.md`](comparison.md).
 
 ---
@@ -57,6 +57,11 @@ antra run --domain myapp.localhost -- pnpm dev
 Open the URL. Your app is there. Vite HMR still works. Cookies are a secure
 context. Nobody typed `:5173`.
 
+The first time, Antra asks one question — `Use port 443? [Y/n]` — because a
+URL with no port number needs port 443, and only an admin can open it. You type
+your password once; the proxy gives up admin rights as soon as the port is
+open. Say no and you get `https://myapp.localhost:8443` instead.
+
 ## Install
 
 ```bash
@@ -69,7 +74,7 @@ brew install ifelse-codes/antra/antra
 
 The installer asks before it touches your trust store, and tells you how to undo
 it. On macOS it uses your login keychain — no sudo. Pin a version for teams and
-CI with `ANTRA_VERSION=v0.6.5`.
+CI with `ANTRA_VERSION=v0.6.6`.
 
 ## What you get
 
@@ -107,7 +112,7 @@ antra run --domain myapp.localhost -- pnpm dev
 # open https://myapp.localhost
 ```
 
-MIT. macOS, Linux, Windows. v0.6.5.
+MIT. macOS, Linux, Windows. v0.6.6.
 
 EDIT: add a terminal recording or a 20-second GIF here. The command and the URL
 side by side is the whole pitch and a still image doesn't show it.
@@ -126,6 +131,7 @@ loses more trust than one who never heard of them.
 |---|---|
 | Command + output block | `README.md` quick start, verified against the released binary |
 | Security framing | `docs/security.md`, `README.md` security table |
-| "No sudo on macOS" | `install.sh:227-235`, README service section |
+| "No sudo" for trust on macOS | `install.sh:227-235`, README service section |
+| The port-443 question | `docs/releases/v0.6.6.md` (C27); checked on a real Mac with a real password prompt |
 | Windows service caveat | README — the service runs as SYSTEM and uses the SYSTEM CA. Not in the post; it's a docs-level gotcha |
 | Linux browser gap | Deliberately not in the post. `check-browsers.sh` reproduces it on every CI run and the release notes state it. Leaving it out of a launch post is a call the maintainer should make knowingly, not by omission |
