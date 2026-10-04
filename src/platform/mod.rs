@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+#[cfg(unix)]
+pub mod sudo;
+
 /// Returns the IPC socket/pipe path for the daemon.
 #[cfg(unix)]
 #[allow(dead_code)]
@@ -104,7 +107,7 @@ pub fn chown_to_invoking_user(path: &std::path::Path) {
 /// there is no invoking user to hand anything back to, and guessing (root)
 /// would be wrong.
 #[cfg(unix)]
-fn acting_uid() -> Option<u32> {
+pub(crate) fn acting_uid() -> Option<u32> {
     let euid = unsafe { libc::geteuid() };
     if euid != 0 {
         return Some(euid);

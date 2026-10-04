@@ -20,7 +20,28 @@ fn is_pid_alive(_pid: u32) -> bool {
     true
 }
 
+/// Set by a `proxy start` launcher running under `sudo` on the daemon it
+/// spawns: open the ports, then become the invoking user (C27). A daemon
+/// auto-started by a root CLI (`sudo antra run`) has no marker and stays
+/// root, in root's paths, matching the CLI that started it.
+#[cfg(unix)]
+const DROP_TO_USER: &str = "ANTRA_DROP_TO_USER";
+
 pub fn execute(command: ProxyCommands) -> Result<()> {
+    // Under sudo, find the user's daemon, not root's (C27). Before anything
+    // else: it sets environment variables, and no thread exists yet.
+    #[cfg(unix)]
+    let invoking_user =
+        if std::env::var_os("ANTRA_DAEMON").is_some() && std::env::var_os(DROP_TO_USER).is_none() {
+            None
+        } else {
+            crate::platform::sudo::invoking_user()
+        };
+    #[cfg(unix)]
+    if let Some(user) = &invoking_user {
+        crate::platform::sudo::adopt_invoking_user_paths(user);
+    }
+
     match command {
         ProxyCommands::Start {
             port,
@@ -38,14 +59,25 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 )?;
             }
 
-            let config = DaemonConfig {
+            #[cfg_attr(not(unix), allow(unused_mut))]
+            let mut config = DaemonConfig {
                 https_port: port,
                 http_port,
                 idle_timeout: std::time::Duration::from_secs(600),
+                ..DaemonConfig::default()
             };
 
             // Check if we're already in daemon mode
             if std::env::var("ANTRA_DAEMON").is_ok() {
+                // Under sudo: open the ports as root, then run as the user
+                // who asked. Before the runtime, so no thread outlives root.
+                #[cfg(unix)]
+                if let Some(user) = &invoking_user {
+                    config.prebound = crate::platform::sudo::bind_then_drop(user, port, http_port)?;
+                    // Starting again would need the password again, so a
+                    // daemon started this way stays up until it is stopped.
+                    config.idle_timeout = std::time::Duration::ZERO;
+                }
                 // Already daemonized, run directly
                 let rt = tokio::runtime::Runtime::new()?;
                 rt.block_on(start_daemon(config))?;
@@ -83,6 +115,16 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
 
                 let exe = std::env::current_exe()?;
                 let log_path = crate::util::logs::daemon_log_path();
+                // Under sudo this launcher is still root. Left to
+                // `open_for_append`, it would create the log's directory as
+                // root — on macOS the same directory the daemon, no longer
+                // root, must then put its socket in.
+                #[cfg(unix)]
+                if invoking_user.is_some() {
+                    if let Some(dir) = log_path.parent() {
+                        crate::platform::ensure_private_dir(dir)?;
+                    }
+                }
                 let log_file = crate::util::logs::open_for_append()?;
                 // sudo-root start writes into the user's data dir: hand the
                 // log back so later unprivileged starts can append to it.
@@ -94,6 +136,10 @@ pub fn execute(command: ProxyCommands) -> Result<()> {
                 {
                     use std::os::unix::process::CommandExt;
                     cmd.process_group(0);
+                }
+                #[cfg(unix)]
+                if invoking_user.is_some() {
+                    cmd.env(DROP_TO_USER, "1");
                 }
                 cmd.arg("proxy")
                     .arg("start")

@@ -25,6 +25,10 @@ pub struct DaemonConfig {
     pub https_port: u16,
     pub http_port: u16,
     pub idle_timeout: Duration,
+    /// Listeners opened before the daemon gave up root (see
+    /// `platform::sudo::bind_then_drop`). A port listed here is served from
+    /// these instead of being bound again, which the daemon no longer could.
+    pub prebound: Prebound,
 }
 
 impl Default for DaemonConfig {
@@ -33,6 +37,51 @@ impl Default for DaemonConfig {
             https_port: 443,
             http_port: 80,
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
+            prebound: Prebound::default(),
+        }
+    }
+}
+
+/// Loopback listeners bound ahead of time, per port: both stacks, or IPv4
+/// alone on a host without IPv6 (the `loopback_binds` rule).
+#[derive(Default)]
+pub struct Prebound {
+    pub https: Option<(u16, Vec<std::net::TcpListener>)>,
+    pub http: Option<(u16, Vec<std::net::TcpListener>)>,
+}
+
+impl Prebound {
+    /// The listeners bound for `port`, if any — a fallback port never matches.
+    fn take(
+        slot: &mut Option<(u16, Vec<std::net::TcpListener>)>,
+        port: u16,
+    ) -> Option<Vec<std::net::TcpListener>> {
+        match slot.take() {
+            Some((bound, listeners)) if bound == port => Some(listeners),
+            _ => None,
+        }
+    }
+}
+
+/// The listeners bound ahead of time for `port`, handed to tokio. `None`
+/// sends the caller down the ordinary bind-and-fall-back path.
+fn adopt_prebound(
+    slot: &mut Option<(u16, Vec<std::net::TcpListener>)>,
+    port: u16,
+) -> Option<Vec<tokio::net::TcpListener>> {
+    let listeners = Prebound::take(slot, port)?;
+    let adopted: std::io::Result<Vec<_>> = listeners
+        .into_iter()
+        .map(|l| {
+            l.set_nonblocking(true)?;
+            tokio::net::TcpListener::from_std(l)
+        })
+        .collect();
+    match adopted {
+        Ok(listeners) => Some(listeners),
+        Err(e) => {
+            tracing::warn!(port, error = %e, "Could not use the port opened before dropping root");
+            None
         }
     }
 }
@@ -47,6 +96,7 @@ impl Default for DaemonConfig {
 /// HTTP-only redirect daemon serves nothing.
 async fn bind_proxy_ports(
     config: &DaemonConfig,
+    mut prebound: Prebound,
     registry: &Arc<RouteRegistry>,
     cert_cache: &Arc<CertCache>,
 ) -> (u16, bool, Option<String>, u16, bool, Option<String>) {
@@ -57,7 +107,21 @@ async fn bind_proxy_ports(
     let https_ok;
     let https_error;
 
-    if crate::proxy::https::probe_port(https_port).await.is_ok() {
+    let prebound_https = adopt_prebound(&mut prebound.https, https_port);
+    if let Some(listeners) = prebound_https {
+        actual_https_port = https_port;
+        https_ok = true;
+        https_error = None;
+        let https_registry = Arc::clone(registry);
+        let https_cert_cache = Arc::clone(cert_cache);
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::proxy::https::serve(listeners, https_registry, https_cert_cache).await
+            {
+                tracing::error!(error = %e, "HTTPS server failed");
+            }
+        });
+    } else if crate::proxy::https::probe_port(https_port).await.is_ok() {
         actual_https_port = https_port;
         https_ok = true;
         https_error = None;
@@ -109,7 +173,15 @@ async fn bind_proxy_ports(
     let http_ok;
     let http_error;
 
-    if crate::proxy::https::probe_port(http_port).await.is_ok() {
+    let prebound_http = adopt_prebound(&mut prebound.http, http_port);
+    if let Some(listeners) = prebound_http {
+        actual_http_port = http_port;
+        http_ok = true;
+        http_error = None;
+        for l in listeners {
+            crate::proxy::https::run_http_redirect(l, actual_https_port);
+        }
+    } else if crate::proxy::https::probe_port(http_port).await.is_ok() {
         actual_http_port = http_port;
         http_ok = true;
         http_error = None;
@@ -159,7 +231,8 @@ async fn bind_proxy_ports(
 }
 
 /// Start the daemon process
-pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
+pub async fn start_daemon(mut config: DaemonConfig) -> Result<()> {
+    let prebound = std::mem::take(&mut config.prebound);
     let pid_file = pid_path();
 
     #[cfg(unix)]
@@ -230,7 +303,7 @@ pub async fn start_daemon(config: DaemonConfig) -> Result<()> {
     // cannot serve HTTPS must fail loudly instead of half-starting and
     // stealing the socket (all routes would 502 behind it).
     let (actual_https_port, https_ok, https_error, actual_http_port, http_ok, http_error) =
-        bind_proxy_ports(&config, &registry, &cert_cache).await;
+        bind_proxy_ports(&config, prebound, &registry, &cert_cache).await;
     if !https_ok {
         anyhow::bail!(
             "Cannot start daemon: HTTPS unavailable ({}). Not taking the IPC socket — free the port and retry.",

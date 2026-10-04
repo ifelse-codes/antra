@@ -52,12 +52,12 @@ pub fn execute(args: RunArgs) -> Result<()> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum TrustAnswer {
+pub(super) enum TrustAnswer {
     Yes,
     No,
 }
 
-fn parse_trust_answer(input: &str) -> Option<TrustAnswer> {
+pub(super) fn parse_trust_answer(input: &str) -> Option<TrustAnswer> {
     let answer = input.trim();
     if answer.is_empty() || answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
         Some(TrustAnswer::Yes)
@@ -487,7 +487,7 @@ async fn run_inner(args: RunArgs) -> Result<()> {
             println!(
                 "  {} To use port 443: {}",
                 "ℹ".cyan(),
-                "sudo antra proxy start".bold()
+                "antra proxy stop && sudo antra proxy start".bold()
             );
             // Build clean URL — don't double-append .localhost
             let host = if domain.ends_with(".localhost") {
