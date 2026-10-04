@@ -85,6 +85,13 @@ evidence is in ROADMAP C27.
   died with *Permission denied*. Test the elevated path from an **empty**
   `HOME` with no runtime dir — a home that already has `antra` in it hides
   this.
+- **A spawned child holds every open socket until it execs.** CLOEXEC only
+  closes them *at* exec, so a test that releases a port and then asks its
+  own process group whether anyone still holds it can catch a sibling test's
+  `lsof`/`true` child mid-spawn. `group_listening_ports_finds_a_port_this_
+  group_holds` (C24) failed on a GitHub runner this way: 0/400 alone under
+  CPU load, ~8% beside the spawning tests, 11/400 on `main` too. Its negative
+  check now waits up to 1 s; still fails if the port is never released.
 - **How to test the elevated path without giving anyone `sudo`.** The
   session's permission check refuses to add a sudoers entry for a test user.
   What works instead: a recording fake `sudo` first on `PATH` (captures the
