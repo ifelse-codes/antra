@@ -52,7 +52,10 @@ The daemon's control socket is a Unix socket at `socket_path()`.
 - The socket file itself is `0o600`, owner read/write only
 - Its parent directory is `0o700`, created before the bind and tightened on
   every start — not only when it is first created
-- Under `sudo antra proxy start` with a user-owned `HOME`, the socket and
+- Under `sudo antra proxy start` the daemon now drops to the invoking user
+  before it binds the socket (see *Port 443 and `sudo`*), so it owns all of
+  this. For a daemon that stays root under `sudo` (an older release, or a
+  `SUDO_UID` with no passwd entry), the socket and
   every directory component created for it are chowned to the invoking user
   so unprivileged `status`/`stop` can connect while `0600` still holds —
   enforced for the user instead of root
@@ -106,6 +109,39 @@ user.
 - Signal forwarding is explicit, not broadcast
 - On cleanup, verify child is actually dead before removing route
 - No `kill -9` unless grace period (5 seconds) expired
+
+### Port 443 and `sudo` (ROADMAP C27)
+
+On macOS and Linux only root may bind ports below 1024 on loopback (macOS
+lifts the rule only for `0.0.0.0`, which Antra never binds). A URL without a
+port therefore needs `sudo` once.
+
+- **Asked, never assumed.** The first daemon start in a terminal asks
+  `Use port 443? [Y/n]` and saves the answer in `config.toml`
+  (`use_port_443`). No terminal, no question: a saved yes runs `sudo -n`,
+  which fails rather than waits for a password. The offer is made only when
+  binding 443 is *forbidden* (`EACCES`) — not when it is taken, when the user
+  set `ANTRA_PORT`/`ANTRA_HTTP_PORT`, or when `sudo` is not on `PATH`.
+- **Root only long enough to open the ports.** Under `sudo`, the daemon binds
+  443 and 80 on loopback, then calls `initgroups`, `setgid` and `setuid` to
+  the user named by `SUDO_UID`/`SUDO_GID`, and refuses to run if `setuid(0)`
+  still succeeds afterwards. All of it happens before the tokio runtime
+  exists, so no thread ever runs as root, and the CA, certificates, socket and
+  pid file are created by the user. The short-lived `proxy start` launcher
+  still opens the log as root and chowns it, as it did before.
+- **The user's paths, not root's.** `sudo` on Linux resets `HOME` to root's
+  and drops `XDG_RUNTIME_DIR`, which put a `sudo antra proxy start` daemon's
+  socket under `/root`, invisible to the user's CLI. Under `sudo`, `antra
+  proxy` replaces a `HOME` or `XDG_RUNTIME_DIR` that is root's with the
+  invoking user's (`platform::sudo::paths_to_adopt`); a value passed on
+  purpose is kept. The first-run offer passes the CLI's own values through
+  `sudo -- /usr/bin/env …`, so both sides resolve exactly the same paths.
+- **No idle exit.** A daemon started this way never idles out, since starting
+  it again would mean another password prompt. `antra proxy stop` stops it.
+- Only a daemon spawned by a `proxy start` launcher under `sudo` drops (the
+  launcher marks it with `ANTRA_DROP_TO_USER`). Plain root (a container, a
+  root login) and a daemon auto-started by a root CLI (`sudo antra run`) are
+  unchanged: they stay root, in the same paths as the CLI that started them.
 
 ## Trust Store Modifications
 

@@ -75,7 +75,10 @@ pub fn socket_path() -> PathBuf {
     // `mktemp -d` — used to make the daemon unstartable with no way out.
     // Folding the original path into a hash keeps distinct homes (and so
     // distinct daemons) from colliding on the one short name.
-    let uid = unsafe { libc::geteuid() };
+    // The user's uid, not root's, under `sudo`: the `proxy start` launcher
+    // stays root while the daemon it starts drops to the user (C27), and
+    // both — and the user's own CLI — must arrive at the same socket.
+    let uid = crate::platform::acting_uid().unwrap_or_else(|| unsafe { libc::geteuid() });
     let hash = crate::certs::fingerprint(path.to_string_lossy().as_bytes());
     PathBuf::from("/tmp")
         .join(format!("antra-{uid}"))

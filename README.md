@@ -99,6 +99,20 @@ antra trust
 
 Antra generates a local Root CA and installs it into the **system** trust store. You will be prompted. It never installs silently.
 
+### Port 443 (one-time question on first run)
+
+A URL with no port number needs port 443, and on macOS and Linux only an
+admin can open it. The first time Antra starts its proxy it asks:
+
+```text
+  Use port 443? [Y/n]
+```
+
+Say yes and `sudo` asks for your password once. The proxy opens ports 443 and
+80, **then drops admin rights** and runs as you; it stays up until you restart
+or run `antra proxy stop`, so you are not asked again. Say no and you get
+`https://myapp.localhost:8443` instead. Antra remembers either answer.
+
 ### Run anything
 
 ```bash
@@ -405,6 +419,7 @@ Antra runs as you, on your machine, and it *does* change system configuration wh
 | CA private key leak | `~/.config/antra/ca-key.pem` at `0600`, never logged, never sent over IPC |
 | Hosts-file corruption | Writes only inside a managed block, temp-file + rename |
 | Silent root-cert install | Always prompt. Always reversible via `antra trust --remove` |
+| A root process parsing TLS | Under `sudo` the proxy opens 443/80 as root, then runs as your user; no long-lived root process |
 | Orphan processes | Child in its own process group; SIGTERM then a grace period |
 | Proxy loops | `X-Antra-Hops`, 508 after 5 |
 
@@ -453,7 +468,16 @@ npm run dev -- --port 3001` works without a full path.
 | Linux ARM64 | `antra-aarch64-linux` |
 | Windows x86_64 | `antra-x86_64-windows.exe` |
 
-Privileged ports (`:80`, `:443`) need permission. On macOS / Linux that usually means running the daemon with enough rights to bind them, or changing the ports:
+Privileged ports (`:80`, `:443`) need admin rights on macOS / Linux. The
+first `antra run` offers to start the proxy with `sudo` (see
+[Port 443](#port-443-one-time-question-on-first-run)); by hand it is:
+
+```bash
+antra proxy stop && sudo antra proxy start
+```
+
+Under `sudo` the proxy opens the ports, then runs as you, with your own CA,
+socket and log. Without it, Antra falls back to `:8443`, or pick ports:
 
 ```bash
 antra proxy start --port 8443 --http-port 8080

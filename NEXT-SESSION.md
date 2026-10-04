@@ -31,27 +31,34 @@
 > `curl | bash` on a real Mac from a fresh `HOME` (A2's stall was there and
 > is still unexplained), and opening Firefox once on a Mac (never done).
 
-> **New on 2026-10-04 — read before any GTM work.** Two findings from
-> preparing the launch, both in `docs/gtm/comparison.md`:
-> - **A first run does not get the URL the README promises (ROADMAP C27).**
->   Without root the daemon cannot bind 443 and falls back to 8443, so a
->   stranger sees `https://myapp.localhost:8443`. Measured on Linux as a
->   non-root user; expected on macOS (non-root may bind < 1024 only on
->   `0.0.0.0`, and the daemon binds loopback), not measured there. **The
->   maintainer chose to fix the product before launch:** ask once on first
->   run, then hold 443. Not built — C27 lists the design points, including
->   a suspicion that `sudo antra proxy start` puts the socket under `/root`
->   on Linux. Verify that first.
+> **New on 2026-10-04 — read before any GTM work.**
+> - **C27 is built, not released:** a first run used to print
+>   `https://myapp.localhost:8443` (no root, no port 443), while every page
+>   about Antra shows the URL with no port. The maintainer chose to fix the
+>   product: the first daemon start now asks `Use port 443? [Y/n]`, runs
+>   `sudo` once, and the daemon drops to the user right after opening the
+>   ports. It also fixes the old hint `sudo antra proxy start`, which on Linux
+>   put the daemon's socket under `/root`. Branch
+>   `claude/peaceful-curie-x1xkz8`; details and evidence in ROADMAP C27.
+> - **Next, in order:** (1) the maintainer's Mac run below; (2) open a PR,
+>   CI green on all three platforms; (3) release v0.6.6 (**Releasing**
+>   below); (4) GTM.
+> - **The Mac run** — the one thing the cloud container could not do (no
+>   macOS, and no real `sudo` password prompt):
+>   1. `antra proxy stop`, then build the branch: `cargo build --release`
+>   2. `./target/release/antra run --domain hello.localhost -- python3 -m http.server 8123`
+>      → expect the question; press Enter; type the Mac password
+>   3. Expect `→ https://hello.localhost` with **no port**, and the page to
+>      load in Chrome/Safari with no warning
+>   4. `ps -o user= -p $(cat ~/Library/Application\ Support/antra/daemon.pid)`
+>      → your username, **not root**
+>   5. Ctrl+C, run step 2 again → no question, no password
+>   6. `antra proxy stop` works **without** sudo
 > - **portless has caught up** (HTTPS by default, auto-trust, 443 via
 >   `sudo`, Windows, LAN/Tailscale/ngrok sharing). What is left to Antra: no
->   Node, asks before changing anything, and the messy cases (C23–C25). The
->   README's comparison table is out of date and leaves portless out.
->
-> Building C27 in the claude.ai cloud container needs a way to run the
-> elevated path: the session that found it was refused (by the session's
-> own permission check) when it tried to give a test user `sudo` rights.
-> Ask the maintainer how they want it tested — on their Mac, or with that
-> permission granted — before starting.
+>   Node, asks before changing anything, and the messy cases (C23–C25).
+>   `docs/gtm/comparison.md` has the table; the README's comparison table is
+>   out of date and leaves portless out.
 
 Repo: `main` is the default branch; work in a feature branch.
 
