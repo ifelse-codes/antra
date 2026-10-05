@@ -42,7 +42,9 @@ Linux still warn (C19), and nothing where the user looks says so.
   `mkdir -p ~/.pki/nssdb && certutil …` line. Informational only — no
   issues/warnings push, no exit-code change. The `mkdir` is load-bearing:
   fresh machines have no nssdb and `certutil` fails with
-  `SEC_ERROR_BAD_DATABASE` (measured).
+  `SEC_ERROR_BAD_DATABASE` (measured). The probe compares the stored
+  certificate's bytes, not just the nickname, so a stale `Antra Local CA`
+  left by a rotation is not reported green.
 
 ## How it was verified
 

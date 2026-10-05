@@ -499,10 +499,15 @@ fn report_nss_trust() {
             "Install the NSS tool first: sudo apt-get install -y libnss3-tools".dimmed()
         );
     }
-    let ca_pem = dirs::config_dir()
+    println!("    {}", nss_fix_command(&ca_pem_path(&home)).cyan());
+}
+
+/// The CA certificate the NSS hint should point at.
+#[cfg(target_os = "linux")]
+fn ca_pem_path(home: &std::path::Path) -> std::path::PathBuf {
+    dirs::config_dir()
         .map(|d| d.join("antra/ca.pem"))
-        .unwrap_or_else(|| home.join(".config/antra/ca.pem"));
-    println!("    {}", nss_fix_command(&ca_pem).cyan());
+        .unwrap_or_else(|| home.join(".config/antra/ca.pem"))
 }
 
 /// The exact command that trusts `ca_pem` for Chrome/Firefox on Linux.
@@ -531,19 +536,47 @@ fn certutil_present() -> bool {
         .is_ok()
 }
 
-/// True when the user's NSS store already holds this exact CA nickname.
-/// Best-effort: any failure reads as absent and prints the fix, which is
-/// idempotent (`-A` with the same nickname errors, and then the user sees
-/// the CA is already there).
+/// True when the user's NSS store already holds this exact CA.
+///
+/// Byte comparison, not just the nickname. After a CA rotation the store can
+/// still hold a *different* `Antra Local CA`, and a name-only check would
+/// report green while every browser kept warning — the vacuous-green failure
+/// this repo's checks exist to prevent. Best-effort: any failure reads as
+/// absent and prints the fix, which is idempotent (`-A` under an existing
+/// nickname errors, and the user sees the CA is already there).
 #[cfg(target_os = "linux")]
 fn nss_contains_ca(home: &std::path::Path) -> bool {
+    let Ok(ca_pem) = std::fs::read_to_string(ca_pem_path(home)) else {
+        return false;
+    };
     let db = format!("sql:{}", home.join(".pki/nssdb").display());
-    std::process::Command::new("certutil")
-        .args(["-d", &db, "-L", "-n", "Antra Local CA"])
-        .stdout(std::process::Stdio::null())
+    let output = std::process::Command::new("certutil")
+        .args(["-d", &db, "-L", "-n", "Antra Local CA", "-a"])
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    output.status.success() && pem_payload_eq(&String::from_utf8_lossy(&output.stdout), &ca_pem)
+}
+
+/// Compare two PEM documents by their base64 payload, ignoring headers and
+/// whitespace, so line wrapping does not matter.
+///
+/// Compiled on all platforms under `test`, like `netstat_line_matches`: the
+/// parser is pure and worth testing everywhere, while `nss_contains_ca` that
+/// uses it is Linux-only.
+#[cfg(any(test, target_os = "linux"))]
+fn pem_payload_eq(a: &str, b: &str) -> bool {
+    fn payload(s: &str) -> String {
+        s.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("-----"))
+            .collect()
+    }
+    let a = payload(a);
+    !a.is_empty() && a == payload(b)
 }
 
 fn auto_fix(issues: &[(String, String)]) {
@@ -776,5 +809,41 @@ mod nss_hint_tests {
             cmd.ends_with("-i /home/alice/.config/antra/ca.pem"),
             "{cmd}"
         );
+    }
+}
+
+// `pem_payload_eq` decides whether the NSS store already holds *this* CA, so
+// a bug here would either hide the fix (false negative, harmless) or claim
+// green against a stale CA (false positive — the vacuous green the repo
+// warns about). Pure, so tested on every platform, not just Linux.
+#[cfg(test)]
+mod nss_pem_tests {
+    use super::*;
+
+    const A: &str = "-----BEGIN CERTIFICATE-----\n\
+                     QUJD\n\
+                     RUVG\n\
+                     -----END CERTIFICATE-----\n";
+    const A_REWRAPPED: &str = "-----BEGIN CERTIFICATE-----\r\nQUJ\r\nDRU\r\nVG\n\n\
+                               -----END CERTIFICATE-----";
+    const B: &str = "-----BEGIN CERTIFICATE-----\n\
+                     Rk9P\n\
+                     -----END CERTIFICATE-----\n";
+
+    #[test]
+    fn same_cert_matches_across_wrapping_and_whitespace() {
+        assert!(pem_payload_eq(A, A_REWRAPPED));
+        assert!(pem_payload_eq(A, A));
+    }
+
+    #[test]
+    fn a_different_ca_at_the_same_nickname_does_not_match() {
+        assert!(!pem_payload_eq(A, B));
+    }
+
+    #[test]
+    fn empty_or_header_only_input_never_matches() {
+        assert!(!pem_payload_eq("", ""));
+        assert!(!pem_payload_eq("-----BEGIN CERTIFICATE-----\n\n", A));
     }
 }
