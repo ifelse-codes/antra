@@ -124,6 +124,23 @@ fn remove_pending_retired_ca_from(store: &CertStore) -> Result<bool> {
     Ok(true)
 }
 
+/// Ensure the CA config dirs exist and belong to the invoking user.
+///
+/// Called after adopting the user's HOME under `sudo` (C28), before any
+/// mutating `trust` command. `CertStore::new()` creates
+/// `~/.config/antra/` and `certs/` on first use — as root, in the user's
+/// HOME, that would leave root-owned dirs behind and lock the later
+/// unprivileged CLI out of its own CA. CA *files* are already handed back
+/// by `certs::ca::atomic_write`; this covers the directories. No-op unless
+/// root under sudo (`chown_to_invoking_user` guards that itself).
+#[cfg(unix)]
+pub(crate) fn hand_back_config_dirs() -> Result<()> {
+    let store = CertStore::new()?;
+    crate::platform::chown_to_invoking_user(&store.config_dir);
+    crate::platform::chown_to_invoking_user(&store.certs_dir);
+    Ok(())
+}
+
 fn load_existing_ca() -> Result<Option<os_truststore::Cert>> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
