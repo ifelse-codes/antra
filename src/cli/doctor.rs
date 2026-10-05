@@ -96,6 +96,8 @@ pub fn execute() -> Result<()> {
     match trust::check_trust_status() {
         Ok(true) => {
             println!("  {} {}", "✓".green().bold(), "CA trusted".green());
+            #[cfg(target_os = "linux")]
+            report_nss_trust();
         }
         Ok(false) => match trust::check_user_level_trust() {
             Ok(true) => {
@@ -464,6 +466,119 @@ pub fn execute() -> Result<()> {
     Ok(())
 }
 
+/// Linux only: Chrome and Firefox read `~/.pki/nssdb`, not the system store
+/// `antra trust` writes (ROADMAP C19, kept by decision — Antra never touches
+/// the NSS store itself). A system-trusted CA still warns in those browsers,
+/// so when the system store is green, say whether the NSS store agrees and
+/// print the one-line fix when it does not.
+///
+/// Informational only: it pushes nothing to issues/warnings and changes no
+/// exit code. A permanently yellow doctor would be ignored; a pointer where
+/// the user is already looking will not be.
+#[cfg(target_os = "linux")]
+fn report_nss_trust() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    if nss_contains_ca(&home) {
+        println!(
+            "  {} {}",
+            "✓".green().bold(),
+            "CA trusted by Chrome/Firefox (NSS)".green()
+        );
+        return;
+    }
+    println!(
+        "  {} {}",
+        "•".yellow().bold(),
+        "Chrome/Firefox keep their own certificate store and still warn".yellow()
+    );
+    if !certutil_present() {
+        println!(
+            "    {}",
+            "Install the NSS tool first: sudo apt-get install -y libnss3-tools".dimmed()
+        );
+    }
+    println!("    {}", nss_fix_command(&ca_pem_path(&home)).cyan());
+}
+
+/// The CA certificate the NSS hint should point at.
+#[cfg(target_os = "linux")]
+fn ca_pem_path(home: &std::path::Path) -> std::path::PathBuf {
+    dirs::config_dir()
+        .map(|d| d.join("antra/ca.pem"))
+        .unwrap_or_else(|| home.join(".config/antra/ca.pem"))
+}
+
+/// The exact command that trusts `ca_pem` for Chrome/Firefox on Linux.
+/// Pure so the wording is pinned by a test; the probe above is verified
+/// live instead (it needs a real NSS store).
+///
+/// `mkdir -p` first: on a machine where Chrome/Firefox never ran,
+/// `~/.pki/nssdb` does not exist and `certutil -A` fails with
+/// `SEC_ERROR_BAD_DATABASE` instead of creating it.
+#[cfg(target_os = "linux")]
+fn nss_fix_command(ca_pem: &std::path::Path) -> String {
+    format!(
+        "mkdir -p ~/.pki/nssdb && certutil -d sql:$HOME/.pki/nssdb -A -t \"C,,\" -n \"Antra Local CA\" -i {}",
+        ca_pem.display()
+    )
+}
+
+/// True when `certutil` runs at all (missing tool is its own hint).
+#[cfg(target_os = "linux")]
+fn certutil_present() -> bool {
+    std::process::Command::new("certutil")
+        .arg("-H")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+}
+
+/// True when the user's NSS store already holds this exact CA.
+///
+/// Byte comparison, not just the nickname. After a CA rotation the store can
+/// still hold a *different* `Antra Local CA`, and a name-only check would
+/// report green while every browser kept warning — the vacuous-green failure
+/// this repo's checks exist to prevent. Best-effort: any failure reads as
+/// absent and prints the fix, which is idempotent (`-A` under an existing
+/// nickname errors, and the user sees the CA is already there).
+#[cfg(target_os = "linux")]
+fn nss_contains_ca(home: &std::path::Path) -> bool {
+    let Ok(ca_pem) = std::fs::read_to_string(ca_pem_path(home)) else {
+        return false;
+    };
+    let db = format!("sql:{}", home.join(".pki/nssdb").display());
+    let output = std::process::Command::new("certutil")
+        .args(["-d", &db, "-L", "-n", "Antra Local CA", "-a"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    output.status.success() && pem_payload_eq(&String::from_utf8_lossy(&output.stdout), &ca_pem)
+}
+
+/// Compare two PEM documents by their base64 payload, ignoring headers and
+/// whitespace, so line wrapping does not matter.
+///
+/// Compiled on all platforms under `test`, like `netstat_line_matches`: the
+/// parser is pure and worth testing everywhere, while `nss_contains_ca` that
+/// uses it is Linux-only.
+#[cfg(any(test, target_os = "linux"))]
+fn pem_payload_eq(a: &str, b: &str) -> bool {
+    fn payload(s: &str) -> String {
+        s.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("-----"))
+            .collect()
+    }
+    let a = payload(a);
+    !a.is_empty() && a == payload(b)
+}
+
 fn auto_fix(issues: &[(String, String)]) {
     for (issue, fix) in issues {
         println!("  {} Fixing: {}", "→".cyan(), issue);
@@ -667,5 +782,68 @@ mod windows_tests {
             1234,
             443
         ));
+    }
+}
+
+// The NSS hint is the only thing standing between a Linux user and
+// warning-free Chrome/Firefox (C19 keeps Antra from writing the store
+// itself). Pin the exact command: wrong trust flags (`-t`), a renamed
+// nickname (`-n`), or a relative CA path each make it silently useless,
+// and none of those would fail a build. Each was checked to go red.
+#[cfg(all(test, target_os = "linux"))]
+mod nss_hint_tests {
+    use super::*;
+
+    #[test]
+    fn nss_fix_command_names_store_nickname_and_ca() {
+        let cmd = nss_fix_command(std::path::Path::new("/home/alice/.config/antra/ca.pem"));
+        // Fresh machines have no ~/.pki/nssdb at all; without the mkdir the
+        // command fails with SEC_ERROR_BAD_DATABASE (measured 2026-10-05).
+        assert!(
+            cmd.starts_with("mkdir -p ~/.pki/nssdb && certutil -d sql:$HOME/.pki/nssdb"),
+            "{cmd}"
+        );
+        assert!(cmd.contains("-t \"C,,\""), "{cmd}");
+        assert!(cmd.contains("-n \"Antra Local CA\""), "{cmd}");
+        assert!(
+            cmd.ends_with("-i /home/alice/.config/antra/ca.pem"),
+            "{cmd}"
+        );
+    }
+}
+
+// `pem_payload_eq` decides whether the NSS store already holds *this* CA, so
+// a bug here would either hide the fix (false negative, harmless) or claim
+// green against a stale CA (false positive — the vacuous green the repo
+// warns about). Pure, so tested on every platform, not just Linux.
+#[cfg(test)]
+mod nss_pem_tests {
+    use super::*;
+
+    const A: &str = "-----BEGIN CERTIFICATE-----\n\
+                     QUJD\n\
+                     RUVG\n\
+                     -----END CERTIFICATE-----\n";
+    const A_REWRAPPED: &str = "-----BEGIN CERTIFICATE-----\r\nQUJ\r\nDRU\r\nVG\n\n\
+                               -----END CERTIFICATE-----";
+    const B: &str = "-----BEGIN CERTIFICATE-----\n\
+                     Rk9P\n\
+                     -----END CERTIFICATE-----\n";
+
+    #[test]
+    fn same_cert_matches_across_wrapping_and_whitespace() {
+        assert!(pem_payload_eq(A, A_REWRAPPED));
+        assert!(pem_payload_eq(A, A));
+    }
+
+    #[test]
+    fn a_different_ca_at_the_same_nickname_does_not_match() {
+        assert!(!pem_payload_eq(A, B));
+    }
+
+    #[test]
+    fn empty_or_header_only_input_never_matches() {
+        assert!(!pem_payload_eq("", ""));
+        assert!(!pem_payload_eq("-----BEGIN CERTIFICATE-----\n\n", A));
     }
 }

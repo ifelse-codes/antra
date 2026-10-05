@@ -50,7 +50,28 @@ pub(crate) fn action_for(status: bool, remove: bool, yes: bool, user_level: bool
 }
 
 pub fn execute(status: bool, remove: bool, yes: bool, user_level: bool) -> Result<()> {
-    match action_for(status, remove, yes, user_level) {
+    // Under sudo, act on the invoking user's CA, not root's (C28). `sudo`
+    // on Linux resets HOME to /root, so without this `sudo antra trust`
+    // mints a second CA under /root and installs *that* — while the user's
+    // daemon keeps serving the user's CA and `trust --status` stays red.
+    // Before anything else: it sets environment variables, and no thread
+    // exists yet (same rule as `proxy start` under C27).
+    #[cfg(unix)]
+    let invoking = crate::platform::sudo::invoking_user();
+    #[cfg(unix)]
+    if let Some(user) = &invoking {
+        crate::platform::sudo::adopt_invoking_user_paths(user);
+    }
+
+    let action = action_for(status, remove, yes, user_level);
+    // Only a root process acting for someone else leaves root-owned config
+    // dirs behind; a normal run already owns them and must not gain a new
+    // way to fail here. Status only reads, so it takes no state either.
+    #[cfg(unix)]
+    if invoking.is_some() && action != TrustAction::Status {
+        crate::trust::hand_back_config_dirs()?;
+    }
+    match action {
         TrustAction::Status => show_status(),
         TrustAction::RemovePrompted => {
             println!("{}", "ANTRA TRUST — Remove".bold());
