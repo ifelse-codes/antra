@@ -44,6 +44,17 @@
 > real Mac). Bonus: `antra-intro.html` (animated product intro) and
 > `antra-intro-demo.mp4`. Next: run Check 1, then push/PR when ready to go live.
 
+> **Session close 2026-10-06 (this session):** PR **#69** reviewed and merged
+> to `main` — the **C28** fix (`sudo antra trust` minted root's CA on Linux, so
+> `trust --status` stayed red and no documented path succeeded; trust now
+> adopts the invoking user's paths under sudo, the C27 pattern). The review
+> also gated the config hand-back to sudo, wrote the `.leaf-version` marker
+> through `atomic_write`, and made `doctor`'s Linux NSS hint compare the CA by
+> bytes. **C28 is unreleased** and ships with the next release — none is
+> planned (maintainer, 2026-10-06). GTM materials (**#68**) are merged. What
+> remains: **Check 1** (one manual `curl | bash` on a real Mac) and the go-live
+> announcement. `AGENT.md` current-state and ROADMAP C28 are in sync.
+
 > **New on 2026-10-04 — read before any GTM work.**
 > - **C27 shipped in v0.6.6.** A first run used to print
 >   `https://myapp.localhost:8443` (no root, no port 443), while every page

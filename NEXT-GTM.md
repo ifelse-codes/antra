@@ -8,16 +8,19 @@
 > `SKILL.md` from `~/.omp/agent/skills/darshan-npt/`) like the user did this
 > session — the agent should read the skill first and follow it for every reply.
 
-## ✅ STATUS 2026-10-04 — session closed: lanes finalized, shipped, committed
+## ✅ STATUS 2026-10-06 — GTM materials merged; only the human steps remain
 
 Read this first, then the job below it.
 
-**This session (closed 2026-10-04):** the three lanes are done and committed on
-branch `gtm/launch-final` (not pushed). Launch post voice-reviewed; comparison
-with portless shipped to `README.md` + `landing/index.html` + the post; runbook
-reviewed (Check 2 closed). `LICENSE` added. Bonus: `antra-intro.html` (animated
-product intro) + `antra-intro-demo.mp4`. Remaining: Check 1 (one manual
-`curl | bash` on a real Mac) and the push/PR — a person presses go.
+**The GTM work is on `main`.** PR **#68** (`gtm/launch-final`) merged on
+2026-10-04: launch post voice-reviewed; comparison with portless in `README.md`
++ `landing/index.html` + the post; runbook reviewed (Check 2 closed); `LICENSE`
+added; bonus `antra-intro.html` (animated product intro) +
+`antra-intro-demo.mp4`. Also merged 2026-10-06: **#69**, the C28 fix (`sudo
+antra trust` installed root's CA on Linux — ROADMAP C28). It is **unreleased**
+and ships with the next release, whenever a person cuts one. **Remaining:
+Check 1** (one manual `curl | bash` on a real Mac from a fresh `HOME`) and the
+go-live announcement — a person presses go.
 
 `launch/` now holds the three deliverables, drafted and fact-checked:
 
@@ -59,10 +62,11 @@ than by eye. **C19 is Linux-only. This Mac is done; nothing is owed here.**
 
 ## One job
 
-**Get Antra to market.** The product is done (v0.6.6, published 2026-10-04);
-the launch materials are drafted, voice-reviewed and shipped. What remains:
-run **Check 1** (one manual `curl | bash` on a real Mac — see the runbook) and,
-when a person is ready to go live, push branch `gtm/launch-final`.
+**Get Antra to market.** The product is done (v0.6.6 published 2026-10-04;
+C28 merged unreleased 2026-10-06), and the launch materials are merged (PR
+#68). What remains: run **Check 1** (one manual `curl | bash` on a real Mac —
+see the runbook) and, when a person is ready, post the launch (a person
+presses go). No release is planned yet.
 
 ## Project state (so you don't re-derive it)
 
@@ -92,9 +96,9 @@ when a person is ready to go live, push branch `gtm/launch-final`.
    opening Firefox once on a Mac. **The Firefox half is now closed and green;
    only the installer half is outstanding.**
 
-All three are finalized as of 2026-10-04. What remains: **Check 1** (one manual
-`curl | bash` on a real Mac), and the push/PR of branch `gtm/launch-final`.
-LICENSE is done.
+All three are finalized as of 2026-10-04 and merged (PR #68). What remains:
+**Check 1** (one manual `curl | bash` on a real Mac) and the go-live
+announcement. LICENSE is done. No release is planned yet.
 
 ## How to interact this session
 
