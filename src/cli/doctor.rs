@@ -750,13 +750,17 @@ mod windows_tests {
             443
         ));
     }
+}
 
-    // The NSS hint is the only thing standing between a Linux user and
-    // warning-free Chrome/Firefox (C19 keeps Antra from writing the store
-    // itself). Pin the exact command: wrong trust flags (`-t`), a renamed
-    // nickname (`-n`), or a relative CA path each make it silently useless,
-    // and none of those would fail a build. Each was checked to go red.
-    #[cfg(target_os = "linux")]
+// The NSS hint is the only thing standing between a Linux user and
+// warning-free Chrome/Firefox (C19 keeps Antra from writing the store
+// itself). Pin the exact command: wrong trust flags (`-t`), a renamed
+// nickname (`-n`), or a relative CA path each make it silently useless,
+// and none of those would fail a build. Each was checked to go red.
+#[cfg(all(test, target_os = "linux"))]
+mod nss_hint_tests {
+    use super::*;
+
     #[test]
     fn nss_fix_command_names_store_nickname_and_ca() {
         let cmd = nss_fix_command(std::path::Path::new("/home/alice/.config/antra/ca.pem"));

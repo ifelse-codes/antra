@@ -340,7 +340,13 @@ fn ensure_leaf_version(certs_dir: &Path, ca_pem: Option<&str>) -> Result<()> {
             }
         }
     }
-    std::fs::write(&marker, expected)?;
+    // `atomic_write`, not `fs::write`: under `sudo antra trust` this runs as
+    // root in the user's config dir (C28). A plain write would leave the
+    // marker root-owned, and the next *unprivileged* rotation could not
+    // truncate it — the same lock-out class C28 fixes for the dirs.
+    // `atomic_write` replaces by rename (needs only dir write) and hands the
+    // file back to the invoking user.
+    ca::atomic_write(&marker, expected.as_bytes(), None)?;
     Ok(())
 }
 

@@ -32,6 +32,11 @@ Linux still warn (C19), and nothing where the user looks says so.
   `trust::hand_back_config_dirs` chowns `~/.config/antra/` + `certs/` back —
   CA files were already handed back by `atomic_write`; the directories were
   not, which would have locked the next unprivileged run out of its own CA.
+  The hand-back only runs under `sudo` (a normal run already owns its dirs and
+  must not gain a new way to fail there), and the cert-cache marker
+  (`.leaf-version`) is now written through `atomic_write` too, so a
+  root-written marker is handed back and replaced by rename rather than left
+  root-owned for a later rotation to trip over.
 - **P1:** `doctor` on Linux now reports the NSS gap at the point of success:
   `✓ CA trusted by Chrome/Firefox (NSS)`, or a copy-paste
   `mkdir -p ~/.pki/nssdb && certutil …` line. Informational only — no
