@@ -2,3 +2,4 @@
 .lyzo/
 .wrangler/
 landing/.wrangler/
+.DS_Store
