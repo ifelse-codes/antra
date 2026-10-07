@@ -55,8 +55,14 @@
 > old giant caps removed. Verified with Playwright stills (all seven scenes),
 > reduced-motion static, no console errors; `antra-intro-demo.{mp4,webm}`
 > re-recorded from the rebuilt film. Asset-only — no product code, no release
-> impact. Merged by the maintainer the same session. Next session: Check 1 +
-> go-live as already planned. **Owed: nothing for the intro film.**
+> impact. Merged by the maintainer the same session. **Soft launch posted the
+> same day** — LinkedIn
+> `urn:li:ugcPost:7513444740139524096` (text + `antra-intro-demo.mp4` attached,
+> short link `lnkd.in/euBjH4tN`; landing, repo and install.sh all verified 200).
+> The post copy and the three-line `Repo:` / `Docs:` / `Install:` comment are in
+> `launch/linkedin-soft-launch.md`. Next session: reply to comments (the first
+> hour carries the reach), then Check 1 + go-live as already planned.
+> **Owed: nothing for the intro film.**
 
 > **Session close 2026-10-06 (this session):** PR **#69** reviewed and merged
 > to `main` — the **C28** fix (`sudo antra trust` minted root's CA on Linux, so
