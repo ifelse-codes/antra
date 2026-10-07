@@ -45,8 +45,8 @@
 > `antra-intro-demo.mp4`. Next: run Check 1, then push/PR when ready to go live.
 
 > **Session close 2026-10-07 (this session):** `antra-intro.html` rebuilt for
-> dot clarity on branch `antra/wordmark-film-cleanup` — **PR #70** (open, not
-> merged). The old film bunched its particles: text-pixel sampling and random
+> dot clarity on `antra/wordmark-film-cleanup` — **PR #70, MERGED to `main`**
+> 2026-10-07 (squash `0250d21`). The old film bunched its particles: text-pixel sampling and random
 > disc fills stacked dots on the same spot, so the wordmark read as blobs.
 > The rebuild follows the chitra film's lead: every layout is an evenly spaced
 > lattice/ring/dotted line; the wordmark is a local 5×7 pixel letterform
@@ -55,8 +55,8 @@
 > old giant caps removed. Verified with Playwright stills (all seven scenes),
 > reduced-motion static, no console errors; `antra-intro-demo.{mp4,webm}`
 > re-recorded from the rebuilt film. Asset-only — no product code, no release
-> impact. Next session: merge #70 after a look, then Check 1 + go-live as
-> already planned.
+> impact. Merged by the maintainer the same session. Next session: Check 1 +
+> go-live as already planned. **Owed: nothing for the intro film.**
 
 > **Session close 2026-10-06 (this session):** PR **#69** reviewed and merged
 > to `main` — the **C28** fix (`sudo antra trust` minted root's CA on Linux, so
