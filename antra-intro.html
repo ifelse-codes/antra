@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="antra — stable https domains for local development. A self-contained particle identity film.">
+  <title>antra — stable https domains for local development</title>
+  <link rel="icon" href="data:,">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0A0A0C; }
+    body { display: grid; place-items: center; }
+    canvas { display: block; width: 100%; height: 100%; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <canvas id="film" role="img" aria-label="antra: your dev server is stuck at localhost:5173, one command, a real url, a daemon routes each domain to the right port, antra run --domain myapp.localhost, https, ports, hmr, one real yours, stable https domains for local development."></canvas>
+  <p class="sr-only">antra is a tool that provides stable https domains for local development. This 35-second film features seven scenes and loops automatically. With reduced motion enabled, it displays a static brand composition.</p>
+  <script>
+  (() => {
+    'use strict';
+
+    /* BRAND / RESEARCH -------------------------------------------------------
+       Antra — stable https domains for local development.
+       Hero: one command. a real url.
+       Primary accent: violet #8b7cf6; bright #b7aeff.
+       Film background: #0A0A0C, a top-centred violet radial glow,
+       and a 32px horizontal/vertical hairline grid.
+       Film benefits: stable https domains; one command; daemon routing.
+       v2 — cleaned dot discipline, after the chitra film's lead: every
+       layout is an evenly spaced dot lattice, ring, or dotted line, the
+       wordmark is a local 5x7 pixel letterform (deterministic across
+       system fonts), and glow is capped at 0.85 so dots never merge
+       into blobs.
+    ------------------------------------------------------------------------ */
+    const BRAND = Object.freeze({
+      name: 'antra',
+      accent: '#8b7cf6',
+      tagline: 'stable https domains for local development',
+      background: '#0A0A0C',
+      surface: '#0d0a14',
+      white: '#f2f6ff',
+      quiet: '#a4a4ae'
+    });
+    const W = 1000, H = 600, COUNT = 240, TAU = Math.PI * 2;
+    const FONT = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace';
+    const TYPED_COMMAND = 'antra run --domain myapp.localhost';
+    const TYPE_START = 0.9, TYPE_RATE = 9;
+    const TYPE_END = TYPE_START + TYPED_COMMAND.length / TYPE_RATE;
+    const canvas = document.getElementById('film');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reduced = motion.matches;
+
+    // DETERMINISTIC RANDOM / MATH --------------------------------------------
+    function mulberry32(seed) {
+      return () => {
+        let t = seed += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    const clamp01 = v => Math.max(0, Math.min(1, v));
+    function smoothstep(a, b, v) {
+      const t = clamp01((v - a) / (b - a));
+      return t * t * (3 - 2 * t);
+    }
+    function envelope(t, duration, start = 0.65, end = 0.65) {
+      return smoothstep(start, start + 0.6, t) * (1 - smoothstep(duration - end - 0.5, duration - end, t));
+    }
+    function target(x, y, glow = 0.6, accent = 0) { return { x, y, glow, accent }; }
+
+    // EXPLICIT TARGET GENERATORS — all run once, before playback -------------
+    // Every generator returns exactly COUNT targets with comfortable, even
+    // spacing: a jittered lattice for the unstructured field, dotted rings
+    // and dotted lines for the diagrams, a pixel-grid letterform for the
+    // wordmark. No random disc fills, no text-pixel sampling, no overlaps.
+    function makeChaosTargets() {
+      const rand = mulberry32(0x414E5452);
+      const result = [];
+      // Jittered cells give the unstructured data room without clumping.
+      for (let i = 0; i < COUNT; i++) {
+        const col = i % 20, row = Math.floor(i / 20);
+        result.push(target(108 + col * 41.3 + (rand() - 0.5) * 34,
+          120 + row * 31.6 + (rand() - 0.5) * 26, 0.10 + rand() * 0.26));
+      }
+      return result;
+    }
+    function makeWordmarkTargets(cx = 500, cy = 265) {
+      // Local lowercase pixel letterforms: deterministic across system fonts.
+      // The form is a terminal-style spelling of the exact lowercase brand;
+      // the leading 'a' carries the violet accent, as on the site. Each
+      // glyph cell holds exactly four dots on a tight 2x2 sub-grid, so the
+      // letters read as crisp pixels, not clumps; a dotted violet underline
+      // (the cursor beam) grounds the word and takes the remaining dots.
+      const letters = {
+        a: ['00000','00000','01110','00001','01111','10001','01111'],
+        n: ['00000','00000','01110','10001','10001','10001','10001'],
+        t: ['00100','00100','11111','00100','00100','00101','00010'],
+        r: ['00000','00000','10110','11001','10000','10000','10000']
+      };
+      const word = BRAND.name, advance = 66, pitch = 11;
+      const rows = 7, height = rows * pitch;
+      const x0 = cx - (advance * (word.length - 1) + 5 * pitch) / 2, y0 = cy - height / 2;
+      const cells = [];
+      for (let l = 0; l < word.length; l++) {
+        const glyph = letters[word[l]];
+        for (let y = 0; y < rows; y++) for (let x = 0; x < 5; x++) {
+          if (glyph[y][x] === '1') {
+            cells.push({ x: x0 + l * advance + x * pitch, y: y0 + y * pitch, accent: l === 0 ? 1 : 0 });
+          }
+        }
+      }
+      const sub = [[-3, -3], [3, -3], [-3, 3], [3, 3]];
+      const result = [];
+      for (const cell of cells) {
+        for (const off of sub) {
+          // One shared half-pitch lattice: adjacent cells' dots align into
+          // continuous strokes, so letters read as a clean bitmap.
+          result.push(target(cell.x + off[0], cell.y + off[1],
+            cell.accent ? 0.72 : 0.5, cell.accent));
+        }
+      }
+      const beamX0 = x0 - 26, beamX1 = x0 + (word.length - 1) * advance + 5 * pitch + 26;
+      const beamY = y0 + height + 26, beamN = COUNT - result.length;
+      for (let i = 0; i < beamN; i++) {
+        const f = beamN === 1 ? 0.5 : i / (beamN - 1);
+        const wee = 1 - Math.abs(f - 0.5) * 2;
+        result.push(target(beamX0 + (beamX1 - beamX0) * f, beamY,
+          0.34 + wee * 0.34, 1));
+      }
+      return result;
+    }
+    function samplePolyline(points, count, glow = 0.7) {
+      // Evenly spaced dots along a path, arc-length sampled.
+      const lengths = [], result = [];
+      let total = 0;
+      for (let i = 1; i < points.length; i++) {
+        total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+        lengths.push(total);
+      }
+      let segment = 0;
+      for (let i = 0; i < count; i++) {
+        const distance = i / Math.max(1, count - 1) * total;
+        while (segment < lengths.length - 1 && distance > lengths[segment]) segment++;
+        const a = points[segment], b = points[segment + 1];
+        const prior = segment ? lengths[segment - 1] : 0;
+        const length = lengths[segment] - prior;
+        const f = length ? (distance - prior) / length : 0;
+        result.push(target(a[0] + (b[0] - a[0]) * f,
+          a[1] + (b[1] - a[1]) * f, glow - (i % 5) * 0.026));
+      }
+      return result;
+    }
+    function dotRing(cx, cy, r, n, glow, accent = 0, phase = -Math.PI / 2) {
+      const o = [];
+      for (let i = 0; i < n; i++) {
+        const a = phase + i / n * TAU;
+        o.push(target(cx + Math.cos(a) * r, cy + Math.sin(a) * r, glow - (i % 4) * 0.03, accent));
+      }
+      return o;
+    }
+    function dotLattice(cx, cy, pitch, half, glow, accent = 0) {
+      const o = [];
+      for (let gy = -half; gy <= half; gy += pitch) {
+        for (let gx = -half; gx <= half; gx += pitch) {
+          o.push(target(cx + gx, cy + gy, glow - ((gx + gy) / pitch % 3 + 3) % 3 * 0.03, accent));
+        }
+      }
+      return o;
+    }
+    function roundedRectPolyline(x0, y0, x1, y1, r) {
+      const pts = [];
+      const seg = (ax, ay, bx, by) => {
+        const n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / 4));
+        for (let i = 0; i < n; i++) pts.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n]);
+      };
+      const arc = (cx, cy, a0, a1) => {
+        const n = Math.max(1, Math.round(r * (a1 - a0) / 4));
+        for (let i = 0; i <= n; i++) {
+          const a = a0 + (a1 - a0) * i / n;
+          pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+        }
+      };
+      seg(x0 + r, y0, x1 - r, y0);
+      arc(x1 - r, y0 + r, -Math.PI / 2, 0);
+      seg(x1, y0 + r, x1, y1 - r);
+      arc(x1 - r, y1 - r, 0, Math.PI / 2);
+      seg(x1 - r, y1, x0 + r, y1);
+      arc(x0 + r, y1 - r, Math.PI / 2, Math.PI);
+      seg(x0, y1 - r, x0, y0 + r);
+      arc(x0 + r, y0 + r, Math.PI, Math.PI * 1.5);
+      return pts;
+    }
+    function exact(pts, label) {
+      if (pts.length !== COUNT) throw new Error(`${label}: needs ${COUNT} targets, got ${pts.length}.`);
+      return pts;
+    }
+    const chaos = makeChaosTargets();
+    const logo = matchTargetsBuilder(chaos, makeWordmarkTargets(), 'logo');
+    const flow = matchTargetsBuilder(logo, makeFlowTargets(), 'flow');
+    const detail = matchTargetsBuilder(flow, makeCommandTargets(), 'detail');
+    const branch = matchTargetsBuilder(detail, makeBranchTargets(), 'branch');
+    const payoff = matchTargetsBuilder(branch, makeWordmarkTargets(), 'payoff');
+    const resolve = payoff; // the closing wordmark is the same composition
+    function matchTargetsBuilder(previous, raw, label) {
+      // A once-only nearest-neighbour assignment limits needless crossings;
+      // particle indices remain stable for every subsequent loop.
+      if (raw.length !== COUNT) throw new Error(`${label}: every layout must contain ${COUNT} targets.`);
+      const used = new Uint8Array(COUNT), result = new Array(COUNT);
+      for (let i = 0; i < COUNT; i++) {
+        let nearest = -1, best = Infinity;
+        for (let j = 0; j < COUNT; j++) {
+          if (used[j]) continue;
+          const dx = previous[i].x - raw[j].x, dy = previous[i].y - raw[j].y;
+          const d = dx * dx + dy * dy;
+          if (d < best) { nearest = j; best = d; }
+        }
+        used[nearest] = 1;
+        result[i] = raw[nearest];
+      }
+      return result;
+    }
+    function makeFlowTargets() {
+      const rand = mulberry32(0x464C4F57);
+      let pts = [];
+      // The domain line, the daemon (ring + violet core), three routed ports.
+      pts = pts.concat(samplePolyline([[370, 150], [630, 150]], 28, 0.46));
+      pts = pts.concat(samplePolyline([[500, 160], [500, 232]], 9, 0.3));
+      pts = pts.concat(dotRing(500, 312, 74, 66, 0.56));
+      pts = pts.concat(dotLattice(500, 312, 8, 16, 0.82, 1));
+      pts = pts.concat(samplePolyline([[500, 392], [280, 432]], 18, 0.28));
+      pts = pts.concat(samplePolyline([[500, 392], [500, 430]], 7, 0.28));
+      pts = pts.concat(samplePolyline([[500, 392], [720, 432]], 18, 0.28));
+      pts = pts.concat(dotRing(280, 462, 24, 23, 0.52));
+      pts = pts.concat(dotRing(500, 462, 24, 23, 0.52));
+      pts = pts.concat(dotRing(720, 462, 24, 23, 0.52));
+      return exact(pts, 'flow');
+    }
+    function makeCommandTargets() {
+      // A fine dotted terminal frame around the typed command, and a violet
+      // underline that grounds the resolved https URL.
+      const frame = samplePolyline(roundedRectPolyline(252, 252, 748, 420, 14), 204, 0.44);
+      const underline = samplePolyline([[381, 398], [629, 398]], 36, 0.8)
+        .map(t => ({ x: t.x, y: t.y, glow: t.glow, accent: 1 }));
+      return exact(frame.concat(underline), 'detail');
+    }
+    function makeBranchTargets() {
+      let pts = [];
+      // Three specimen rings: https (accent) above, ports and hmr below,
+      // joined by dotted connectors the pool itself draws.
+      pts = pts.concat(dotRing(500, 170, 31, 45, 0.62, 1));
+      pts = pts.concat(dotRing(295, 404, 31, 45, 0.58));
+      pts = pts.concat(dotRing(705, 404, 31, 45, 0.58));
+      pts = pts.concat(dotLattice(500, 170, 9, 9, 0.42, 1));
+      pts = pts.concat(dotLattice(295, 404, 9, 9, 0.42));
+      pts = pts.concat(dotLattice(705, 404, 9, 9, 0.42));
+      pts = pts.concat(samplePolyline([[500, 208], [295, 366]], 17, 0.3));
+      pts = pts.concat(samplePolyline([[500, 208], [705, 366]], 17, 0.3));
+      pts = pts.concat(samplePolyline([[295, 442], [705, 442]], 44, 0.3));
+      return exact(pts, 'branch');
+    }
+
+    // ONE PERSISTENT PARTICLE POOL -------------------------------------------
+    const seeds = mulberry32(0x616E7472);
+    const particles = chaos.map((p, i) => ({
+      id: i, x: p.x, y: p.y, tx: p.x, ty: p.y,
+      glow: p.glow, targetGlow: p.glow,
+      accent: 0, targetAccent: 0,
+      phase: seeds() * TAU, driftSeed: 0.6 + seeds() * 0.7,
+      alpha: 0.76 + seeds() * 0.24
+    }));
+
+    // TIMELINE / SCENE METADATA ----------------------------------------------
+    const scenes = [
+      { name: 'CHAOS',     duration: 4.5, layout: chaos,  caption: 'your dev server is stuck at localhost:5173' },
+      { name: 'IDENTITY',  duration: 5,   layout: logo,   caption: 'one command. a real url.' },
+      { name: 'MECHANISM', duration: 5,   layout: flow,   caption: 'a daemon routes each domain to the right port' },
+      { name: 'COMMAND',   duration: 7,   layout: detail, caption: '' },
+      { name: 'BRANCH',    duration: 5,   layout: branch, caption: '' },
+      { name: 'PAYOFF',    duration: 5,   layout: payoff, caption: '' },
+      { name: 'RESOLVE',   duration: 4,   layout: resolve, caption: BRAND.tagline }
+    ];
+    let total = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      scenes[i].start = total;
+      scenes[i].chapter = `0${i + 1} / 07 — ${scenes[i].name}`;
+      total += scenes[i].duration;
+    }
+    const DURATION = total; // 35.5 seconds
+    let elapsed = 0, last = performance.now(), raf = 0;
+
+    // CACHED SPRITES / BACKGROUND --------------------------------------------
+    function makeSurface(w, h) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h; return c;
+    }
+    function sprite(color, halo) {
+      const c = makeSurface(64, 64), g = c.getContext('2d');
+      if (halo) {
+        const gradient = g.createRadialGradient(32, 32, 1, 32, 32, 30);
+        gradient.addColorStop(0, color + '38');
+        gradient.addColorStop(0.24, color + '15');
+        gradient.addColorStop(0.65, color + '05');
+        gradient.addColorStop(1, color + '00');
+        g.fillStyle = gradient; g.fillRect(0, 0, 64, 64);
+      } else {
+        g.fillStyle = color; g.beginPath(); g.arc(32, 32, 22, 0, TAU); g.fill();
+      }
+      return c;
+    }
+    const sprites = {
+      dot: sprite(BRAND.white, false), halo: sprite(BRAND.white, true),
+      accent: sprite(BRAND.accent, false), accentHalo: sprite(BRAND.accent, true)
+    };
+    const atmosphere = makeSurface(W * 2, H * 2);
+    {
+      const g = atmosphere.getContext('2d'); g.scale(2, 2);
+      g.fillStyle = BRAND.background; g.fillRect(0, 0, W, H);
+      const purpleGradient = g.createLinearGradient(0, 0, 0, H);
+      purpleGradient.addColorStop(0, BRAND.surface);
+      purpleGradient.addColorStop(0.55, '#08060e');
+      purpleGradient.addColorStop(1, BRAND.background);
+      g.fillStyle = purpleGradient; g.fillRect(0, 0, W, H);
+      const violetGlow = g.createRadialGradient(500, -95, 0, 500, -95, 720);
+      violetGlow.addColorStop(0, BRAND.accent + '0b');
+      violetGlow.addColorStop(0.55, BRAND.accent + '03');
+      violetGlow.addColorStop(1, BRAND.accent + '00');
+      g.fillStyle = violetGlow; g.fillRect(0, 0, W, H);
+      g.fillStyle = 'rgba(242,246,255,0.008)';
+      for (let x = 32; x < W; x += 32) g.fillRect(x, 0, 1, H);
+      for (let y = 32; y < H; y += 32) g.fillRect(0, y, W, 1);
+      g.fillStyle = 'rgba(183,174,255,0.014)';
+      for (let y = 32; y < H; y += 32) for (let x = 32; x < W; x += 32) g.fillRect(x, y, 1, 1);
+    }
+
+    // VIEWPORT — proportional letterboxing, Retina backing store -------------
+    let viewWidth = 0, viewHeight = 0, dpr = 1, scale = 1, offsetX = 0, offsetY = 0;
+    function resize() {
+      viewWidth = window.innerWidth; viewHeight = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      scale = Math.min(viewWidth / W, viewHeight / H);
+      offsetX = (viewWidth - W * scale) / 2;
+      offsetY = (viewHeight - H * scale) / 2;
+      canvas.width = Math.round(viewWidth * dpr);
+      canvas.height = Math.round(viewHeight * dpr);
+      if (reduced) renderStatic();
+    }
+
+    // TEXT LAYOUT CACHE — measured only during initialization ----------------
+    const textCache = new Map();
+    function prepareText(text, size = 11, tracking = 0, weight = 400) {
+      const key = `${size}/${tracking}/${weight}/${text}`;
+      if (textCache.has(key)) return textCache.get(key);
+      const font = `${weight} ${size}px ${FONT}`;
+      ctx.font = font;
+      const chars = [...text], offsets = new Float32Array(chars.length);
+      let width = 0;
+      for (let i = 0; i < chars.length; i++) {
+        offsets[i] = width;
+        width += ctx.measureText(chars[i]).width + tracking;
+      }
+      width = Math.max(0, width - tracking);
+      const item = { text, chars, offsets, width, font };
+      textCache.set(key, item); return item;
+    }
+    function drawTrackedText(item, x, y, alpha = 1, color = BRAND.white, align = 'center') {
+      if (alpha < 0.002) return;
+      ctx.globalAlpha = alpha; ctx.fillStyle = color;
+      ctx.font = item.font; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const left = align === 'center' ? x - item.width / 2 : align === 'right' ? x - item.width : x;
+      for (let i = 0; i < item.chars.length; i++) ctx.fillText(item.chars[i], left + item.offsets[i], y);
+    }
+    const text = {
+      smallBrand: prepareText('ANTRA / STABLE HTTPS DOMAINS', 9, 1.7),
+      domain: prepareText('myapp.localhost', 10, 1.6),
+      portNums: ['5173', '3000', '8080'].map(v => prepareText(v, 10, 0.5)),
+      url: prepareText('https://myapp.localhost', 18, 0),
+      https: prepareText('https', 15, 0),
+      ports: prepareText('ports', 15, 0),
+      hmr: prepareText('hmr', 15, 0),
+      tagline: prepareText(BRAND.tagline, 15, 0.3),
+      staticChapter: prepareText('ANTRA / STABLE HTTPS DOMAINS', 9, 1.6),
+      captions: scenes.map(s => prepareText(s.caption, 12, 0.25)),
+      chapters: scenes.map(s => prepareText(s.chapter, 9, 1.5))
+    };
+    const payoffRow = ['one', 'real', 'yours'].map(w => prepareText(w, 20, 6, 500));
+
+    // SCENE OVERLAYS — restrained chart notation, no extra particle systems --
+    function drawCheck(x, y, size, alpha) {
+      ctx.globalAlpha = alpha; ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 3;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x - size * 0.5, y);
+      ctx.lineTo(x - size * 0.16, y + size * 0.34);
+      ctx.lineTo(x + size * 0.56, y - size * 0.36);
+      ctx.stroke();
+    }
+    function drawShockwave(cx, cy, radius, maxRadius, alpha) {
+      if (alpha < 0.002) return;
+      const p = (radius - 120) / (maxRadius - 120);
+      ctx.globalAlpha = alpha * (1 - p); ctx.strokeStyle = '#b7aeff';
+      ctx.lineWidth = 1.5 * (1 - p) + 0.5;
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, TAU); ctx.stroke();
+    }
+    function drawTyping(local, alpha) {
+      const typed = Math.max(0, Math.min(TYPED_COMMAND.length, Math.floor((local - TYPE_START) * TYPE_RATE)));
+      ctx.globalAlpha = alpha; ctx.fillStyle = BRAND.accent;
+      ctx.font = '500 16px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText('$', 296, 300);
+      ctx.fillStyle = BRAND.white;
+      const shown = TYPED_COMMAND.slice(0, typed);
+      ctx.fillText(shown, 320, 300);
+      if (local >= TYPE_START && local < TYPE_END + 0.55) {
+        const blink = Math.sin((local - TYPE_START) * TAU * 1.25) > -0.3 ? 1 : 0;
+        ctx.globalAlpha = alpha * blink * 0.8; ctx.fillStyle = BRAND.white;
+        ctx.fillRect(320 + ctx.measureText(shown).width, 291, 2, 18);
+      }
+    }
+    function drawURL(local, alpha) {
+      // The resolved https URL pops once the command has finished typing.
+      const urlA = smoothstep(TYPE_END + 0.15, TYPE_END + 0.75, local) *
+        (1 - smoothstep(6.4, 6.85, local));
+      if (urlA < 0.002) return;
+      const pop = smoothstep(TYPE_END + 0.15, TYPE_END + 0.5, local);
+      const sz = 22 * (1 + 0.5 * (1 - pop));
+      const glowA = urlA * (1 - pop) * 0.5;
+      if (glowA > 0) {
+        ctx.globalAlpha = glowA;
+        ctx.drawImage(sprites.accentHalo, 340 - 30, 372 - 30, 60, 60);
+      }
+      drawCheck(340, 372, sz, urlA);
+      drawTrackedText(text.url, 505, 372, urlA, '#b7aeff');
+    }
+    function drawPayoff(alpha, local) {
+      if (alpha < 0.002) return;
+      // The payoff keeps the brand's lowercase voice: one · real · yours,
+      // revealed in rhythm, with 'real' carrying the violet accent.
+      const beats = [0.9, 1.2, 1.5];
+      const cx = [332, 492, 652];
+      const colors = [BRAND.white, '#b7aeff', BRAND.white];
+      for (let i = 0; i < 3; i++) {
+        drawTrackedText(payoffRow[i], cx[i], 434,
+          smoothstep(beats[i], beats[i] + 0.5, local) * alpha * 0.88, colors[i]);
+      }
+      const sep = smoothstep(1.05, 1.65, local) * alpha * 0.16;
+      if (sep > 0.002) {
+        ctx.strokeStyle = BRAND.white; ctx.lineWidth = 1;
+        for (const x of [408, 568]) {
+          ctx.globalAlpha = sep;
+          ctx.beginPath(); ctx.moveTo(x, 425); ctx.lineTo(x, 443); ctx.stroke();
+        }
+      }
+    }
+    function drawSceneOverlays(index, local) {
+      const scene = scenes[index], alpha = envelope(local, scene.duration);
+      if (index === 0) {
+        // Caption drawn at bottom
+      } else if (index === 1) {
+        const pulse = clamp01((local - 0.9) / 1.7);
+        if (pulse > 0 && pulse < 1) {
+          ctx.globalAlpha = Math.sin(pulse * Math.PI) * 0.14 * alpha;
+          ctx.strokeStyle = BRAND.white; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(500, 265, 138 + pulse * 26, 0, TAU); ctx.stroke();
+        }
+      } else if (index === 2) {
+        drawTrackedText(text.domain, 500, 128, alpha * 0.5);
+        for (let i = 0; i < 3; i++) drawTrackedText(text.portNums[i], 280 + i * 220, 462, alpha * 0.6);
+      } else if (index === 3) {
+        drawTyping(local, alpha);
+        drawURL(local, alpha);
+      } else if (index === 4) {
+        drawTrackedText(text.https, 500, 127, alpha * 0.63, '#b7aeff');
+        drawTrackedText(text.ports, 295, 459, alpha * 0.63, BRAND.quiet);
+        drawTrackedText(text.hmr, 705, 459, alpha * 0.63, BRAND.quiet);
+      } else if (index === 5) {
+        drawPayoff(alpha, local);
+        const lt = local - 0.7;
+        if (lt >= 0 && lt < 0.7) drawShockwave(500, 265, 120 + lt / 0.7 * 210, 330, 0.5 * (1 - lt / 0.7) * alpha);
+      } else {
+        const ta = smoothstep(1.0, 1.6, local) * (1 - smoothstep(2.7, 3.0, local));
+        drawTrackedText(text.tagline, 500, 385, ta * 0.63, '#9b95ad');
+        const lt = local - 0.7;
+        if (lt >= 0 && lt < 0.7) drawShockwave(500, 265, 120 + lt / 0.7 * 210, 330, 0.5 * (1 - lt / 0.7) * alpha);
+      }
+      if (index < 5) drawTrackedText(text.captions[index], 500, 497, alpha * 0.63, BRAND.quiet);
+    }
+
+    // RENDERING --------------------------------------------------------------
+    function beginFrame() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+      ctx.fillStyle = BRAND.background; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offsetX, dpr * offsetY);
+      ctx.drawImage(atmosphere, 0, 0, W, H);
+    }
+    function drawParticles() {
+      for (let i = 0; i < COUNT; i++) {
+        const p = particles[i], glow = p.glow;
+        const size = 1.9 + glow * 2.6, alpha = (0.32 + glow * 0.66) * p.alpha;
+        if (glow > 0.62) {
+          const haloSize = 11 + glow * 9;
+          ctx.globalAlpha = (glow - 0.62) * 0.85 * (1 - p.accent);
+          ctx.drawImage(sprites.halo, p.x - haloSize / 2, p.y - haloSize / 2, haloSize, haloSize);
+          if (p.accent > 0.002) {
+            ctx.globalAlpha = (glow - 0.62) * 0.85 * p.accent;
+            ctx.drawImage(sprites.accentHalo, p.x - haloSize / 2, p.y - haloSize / 2, haloSize, haloSize);
+          }
+        }
+        ctx.globalAlpha = alpha * (1 - p.accent);
+        ctx.drawImage(sprites.dot, p.x - size / 2, p.y - size / 2, size, size);
+        if (p.accent > 0.002) {
+          ctx.globalAlpha = alpha * p.accent;
+          ctx.drawImage(sprites.accent, p.x - size / 2, p.y - size / 2, size, size);
+        }
+      }
+    }
+    function drawChrome(index, local, time) {
+      const a = envelope(local, scenes[index].duration, 0.12, 0.18);
+      drawTrackedText(text.chapters[index], 38, 34, a * 0.4, BRAND.white, 'left');
+      drawTrackedText(text.smallBrand, 962, 34, 0.23, BRAND.white, 'right');
+      const edge = smoothstep(0, 0.3, time) * (1 - smoothstep(DURATION - 0.3, DURATION, time));
+      ctx.globalAlpha = 0.09; ctx.fillStyle = BRAND.white; ctx.fillRect(0, H - 2 / scale, W, 2 / scale);
+      ctx.globalAlpha = 0.64 * edge; ctx.fillStyle = BRAND.accent;
+      ctx.fillRect(0, H - 2 / scale, W * time / DURATION, 2 / scale);
+    }
+    function updateParticles(layout, dt, time, drift = 0) {
+      const ease = 1 - Math.exp(-5 * dt);
+      const glowEase = 1 - Math.exp(-4 * dt);
+      for (let i = 0; i < COUNT; i++) {
+        const p = particles[i], t = layout[i];
+        p.tx = t.x + Math.sin(time * p.driftSeed + p.phase) * drift;
+        p.ty = t.y + Math.cos(time * p.driftSeed * 0.8 + p.phase) * drift * 0.7;
+        p.targetGlow = t.glow; p.targetAccent = t.accent;
+        p.x += (p.tx - p.x) * ease; p.y += (p.ty - p.y) * ease;
+        p.glow += (p.targetGlow - p.glow) * glowEase;
+        p.accent += (p.targetAccent - p.accent) * glowEase;
+      }
+    }
+    function drawAt(time, dt) {
+      let index = scenes.length - 1;
+      while (index > 0 && time < scenes[index].start) index--;
+      const local = time - scenes[index].start;
+      let layout = scenes[index].layout;
+      if (index === 6 && local >= 3.05) layout = chaos;
+      const drift = index === 0 ? 3.4 * smoothstep(0.3, 1.1, local) * (1 - smoothstep(3.2, 4.3, local)) : 0;
+      updateParticles(layout, dt, time, drift);
+      beginFrame();
+      drawSceneOverlays(index, local);
+      drawParticles();
+      drawChrome(index, local, time);
+    }
+    function frame(now) {
+      const dt = Math.min(Math.max(0, (now - last) / 1000), 0.05);
+      last = now;
+      elapsed = (elapsed + dt) % DURATION;
+      drawAt(elapsed, dt);
+      raf = requestAnimationFrame(frame);
+    }
+
+    // REDUCED MOTION — one finished static composition, no recurring RAF ------
+    function renderStatic() {
+      for (let i = 0; i < COUNT; i++) {
+        const p = particles[i], t = logo[i];
+        p.x = p.tx = t.x; p.y = p.ty = t.y;
+        p.glow = p.targetGlow = t.glow; p.accent = p.targetAccent = t.accent;
+      }
+      beginFrame(); drawParticles();
+      drawTrackedText(text.staticChapter, 38, 34, 0.4, BRAND.white, 'left');
+      drawTrackedText(text.tagline, 500, 402, 0.67, '#9b95ad');
+      ctx.globalAlpha = 0.55; ctx.fillStyle = BRAND.accent;
+      ctx.fillRect(0, H - 2 / scale, W, 2 / scale);
+    }
+    function resume() {
+      cancelAnimationFrame(raf);
+      if (reduced) { renderStatic(); return; }
+      last = performance.now();
+      if (!document.hidden) raf = requestAnimationFrame(frame);
+    }
+    motion.addEventListener('change', event => {
+      reduced = event.matches;
+      if (!reduced) elapsed = scenes[1].start + 1;
+      resume();
+    });
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('resize', resize);
+    resize();
+    if (!reduced) drawAt(0, 0);
+    resume();
+  })();
+  </script>
+</body>
+</html>
