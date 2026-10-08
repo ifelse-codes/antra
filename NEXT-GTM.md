@@ -8,6 +8,17 @@
 > `SKILL.md` from `~/.omp/agent/skills/darshan-npt/`) like the user did this
 > session — the agent should read the skill first and follow it for every reply.
 
+## ✅ STATUS 2026-10-08 — screencast video made (follow-up to the soft launch)
+
+The soft launch (2026-10-07) went out **text + link only** — 3 likes, no
+comments, and the intro film was never attached. A **real screencast** was
+produced to fix that: `launch/screencast-demo.mp4` (1200×800 · 25 s · ~900 KB,
+H.264) + `.webm` + `screencast-poster.png`, with the paste-ready post in
+`launch/linkedin-screencast-post.md`. It shows the real command running, then
+the browser at the bare URL with a green lock. **Not posted** — a person
+presses go. Environment caveat (port 443 + keychain trust are staged) is
+recorded in that file. This is option **B** from the 2026-10-08 session.
+
 ## ✅ STATUS 2026-10-06 — GTM materials merged; only the human steps remain
 
 Read this first, then the job below it.

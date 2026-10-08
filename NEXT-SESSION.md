@@ -44,6 +44,21 @@
 > real Mac). Bonus: `antra-intro.html` (animated product intro) and
 > `antra-intro-demo.mp4`. Next: run Check 1, then push/PR when ready to go live.
 
+> **Session close 2026-10-08 (this session):** the soft launch (2026-10-07,
+> LinkedIn `urn:li:ugcPost:7513444740139524096`, 3 likes / 0 comments) went out
+> **text + link only** — the intro film was never attached. Built the missing
+> piece: a **real screencast** of `antra run` — command → ✓ lines → bare
+> `https://myapp.localhost` → browser with a green lock → end card. Output:
+> `launch/screencast-demo.mp4` (1200×800 · 25 s · ~900 KB) + `.webm` +
+> `screencast-poster.png`; paste-ready post in `launch/linkedin-screencast-post.md`.
+> Recorded headless with Playwright from a real antra run + real screenshot of
+> the served page; port 443 and keychain trust are staged (this host has no
+> sudo and no login keychain) — caveat written in the post file. **Posted the
+> same session** (short variant + native video; self-comment added), and the
+> work is **committed on branch `gtm/screencast-video` (not pushed)** — same
+> pattern as `gtm/launch-final`. Next: watch the post's first hour, reply to
+> comments, then push/PR the branch when ready to go live.
+
 > **Session close 2026-10-07 (this session):** `antra-intro.html` rebuilt for
 > dot clarity on `antra/wordmark-film-cleanup` — **PR #70, MERGED to `main`**
 > 2026-10-07 (squash `0250d21`). The old film bunched its particles: text-pixel sampling and random
