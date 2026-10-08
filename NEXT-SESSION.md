@@ -55,9 +55,9 @@
 > the served page; port 443 and keychain trust are staged (this host has no
 > sudo and no login keychain) — caveat written in the post file. **Posted the
 > same session** (short variant + native video; self-comment added), and the
-> work is **committed on branch `gtm/screencast-video` (not pushed)** — same
-> pattern as `gtm/launch-final`. Next: watch the post's first hour, reply to
-> comments, then push/PR the branch when ready to go live.
+> work is **MERGED to `main`** — PR **#71**, squash `ef26f72` (branch
+> `gtm/screencast-video`). Next: watch the post's first hour, reply to
+> comments; follow-up post idea "What Antra does not do" is in the post file.
 
 > **Session close 2026-10-07 (this session):** `antra-intro.html` rebuilt for
 > dot clarity on `antra/wordmark-film-cleanup` — **PR #70, MERGED to `main`**

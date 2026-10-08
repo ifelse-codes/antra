@@ -15,9 +15,11 @@ comments, and the intro film was never attached. A **real screencast** was
 produced to fix that: `launch/screencast-demo.mp4` (1200×800 · 25 s · ~900 KB,
 H.264) + `.webm` + `screencast-poster.png`, with the paste-ready post in
 `launch/linkedin-screencast-post.md`. It shows the real command running, then
-the browser at the bare URL with a green lock. **Not posted** — a person
-presses go. Environment caveat (port 443 + keychain trust are staged) is
-recorded in that file. This is option **B** from the 2026-10-08 session.
+the browser at the bare URL with a green lock. **Posted the same session**
+(short variant + native video + self-comment) and **merged to `main`** —
+PR **#71** (squash `ef26f72`). Environment caveat (port 443 + keychain trust
+are staged) is recorded in that file. This was option **B** from the
+2026-10-08 session. Next: watch the post's first hour, reply to comments.
 
 ## ✅ STATUS 2026-10-06 — GTM materials merged; only the human steps remain
 
